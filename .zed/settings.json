@@ -1,0 +1,15 @@
+{
+  // Prefer GitHub Copilot for inline edit predictions in this project
+  "features": {
+    "edit_prediction_provider": "copilot"
+  },
+
+  // Project-local editor settings allowed by Zed
+  "languages": {
+    "C": {
+      "format_on_save": "on",
+      "tab_size": 4,
+      "preferred_line_length": 100
+    }
+  }
+}

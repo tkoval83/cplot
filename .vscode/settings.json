@@ -1,0 +1,26 @@
+{
+  "editor.formatOnSave": true,
+  "editor.rulers": [
+    100
+  ],
+  "files.trimTrailingWhitespace": true,
+  "[c]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+  // Use project formatting/configs
+  "C_Cpp.clang_format_style": "file",
+  "C_Cpp.default.cStandard": "c99",
+  "C_Cpp.default.compilerPath": "gcc",
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/lib",
+    "/opt/homebrew/include",
+    "/usr/local/include"
+  ],
+  // If you use the clangd extension, it will pick up .clangd
+  "clangd.arguments": [
+    "--log=error"
+  ],
+  "makefile.configureOnOpen": false
+}

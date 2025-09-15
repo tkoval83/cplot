@@ -1,0 +1,45 @@
+[
+  {
+    "label": "Build (make)",
+    "command": "make",
+    "args": ["-j"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "hide": "if_success",
+    "show_summary": true,
+    "show_command": true
+  },
+  {
+    "label": "Run (bin/cplot)",
+    "command": "sh",
+    "args": ["-lc", "./bin/cplot --help || ./bin/cplot"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "hide": "never"
+  },
+  {
+    "label": "Tests (make tests)",
+    "command": "make",
+    "args": ["tests"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "hide": "never"
+  },
+  {
+    "label": "Valgrind (make valgrind)",
+    "command": "make",
+    "args": ["valgrind"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "hide": "never"
+  },
+  {
+    "label": "Clean (make clean)",
+    "command": "make",
+    "args": ["clean"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "hide": "always"
+  }
+]
+

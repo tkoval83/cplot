@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug cplot (lldb)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/cplot",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build (make)"
+    },
+    {
+      "name": "Debug cplot (gdb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/cplot",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "externalConsole": false,
+      "preLaunchTask": "Build (make)"
+    }
+  ]
+}
+

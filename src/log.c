@@ -1,0 +1,124 @@
+/**
+ * @file log.c
+ * @brief Реалізація простої підсистеми журналювання.
+ *
+ * У цьому модулі визначено глобальну конфігурацію логера та утиліти
+ * для друку повідомлень різних рівнів до stderr. Повідомлення мають бути
+ * українською, формат сумісний із printf.
+ */
+#include "log.h"
+
+#include <string.h>
+
+/**
+ * @brief Глобальна конфігурація логера (рівень і використання кольорів).
+ */
+static log_config_t g_cfg = {
+    .level = LOG_INFO,
+    .use_colors = true,
+};
+
+/**
+ * Отримати вказівник на глобальну конфігурацію логера.
+ *
+ * @return Вказівник на структуру конфігурації (ніколи не NULL).
+ */
+log_config_t *log_get_config (void) { return &g_cfg; }
+
+/**
+ * Встановити мінімальний рівень журналювання.
+ *
+ * Повідомлення з рівнем, вищим за встановлений (чисельно більшим),
+ * не будуть виводитися.
+ *
+ * @param level Новий рівень (LOG_ERROR/LOG_WARN/LOG_INFO/LOG_DEBUG).
+ */
+void log_set_level (log_level_t level) { g_cfg.level = level; }
+
+/**
+ * Увімкнути/вимкнути ANSI‑кольори у виводі логера.
+ *
+ * @param use true — використовувати кольори; false — без кольорів.
+ */
+void log_set_use_colors (bool use) { g_cfg.use_colors = use; }
+
+/**
+ * Повернути текстову мітку для рівня журналу українською мовою.
+ *
+ * @param lv Рівень журналу.
+ * @return Статичний рядок з міткою рівня.
+ */
+static const char *level_label (log_level_t lv) {
+    switch (lv) {
+    case LOG_ERROR:
+        return "помилка"; /* error */
+    case LOG_WARN:
+        return "попередження"; /* warn */
+    case LOG_INFO:
+        return "інфо"; /* info */
+    case LOG_DEBUG:
+        return "debug"; /* debug */
+    default:
+        return "";
+    }
+}
+
+/**
+ * Повернути ANSI‑колір для заданого рівня журналу згідно конфігурації.
+ *
+ * @param lv Рівень журналу.
+ * @return Секвенція кольору або порожній рядок, якщо кольори вимкнено.
+ */
+static const char *level_color (log_level_t lv) {
+    if (!g_cfg.use_colors)
+        return "";
+    switch (lv) {
+    case LOG_ERROR:
+        return RED;
+    case LOG_WARN:
+        return BROWN;
+    case LOG_INFO:
+        return BLUE;
+    case LOG_DEBUG:
+        return GRAY;
+    default:
+        return "";
+    }
+}
+
+/**
+ * Надрукувати повідомлення до stderr, використовуючи список аргументів.
+ *
+ * Функція поважає глобальну конфігурацію рівня та кольорів. Якщо рівень
+ * повідомлення вищий за поточний, воно ігнорується.
+ *
+ * @param level Рівень повідомлення.
+ * @param fmt   Форматний рядок (українською), як у printf.
+ * @param ap    Список аргументів для форматування.
+ */
+void log_vprint (log_level_t level, const char *fmt, va_list ap) {
+    if (level > g_cfg.level)
+        return;
+    const char *col = level_color (level);
+    const char *lab = level_label (level);
+    if (g_cfg.use_colors && col[0])
+        fprintf (stderr, "%s[%s]%s ", col, lab, NO_COLOR);
+    else
+        fprintf (stderr, "[%s] ", lab);
+    vfprintf (stderr, fmt, ap);
+    fputc ('\n', stderr);
+}
+
+/**
+ * Зручна обгортка над log_vprint із варіативними аргументами.
+ *
+ * @param level Рівень повідомлення.
+ * @param fmt   Форматний рядок (українською), як у printf.
+ * @param ...   Додаткові аргументи згідно fmt.
+ */
+void log_print (log_level_t level, const char *fmt, ...) {
+    va_list ap;
+    va_start (ap, fmt);
+    log_vprint (level, fmt, ap);
+    va_end (ap);
+}

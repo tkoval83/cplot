@@ -1,0 +1,73 @@
+/**
+ * @file cli.c
+ * @brief Minimal subcommand dispatcher.
+ */
+
+#include <stdio.h>
+
+#include "args.h"
+#include "cli.h"
+#include "cmd.h"
+#include "config.h"
+#include "help.h"
+#include "log.h"
+
+/**
+ * Викликати реалізацію відповідної підкоманди.
+ *
+ * На поточному етапі підкоманди є заглушками й лише виводять повідомлення.
+ *
+ * @param options Розібрані опції командного рядка (не NULL).
+ * @return Код завершення процесу: 0 — успіх, 2 — показати usage, 1 — внутрішня помилка.
+ */
+int cli_dispatch (const options_t *options) {
+    if (!options) {
+        LOGE ("внутрішня помилка: options == NULL");
+        return 1;
+    }
+
+    verbose_level_t verbose = options->verbose ? VERBOSE_ON : VERBOSE_OFF;
+
+    switch (options->cmd) {
+    case CMD_NONE:
+        LOGW ("не вказано підкоманду — показ довідки");
+        usage ();
+        return 2;
+    case CMD_VERSION:
+        return cmd_version_execute (verbose);
+    case CMD_FONTS:
+        return cmd_fonts_execute (verbose);
+    case CMD_CONFIG: {
+        config_t cfg; /* TODO: load real config */
+        config_factory_defaults (&cfg);
+        const char *pairs = options->config_set_pairs[0] ? options->config_set_pairs : NULL;
+        return cmd_config_execute (options->config_action, pairs, &cfg, verbose);
+    }
+    case CMD_DEVICE:
+        return cmd_device_execute (
+            options->device_action, options->device_port[0] ? options->device_port : NULL,
+            options->device_model[0] ? options->device_model : NULL, options->jog_dx_mm,
+            options->jog_dy_mm, verbose);
+    case CMD_PRINT:
+        if (options->preview) {
+            return cmd_preview_execute (
+                options->file_name, options->font_family[0] ? options->font_family : NULL,
+                options->paper_w_mm, options->paper_h_mm, options->margin_top_mm,
+                options->margin_right_mm, options->margin_bottom_mm, options->margin_left_mm,
+                options->orientation, options->dry_run,
+                options->preview_png ? PREVIEW_FMT_PNG : PREVIEW_FMT_SVG, verbose);
+        } else {
+            return cmd_print_execute (
+                options->file_name, options->font_family[0] ? options->font_family : NULL,
+                options->paper_w_mm, options->paper_h_mm, options->margin_top_mm,
+                options->margin_right_mm, options->margin_bottom_mm, options->margin_left_mm,
+                options->orientation, options->dry_run, verbose);
+        }
+    case CMD_SYSINFO:
+        return cmd_sysinfo_execute (verbose);
+    default:
+        LOGW ("невідома підкоманда — показ довідки");
+        usage ();
+        return 2;
+    }
+}
