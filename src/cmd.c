@@ -3,6 +3,7 @@
  * @brief Реалізації фасаду підкоманд (скорочена назва файлу).
  */
 #include "cmd.h"
+#include "fontreg.h"
 #include "help.h"
 #include "log.h"
 #include <stdio.h>
@@ -276,7 +277,19 @@ cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose) {
 cmd_result_t cmd_font_list_execute (verbose_level_t verbose) {
     (void)verbose;
     LOGI ("Перелік доступних шрифтів");
-    fprintf (stdout, "Шрифти: ще не реалізовано\n");
+    font_face_t *faces = NULL;
+    size_t count = 0;
+    int rc = fontreg_list (&faces, &count);
+    if (rc != 0) {
+        fprintf (stdout, "Не вдалося завантажити реєстр шрифтів (код %d)\n", rc);
+        return 1;
+    }
+
+    fprintf (stdout, "Доступні шрифти (%zu):\n", count);
+    for (size_t i = 0; i < count; ++i) {
+        fprintf (stdout, "  - %-24s — %s\n", faces[i].id, faces[i].name);
+    }
+    free (faces);
     return 0;
 }
 

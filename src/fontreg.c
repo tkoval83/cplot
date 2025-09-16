@@ -4,6 +4,7 @@
  */
 #include "fontreg.h"
 
+#include "jsr.h"
 #include "log.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -23,8 +24,9 @@ static void strlower (char *s) {
 /**
  * Прочитати список шрифтів із hershey/index.json.
  *
- * Дуже простий пострічковий розбір очікує об'єкти вигляду
- * "key": { "file": "...", "name": "..." } на кожному рядку.
+ * Читає весь файл як один JSON‑рядок (об’єкт верхнього рівня) ітерацією по
+ * ключах верхнього рівня. Для читання значень використовуються утиліти jsr
+ * (json_get_raw/json_get_string).
  *
  * @param faces  Вихід: масив елементів font_face_t (malloc), який потрібно звільнити через free().
  * @param count  Вихід: кількість елементів у масиві.
@@ -40,75 +42,162 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         LOGE ("не знайдено hershey/index.json");
         return -2;
     }
-    size_t cap = 16;
-    font_face_t *arr = (font_face_t *)malloc (cap * sizeof (*arr));
-    if (!arr) {
+    /* Зчитати увесь файл у пам'ять */
+    if (fseek (fp, 0, SEEK_END) != 0) {
         fclose (fp);
         return -3;
     }
-    char line[512];
-    while (fgets (line, sizeof (line), fp)) {
-        char *kq = strchr (line, '"');
-        if (!kq)
-            continue;
-        char *kend = strchr (kq + 1, '"');
-        if (!kend)
-            continue;
-        size_t klen = (size_t)(kend - (kq + 1));
-        if (klen >= sizeof (arr[0].id))
-            klen = sizeof (arr[0].id) - 1;
-        char key[64];
-        memcpy (key, kq + 1, klen);
-        key[klen] = '\0';
-        char *filep = strstr (line, "\"file\"");
-        char *namep = strstr (line, "\"name\"");
-        if (!filep || !namep)
-            continue;
-        char *fq1 = strchr (filep + 6, '"');
-        if (!fq1)
-            continue;
-        char *fq2 = strchr (fq1 + 1, '"');
-        if (!fq2)
-            continue;
-        size_t flen = (size_t)(fq2 - (fq1 + 1));
-        if (flen >= sizeof (arr[0].path))
-            flen = sizeof (arr[0].path) - 1;
-        char path[128];
-        memcpy (path, fq1 + 1, flen);
-        path[flen] = '\0';
-        char *nq1 = strchr (namep + 6, '"');
-        if (!nq1)
-            continue;
-        char *nq2 = strchr (nq1 + 1, '"');
-        if (!nq2)
-            continue;
-        size_t nlen = (size_t)(nq2 - (nq1 + 1));
-        if (nlen >= sizeof (arr[0].name))
-            nlen = sizeof (arr[0].name) - 1;
-        char name[96];
-        memcpy (name, nq1 + 1, nlen);
-        name[nlen] = '\0';
-
-        if (*count == cap) {
-            cap *= 2;
-            font_face_t *na = (font_face_t *)realloc (arr, cap * sizeof (*na));
-            if (!na) {
-                free (arr);
-                fclose (fp);
-                LOGE ("нестача пам’яті під час збільшення масиву шрифтів");
-                return -4;
-            }
-            arr = na;
-        }
-        memset (&arr[*count], 0, sizeof (arr[*count]));
-        strncpy (arr[*count].id, key, sizeof (arr[*count].id) - 1);
-        strncpy (arr[*count].name, name, sizeof (arr[*count].name) - 1);
-        snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", path);
-        (*count)++;
+    long sz = ftell (fp);
+    if (sz < 0) {
+        fclose (fp);
+        return -3;
     }
+    rewind (fp);
+    char *json = (char *)malloc ((size_t)sz + 1);
+    if (!json) {
+        fclose (fp);
+        return -3;
+    }
+    size_t rd = fread (json, 1, (size_t)sz, fp);
     fclose (fp);
+    json[rd] = '\0';
+
+    size_t cap = 16;
+    font_face_t *arr = (font_face_t *)malloc (cap * sizeof (*arr));
+    if (!arr) {
+        free (json);
+        return -3;
+    }
+
+    /* Ітерація по ключах верхнього рівня */
+    const char *p = json_skip_ws (json);
+    if (*p != '{') {
+        free (arr);
+        free (json);
+        LOGE ("некоректний формат hershey/index.json (очікувався об’єкт)");
+        return -4;
+    }
+    p++;
+    while (1) {
+        p = json_skip_ws (p);
+        if (*p == '}') {
+            break; /* кінець об’єкта */
+        }
+        if (*p != '"') {
+            /* пропустити непридатний символ до наступної коми/закриття */
+            while (*p && *p != ',' && *p != '}')
+                p++;
+            if (*p == ',') {
+                p++;
+                continue;
+            }
+            if (*p == '}')
+                break;
+        }
+        /* Зняти ключ у лапках (без ескейпів для спрощення: у файлі вони відсутні) */
+        p++;
+        const char *kbeg = p;
+        while (*p && *p != '"')
+            p++;
+        if (*p != '"')
+            break;
+        size_t klen = (size_t)(p - kbeg);
+        char key[64];
+        if (klen >= sizeof (key))
+            klen = sizeof (key) - 1;
+        memcpy (key, kbeg, klen);
+        key[klen] = '\0';
+        p++; /* після закритих лапок */
+        p = json_skip_ws (p);
+        if (*p != ':') {
+            /* Спробувати продовжити */
+            while (*p && *p != ',' && *p != '}')
+                p++;
+            if (*p == ',') {
+                p++;
+                continue;
+            }
+            if (*p == '}')
+                break;
+        }
+        p++; /* на початок значення */
+        p = json_skip_ws (p);
+
+        /* Отримати сирий фрагмент значення за допомогою jsr (пошук від початку json) */
+        const char *vptr = NULL;
+        size_t vlen = 0;
+        if (!json_get_raw (json, key, &vptr, &vlen)) {
+            /* пропустити значення вручну */
+            int depth = 0, in_str = 0;
+            const char *q = p;
+            while (*q) {
+                if (!in_str) {
+                    if (*q == '"')
+                        in_str = 1;
+                    else if (*q == '{' || *q == '[')
+                        depth++;
+                    else if (*q == '}' || *q == ']') {
+                        if (depth == 0)
+                            break;
+                        depth--;
+                    } else if (*q == ',' && depth == 0)
+                        break;
+                } else {
+                    if (*q == '\\' && q[1]) {
+                        q += 2;
+                        continue;
+                    }
+                    if (*q == '"')
+                        in_str = 0;
+                }
+                q++;
+            }
+            p = q;
+            p = json_skip_ws (p);
+            if (*p == ',')
+                p++;
+            continue;
+        }
+        /* Значення — об’єкт із полями file та name */
+        char *file = json_get_string (vptr, "file", NULL);
+        char *name = json_get_string (vptr, "name", NULL);
+        if (file && name) {
+            if (*count == cap) {
+                cap *= 2;
+                font_face_t *na = (font_face_t *)realloc (arr, cap * sizeof (*na));
+                if (!na) {
+                    free (file);
+                    free (name);
+                    free (arr);
+                    free (json);
+                    LOGE ("нестача пам’яті під час збільшення масиву шрифтів");
+                    return -5;
+                }
+                arr = na;
+            }
+            memset (&arr[*count], 0, sizeof (arr[*count]));
+            strncpy (arr[*count].id, key, sizeof (arr[*count].id) - 1);
+            strncpy (arr[*count].name, name, sizeof (arr[*count].name) - 1);
+            snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
+            (*count)++;
+        }
+        free (file);
+        free (name);
+
+        /* Продовжити після значення */
+        p = vptr + vlen;
+        p = json_skip_ws (p);
+        if (*p == ',') {
+            p++;
+            continue;
+        }
+        if (*p == '}')
+            break;
+    }
+
     *faces = arr;
     LOGD ("завантажено шрифтів: %zu", *count);
+    free (json);
     return 0;
 }
 

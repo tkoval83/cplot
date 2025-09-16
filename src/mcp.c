@@ -19,7 +19,8 @@
 #include "mcp.h"
 
 #include "cmd.h"
-#include "json.h"
+#include "jsr.h"
+#include "jsw.h"
 #include "log.h"
 #include "proginfo.h"
 
