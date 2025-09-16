@@ -8,13 +8,19 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/// Орієнтація сторінки (узгоджено з CLI).
+typedef enum {
+    ORIENT_PORTRAIT = 1, /**< портретна орієнтація */
+    ORIENT_LANDSCAPE = 2 /**< альбомна орієнтація */
+} orientation_t;
+
 /// Конфігураційний блок для параметрів пристрою/розкладки (типово MiniKit2).
 typedef struct {
     // Версіонування
     int version; /**< інкремент при зміні формату на диску */
 
     // Сторінка та розміщення
-    int orientation; /**< 1=портрет, 2=альбом */
+    int orientation; /**< 1=портрет, 2=альбом (див. orientation_t) */
     double paper_w_mm;
     double paper_h_mm;
     double margin_top_mm;

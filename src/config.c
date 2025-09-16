@@ -124,15 +124,11 @@ int config_factory_defaults (config_t *c, const char *device_model) {
     const device_profile_t *profile = profile_for_model (model);
     memset (c, 0, sizeof (*c));
     c->version = CONFIG_VERSION;
-    c->orientation = 1;
-    c->paper_w_mm = 160.0;
-    c->paper_h_mm = 101.0;
+    c->orientation = ORIENT_PORTRAIT;
     c->margin_top_mm = 10.0;
     c->margin_right_mm = 10.0;
     c->margin_bottom_mm = 10.0;
     c->margin_left_mm = 10.0;
-    c->speed_mm_s = 254.0;
-    c->accel_mm_s2 = 200.0;
     c->pen_up_pos = 60;
     c->pen_down_pos = 40;
     c->pen_up_speed = 150;
@@ -140,12 +136,11 @@ int config_factory_defaults (config_t *c, const char *device_model) {
     c->pen_up_delay_ms = 0;
     c->pen_down_delay_ms = 0;
     c->servo_timeout_s = 60;
-    if (profile) {
-        c->paper_w_mm = profile->paper_w_mm;
-        c->paper_h_mm = profile->paper_h_mm;
-        c->speed_mm_s = profile->speed_mm_s;
-        c->accel_mm_s2 = profile->accel_mm_s2;
-    }
+    /* profile_for_model() завжди повертає валідний профіль (мінімум типовий). */
+    c->paper_w_mm = profile->paper_w_mm;
+    c->paper_h_mm = profile->paper_h_mm;
+    c->speed_mm_s = profile->speed_mm_s;
+    c->accel_mm_s2 = profile->accel_mm_s2;
     return 0;
 }
 

@@ -17,6 +17,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "config.h"
+
 /// Максимальний розмір імені вхідного файлу (разом із NUL).
 #define FILE_NAME_SIZE 512
 
@@ -30,14 +32,6 @@ typedef enum {
     CMD_VERSION,
     CMD_SYSINFO
 } cmd_t;
-
-/**
- * @enum orientation_t
- * @brief Орієнтація сторінки для команд `print`/`preview`.
- *
- * Значення 1 та 2 сумісні з config_t, де 1 — портрет, 2 — альбом.
- */
-typedef enum { ORIENT_PORTRAIT = 1, ORIENT_LANDSCAPE = 2 } orientation_t;
 
 /**
  * @enum device_action_kind_t
