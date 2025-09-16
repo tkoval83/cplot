@@ -26,6 +26,87 @@ static void copy_string (char *dst, size_t dst_size, const char *src) {
 }
 
 /**
+ * Перетворити рядок підкоманди на відповідне значення cmd_t.
+ */
+static cmd_t parse_command_name (const char *name) {
+    if (!name)
+        return CMD_NONE;
+    static const struct {
+        const char *name;
+        cmd_t cmd;
+    } k_cmd_map[] = {
+        { "print", CMD_PRINT },   { "device", CMD_DEVICE }, { "fonts", CMD_FONTS },
+        { "config", CMD_CONFIG }, { "version", CMD_VERSION }, { "sysinfo", CMD_SYSINFO }
+    };
+    for (size_t i = 0; i < sizeof (k_cmd_map) / sizeof (k_cmd_map[0]); ++i) {
+        if (strcmp (name, k_cmd_map[i].name) == 0)
+            return k_cmd_map[i].cmd;
+    }
+    return CMD_NONE;
+}
+
+/** Відобразити рядок дії пристрою у device_action_t. */
+static device_action_t device_action_from_token (const char *token) {
+    if (!token)
+        return DEV_NONE;
+    static const struct {
+        const char *token;
+        device_action_t action;
+    } k_device_map[] = {
+        { "list", DEV_LIST },         { "up", DEV_UP },           { "down", DEV_DOWN },
+        { "toggle", DEV_TOGGLE },     { "motors-on", DEV_MOTORS_ON },
+        { "motors-off", DEV_MOTORS_OFF }, { "home", DEV_HOME },   { "jog", DEV_JOG },
+        { "version", DEV_VERSION },   { "status", DEV_STATUS },   { "position", DEV_POSITION },
+        { "reset", DEV_RESET },       { "reboot", DEV_REBOOT }
+    };
+    for (size_t i = 0; i < sizeof (k_device_map) / sizeof (k_device_map[0]); ++i) {
+        if (strcmp (token, k_device_map[i].token) == 0)
+            return k_device_map[i].action;
+    }
+    return DEV_NONE;
+}
+
+/**
+ * Обробити позиційні аргументи підкоманди device, визначивши дію та зсуви jog.
+ */
+static void parse_device_tokens (int argc, char *argv[], options_t *options) {
+    if (options->cmd != CMD_DEVICE)
+        return;
+
+    if (options->device_action == DEV_NONE && optind < argc) {
+        device_action_t candidate = device_action_from_token (argv[optind]);
+        if (candidate != DEV_NONE)
+            options->device_action = candidate;
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        const char *token = argv[i];
+        if (!token)
+            continue;
+        if (token[0] == '-') {
+            if (strcmp (token, "--dx") == 0 && i + 1 < argc) {
+                options->jog_dx_mm = atof (argv[i + 1]);
+                LOGD ("jog dx=%.3f мм", options->jog_dx_mm);
+                ++i;
+            } else if (strcmp (token, "--dy") == 0 && i + 1 < argc) {
+                options->jog_dy_mm = atof (argv[i + 1]);
+                LOGD ("jog dy=%.3f мм", options->jog_dy_mm);
+                ++i;
+            }
+            continue;
+        }
+        if (options->device_action == DEV_NONE) {
+            device_action_t candidate = device_action_from_token (token);
+            if (candidate != DEV_NONE)
+                options->device_action = candidate;
+        }
+    }
+
+    if (options->device_action != DEV_NONE)
+        LOGD ("device action: %d", options->device_action);
+}
+
+/**
  * Ініціалізувати всі опції типовими значеннями.
  *
  * @param options Вказівник на структуру опцій для ініціалізації (не NULL).
@@ -264,24 +345,10 @@ void options_parser (int argc, char *argv[], options_t *options) {
 
     // Розібрати підкоманду, якщо присутня (argv[1])
     if (argc >= 2 && argv[1][0] != '-') {
-        if (strcmp (argv[1], "print") == 0)
-            options->cmd = CMD_PRINT;
-        else if (strcmp (argv[1], "device") == 0)
-            options->cmd = CMD_DEVICE;
-        else if (strcmp (argv[1], "fonts") == 0)
-            options->cmd = CMD_FONTS;
-        else if (strcmp (argv[1], "config") == 0)
-            options->cmd = CMD_CONFIG;
-        else if (strcmp (argv[1], "version") == 0)
-            options->cmd = CMD_VERSION;
-        else if (strcmp (argv[1], "sysinfo") == 0)
-            options->cmd = CMD_SYSINFO;
-        else
-            options->cmd = CMD_NONE; // невідомо — нехай usage розкаже згодом
-
-        if (options->cmd != CMD_NONE) {
+        cmd_t parsed = parse_command_name (argv[1]);
+        if (parsed != CMD_NONE) {
+            options->cmd = parsed;
             LOGD ("виявлено підкоманду: %d", options->cmd);
-            // Просунутись повз підкоманду для getopt_long
             argv++;
             argc--;
         }
@@ -307,15 +374,15 @@ void options_parser (int argc, char *argv[], options_t *options) {
         }
 
         switch (arg) {
-        case 1:
+        case ARG_PORTRAIT:
             options->orientation = ORIENT_PORTRAIT;
             LOGD ("орієнтація: portrait");
             break;
-        case 2:
+        case ARG_LANDSCAPE:
             options->orientation = ORIENT_LANDSCAPE;
             LOGD ("орієнтація: landscape");
             break;
-        case 4: {
+        case ARG_MARGINS: {
             // розібрати T,R,B,L:mm або просто число = всі сторони у мм
             double t = 0, r = 0, b = 0, l = 0;
             char *s = optarg;
@@ -349,61 +416,61 @@ void options_parser (int argc, char *argv[], options_t *options) {
             options->margin_left_mm = l;
             break;
         }
-        case 5:
+        case ARG_PAPER_W:
             options->paper_w_mm = atof (optarg);
             LOGD ("paper_w=%.3f мм", options->paper_w_mm);
             break;
-        case 6:
+        case ARG_PAPER_H:
             options->paper_h_mm = atof (optarg);
             LOGD ("paper_h=%.3f мм", options->paper_h_mm);
             break;
-        case 8:
+        case ARG_PNG:
             options->preview_png = true;
             LOGD ("режим прев’ю: PNG");
             break;
-        case 20:
+        case ARG_PREVIEW:
             options->preview = true;
             LOGD ("увімкнено прев’ю (SVG за замовчуванням)");
             break;
-        case 9:
+        case ARG_DRY_RUN:
             options->dry_run = true;
             LOGD ("сухий запуск: без надсилання на пристрій");
             break;
-        case 10:
+        case ARG_VERBOSE:
             options->verbose = true;
             LOGD ("детальний вивід (--verbose)");
             break;
-        case 11:
+        case ARG_LIST:
             options->device_action = DEV_LIST;
             LOGD ("device: --list");
             break;
-        case 12:
+        case ARG_PORT:
             copy_string (options->device_port, sizeof (options->device_port), optarg);
             break;
-        case 13:
+        case ARG_DX:
             options->jog_dx_mm = atof (optarg);
             break;
-        case 14:
+        case ARG_DY:
             options->jog_dy_mm = atof (optarg);
             break;
-        case 15:
+        case ARG_FAMILY:
             copy_string (options->font_family, sizeof (options->font_family), optarg);
             LOGD ("font family: %s", options->font_family);
             break;
-        case 16:
+        case ARG_SHOW:
             options->config_action = CFG_SHOW;
             LOGD ("config: --show");
             break;
-        case 17:
+        case ARG_RESET:
             options->config_action = CFG_RESET;
             LOGD ("config: --reset");
             break;
-        case 18:
+        case ARG_SET:
             options->config_action = CFG_SET;
             copy_string (options->config_set_pairs, sizeof (options->config_set_pairs), optarg);
             LOGD ("config: --set %s", options->config_set_pairs);
             break;
-        case 19:
+        case ARG_DEVICE_MODEL:
             copy_string (options->device_model, sizeof (options->device_model), optarg);
             LOGD ("device model: %s", options->device_model);
             break;
@@ -415,98 +482,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
     /* Handle device positional action (e.g., up, down, jog). On some libc
      * (e.g., macOS), getopt_long stops at the first non-option token, so make a
      * robust pass to capture positional action and any dx/dy that follow it. */
-    if (options->cmd == CMD_DEVICE) {
-        // Prefer getopt result if it already set an action via --list
-        if (options->device_action == DEV_NONE) {
-            // If getopt stopped at first non-option, optind should point to it
-            if (optind < argc) {
-                const char *act = argv[optind];
-                if (strcmp (act, "up") == 0)
-                    options->device_action = DEV_UP;
-                else if (strcmp (act, "down") == 0)
-                    options->device_action = DEV_DOWN;
-                else if (strcmp (act, "toggle") == 0)
-                    options->device_action = DEV_TOGGLE;
-                else if (strcmp (act, "motors-on") == 0)
-                    options->device_action = DEV_MOTORS_ON;
-                else if (strcmp (act, "motors-off") == 0)
-                    options->device_action = DEV_MOTORS_OFF;
-                else if (strcmp (act, "home") == 0)
-                    options->device_action = DEV_HOME;
-                else if (strcmp (act, "jog") == 0)
-                    options->device_action = DEV_JOG;
-                else if (strcmp (act, "version") == 0)
-                    options->device_action = DEV_VERSION;
-                else if (strcmp (act, "status") == 0)
-                    options->device_action = DEV_STATUS;
-                else if (strcmp (act, "position") == 0)
-                    options->device_action = DEV_POSITION;
-                else if (strcmp (act, "reset") == 0)
-                    options->device_action = DEV_RESET;
-                else if (strcmp (act, "reboot") == 0)
-                    options->device_action = DEV_REBOOT;
-            }
-            // Як запасний варіант, проглянути всі токени без опцій на дію
-            if (options->device_action == DEV_NONE) {
-                for (int i = 1; i < argc; i++) {
-                    if (argv[i][0] == '-')
-                        continue;
-                    if (strcmp (argv[i], "up") == 0) {
-                        options->device_action = DEV_UP;
-                        break;
-                    } else if (strcmp (argv[i], "down") == 0) {
-                        options->device_action = DEV_DOWN;
-                        break;
-                    } else if (strcmp (argv[i], "toggle") == 0) {
-                        options->device_action = DEV_TOGGLE;
-                        break;
-                    } else if (strcmp (argv[i], "motors-on") == 0) {
-                        options->device_action = DEV_MOTORS_ON;
-                        break;
-                    } else if (strcmp (argv[i], "motors-off") == 0) {
-                        options->device_action = DEV_MOTORS_OFF;
-                        break;
-                    } else if (strcmp (argv[i], "home") == 0) {
-                        options->device_action = DEV_HOME;
-                        break;
-                    } else if (strcmp (argv[i], "jog") == 0) {
-                        options->device_action = DEV_JOG;
-                        break;
-                    } else if (strcmp (argv[i], "version") == 0) {
-                        options->device_action = DEV_VERSION;
-                        break;
-                    } else if (strcmp (argv[i], "status") == 0) {
-                        options->device_action = DEV_STATUS;
-                        break;
-                    } else if (strcmp (argv[i], "position") == 0) {
-                        options->device_action = DEV_POSITION;
-                        break;
-                    } else if (strcmp (argv[i], "reset") == 0) {
-                        options->device_action = DEV_RESET;
-                        break;
-                    } else if (strcmp (argv[i], "reboot") == 0) {
-                        options->device_action = DEV_REBOOT;
-                        break;
-                    }
-                }
-                if (options->device_action != DEV_NONE)
-                    LOGD ("device action: %d", options->device_action);
-            }
-        }
-
-        // Розібрати дельти jog незалежно від порядку (підтримати токени після дії)
-        for (int i = 1; i + 1 < argc; i++) {
-            if (strcmp (argv[i], "--dx") == 0) {
-                options->jog_dx_mm = atof (argv[i + 1]);
-                i++;
-                LOGD ("jog dx=%.3f мм", options->jog_dx_mm);
-            } else if (strcmp (argv[i], "--dy") == 0) {
-                options->jog_dy_mm = atof (argv[i + 1]);
-                i++;
-                LOGD ("jog dy=%.3f мм", options->jog_dy_mm);
-            }
-        }
-    }
+    parse_device_tokens (argc, argv, options);
 
     // Отримати ім'я файлу або використати stdin; тільки для команд, що беруть файл
     if (options->cmd == CMD_PRINT || options->cmd == CMD_NONE) {
