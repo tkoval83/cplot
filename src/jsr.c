@@ -120,76 +120,65 @@ char *json_get_string (const char *json, const char *key, size_t *out_len) {
         return NULL;
     v++;
     const char *p = v;
-    size_t cap = 64, len = 0;
+    size_t cap = 64;
+    size_t len = 0;
     char *buf = (char *)malloc (cap);
     if (!buf)
         return NULL;
+
+#define ENSURE_CAP(extra)                                                                                 \
+    do {                                                                                                   \
+        if (len + (extra) >= cap) {                                                                        \
+            size_t new_cap = cap ? cap : 64;                                                               \
+            while (len + (extra) >= new_cap)                                                               \
+                new_cap *= 2;                                                                              \
+            char *tmp = (char *)realloc (buf, new_cap);                                                    \
+            if (!tmp)                                                                                      \
+                goto fail;                                                                                 \
+            buf = tmp;                                                                                     \
+            cap = new_cap;                                                                                 \
+        }                                                                                                  \
+    } while (0)
+
     while (*p) {
         if (*p == '\\') {
             p++;
+            if (*p == '\0')
+                break;
             if (*p == 'n') {
-                if (len + 1 >= cap) {
-                    cap *= 2;
-                    buf = (char *)realloc (buf, cap);
-                    if (!buf)
-                        return NULL;
-                }
+                ENSURE_CAP (1);
                 buf[len++] = '\n';
                 p++;
                 continue;
             }
             if (*p == 't') {
-                if (len + 1 >= cap) {
-                    cap *= 2;
-                    buf = (char *)realloc (buf, cap);
-                    if (!buf)
-                        return NULL;
-                }
+                ENSURE_CAP (1);
                 buf[len++] = '\t';
                 p++;
                 continue;
             }
             if (*p == 'r') {
-                if (len + 1 >= cap) {
-                    cap *= 2;
-                    buf = (char *)realloc (buf, cap);
-                    if (!buf)
-                        return NULL;
-                }
+                ENSURE_CAP (1);
                 buf[len++] = '\r';
                 p++;
                 continue;
             }
             if (*p == '"' || *p == '\\' || *p == '/') {
-                if (len + 1 >= cap) {
-                    cap *= 2;
-                    buf = (char *)realloc (buf, cap);
-                    if (!buf)
-                        return NULL;
-                }
+                ENSURE_CAP (1);
                 buf[len++] = *p++;
                 continue;
             }
             if (*p == 'u') {
                 p++;
-                for (int i = 0; i < 4 && isxdigit ((unsigned char)p[i]); i++) {
-                }
-                p += 4;
-                if (len + 1 >= cap) {
-                    cap *= 2;
-                    buf = (char *)realloc (buf, cap);
-                    if (!buf)
-                        return NULL;
-                }
+                int digits = 0;
+                while (digits < 4 && p[digits] && isxdigit ((unsigned char)p[digits]))
+                    digits++;
+                p += digits;
+                ENSURE_CAP (1);
                 buf[len++] = '?';
                 continue;
             }
-            if (len + 1 >= cap) {
-                cap *= 2;
-                buf = (char *)realloc (buf, cap);
-                if (!buf)
-                    return NULL;
-            }
+            ENSURE_CAP (1);
             buf[len++] = *p++;
             continue;
         }
@@ -197,24 +186,19 @@ char *json_get_string (const char *json, const char *key, size_t *out_len) {
             p++;
             break;
         }
-        if (len + 1 >= cap) {
-            cap *= 2;
-            buf = (char *)realloc (buf, cap);
-            if (!buf)
-                return NULL;
-        }
+        ENSURE_CAP (1);
         buf[len++] = *p++;
     }
     if (out_len)
         *out_len = len;
-    if (len == cap) {
-        cap++;
-        buf = (char *)realloc (buf, cap);
-        if (!buf)
-            return NULL;
-    }
+    ENSURE_CAP (1);
     buf[len] = '\0';
+#undef ENSURE_CAP
     return buf;
+
+fail:
+    free (buf);
+    return NULL;
 }
 
 /**

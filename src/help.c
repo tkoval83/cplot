@@ -13,8 +13,8 @@
 #include "proginfo.h"
 
 void usage (void) {
-    fprintf (stdout, BROWN "Usage: " NO_COLOR);
-    fprintf (stdout, "%s <command> [options] [input]\n\n", __PROGRAM_NAME__);
+    fprintf (stdout, BROWN "Використання: " NO_COLOR);
+    fprintf (stdout, "%s <команда> [опції] [вхід]\n\n", __PROGRAM_NAME__);
     fprintf (stdout, "Команди:\n");
     size_t ncmd = 0;
     const cli_command_desc_t *cmds = argdefs_commands (&ncmd);
@@ -25,7 +25,7 @@ void usage (void) {
 }
 
 void description (void) {
-    fprintf (stdout, BROWN "Description: " NO_COLOR);
+    fprintf (stdout, BROWN "Опис: " NO_COLOR);
     fprintf (
         stdout,
         "Плотинг Markdown/звичайного тексту на AxiDraw MiniKit 2 з детермінованою розкладкою.\n");
@@ -38,7 +38,7 @@ void description (void) {
 }
 
 void options (void) {
-    fprintf (stdout, BROWN "Options:\n\n" NO_COLOR);
+    fprintf (stdout, BROWN "Опції:\n\n" NO_COLOR);
 
     size_t nopt = 0;
     const cli_option_desc_t *opts = argdefs_options (&nopt);
@@ -100,6 +100,13 @@ void help (void) {
         }
 
         // Вивести типове значення
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
         const char *fmt = d->fmt ? d->fmt : "%g";
         if (d->type == CFGK_INT) {
             const int *p = (const int *)((const char *)&def + d->offset);
@@ -117,6 +124,11 @@ void help (void) {
                 fprintf (stdout, " (типово %s)", (def.orientation == 2) ? "landscape" : "portrait");
             }
         }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         if (d->description && d->description[0]) {
             fprintf (stdout, " — %s", d->description);
         }

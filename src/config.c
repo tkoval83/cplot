@@ -114,18 +114,29 @@ int config_get_path (char *buf, size_t buflen) {
     const char *xdg = getenv ("XDG_CONFIG_HOME");
     const char *home = getenv ("HOME");
     if (xdg && xdg[0]) {
-        snprintf (buf, buflen, "%s%ccplot%cconfig.json", xdg, PATH_SEP, PATH_SEP);
+        int written = snprintf (buf, buflen, "%s%ccplot%cconfig.json", xdg, PATH_SEP, PATH_SEP);
+        if (written < 0 || (size_t)written >= buflen) {
+            LOGE ("шлях конфігурації надто довгий для буфера");
+            return -1;
+        }
         LOGD ("шлях конфігурації з XDG_CONFIG_HOME: %s", buf);
         return 0;
     }
     if (home && home[0]) {
-        snprintf (
+        int written = snprintf (
             buf, buflen, "%s%c.config%ccplot%cconfig.json", home, PATH_SEP, PATH_SEP, PATH_SEP);
+        if (written < 0 || (size_t)written >= buflen) {
+            LOGE ("шлях конфігурації надто довгий для буфера");
+            return -1;
+        }
         LOGD ("шлях конфігурації з $HOME: %s", buf);
         return 0;
     }
-    strncpy (buf, "./config.json", buflen - 1);
-    buf[buflen - 1] = '\0';
+    int written = snprintf (buf, buflen, "./config.json");
+    if (written < 0 || (size_t)written >= buflen) {
+        LOGE ("шлях конфігурації надто довгий для буфера");
+        return -1;
+    }
     LOGW ("не вдалося визначити XDG/HOME; використано локальний шлях: %s", buf);
     return 0;
 }

@@ -12,6 +12,20 @@
 /* Допоміжні кольори/довідка не потрібні для парсингу; залишаємо цей модуль сфокусованим. */
 
 /**
+ * Безпечно скопіювати рядок у фіксований буфер з гарантією NUL-термінатора.
+ */
+static void copy_string (char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0)
+        return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    strncpy (dst, src, dst_size - 1);
+    dst[dst_size - 1] = '\0';
+}
+
+/**
  * Ініціалізувати всі опції типовими значеннями.
  *
  * @param options Вказівник на структуру опцій для ініціалізації (не NULL).
@@ -217,11 +231,11 @@ void switch_options (int arg, options_t *options) {
 void get_file_name (int argc, char *argv[], options_t *options) {
     // Якщо є ще один аргумент — вважати його шляхом до вхідного файлу
     if (optind < argc) {
-        strncpy (options->file_name, argv[optind++], FILE_NAME_SIZE);
+        copy_string (options->file_name, sizeof (options->file_name), argv[optind++]);
         LOGD ("вхідний файл: %s", options->file_name);
     } else {
         // Інакше вважати stdin вхідним файлом
-        strncpy (options->file_name, "-", FILE_NAME_SIZE);
+        copy_string (options->file_name, sizeof (options->file_name), "-");
         LOGD ("вхідний файл: stdin (-)");
     }
 }
@@ -364,7 +378,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
             LOGD ("device: --list");
             break;
         case 12:
-            strncpy (options->device_port, optarg, sizeof (options->device_port) - 1);
+            copy_string (options->device_port, sizeof (options->device_port), optarg);
             break;
         case 13:
             options->jog_dx_mm = atof (optarg);
@@ -373,7 +387,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
             options->jog_dy_mm = atof (optarg);
             break;
         case 15:
-            strncpy (options->font_family, optarg, sizeof (options->font_family) - 1);
+            copy_string (options->font_family, sizeof (options->font_family), optarg);
             LOGD ("font family: %s", options->font_family);
             break;
         case 16:
@@ -386,11 +400,11 @@ void options_parser (int argc, char *argv[], options_t *options) {
             break;
         case 18:
             options->config_action = CFG_SET;
-            strncpy (options->config_set_pairs, optarg, sizeof (options->config_set_pairs) - 1);
+            copy_string (options->config_set_pairs, sizeof (options->config_set_pairs), optarg);
             LOGD ("config: --set %s", options->config_set_pairs);
             break;
         case 19:
-            strncpy (options->device_model, optarg, sizeof (options->device_model) - 1);
+            copy_string (options->device_model, sizeof (options->device_model), optarg);
             LOGD ("device model: %s", options->device_model);
             break;
         default:
