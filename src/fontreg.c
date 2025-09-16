@@ -7,6 +7,7 @@
 #include "jsr.h"
 #include "log.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,47 @@ static void copy_string (char *dst, size_t dst_size, const char *src) {
 }
 
 /**
+ * Зберігає базовий каталог із ресурсами Hershey.
+ *
+ * Використовується для пошуку hershey/index.json та окремих SVG-файлів при
+ * запуску з пакетів, де дані розміщено не поруч із бінарником.
+ */
+static char g_font_root[PATH_MAX];
+static int g_font_root_initialized = 0;
+
+/**
+ * Встановити базовий каталог, відносно якого шукати hershey/.
+ *
+ * @param path Абсолютний шлях до каталогу з ресурсами або NULL для скидання.
+ */
+void fontreg_set_root (const char *path) {
+    g_font_root_initialized = 1;
+    if (!path || !*path) {
+        g_font_root[0] = '\0';
+        return;
+    }
+    copy_string (g_font_root, sizeof (g_font_root), path);
+    size_t len = strlen (g_font_root);
+    while (len > 0 && g_font_root[len - 1] == '/') {
+        g_font_root[len - 1] = '\0';
+        --len;
+    }
+}
+
+/**
+ * Отримати фактичний базовий каталог, враховуючи CPLOT_DATA_DIR.
+ *
+ * @return Вказівник на встановлений каталог або NULL, якщо використовується CWD.
+ */
+static const char *fontreg_effective_root (void) {
+    if (!g_font_root_initialized) {
+        const char *env = getenv ("CPLOT_DATA_DIR");
+        fontreg_set_root (env && *env ? env : NULL);
+    }
+    return (g_font_root_initialized && g_font_root[0] != '\0') ? g_font_root : NULL;
+}
+
+/**
  * Прочитати список шрифтів із hershey/index.json.
  *
  * Читає весь файл як один JSON‑рядок (об’єкт верхнього рівня) ітерацією по
@@ -51,7 +93,18 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         return -1;
     *faces = NULL;
     *count = 0;
-    FILE *fp = fopen ("hershey/index.json", "r");
+    char index_path[PATH_MAX];
+    FILE *fp = NULL;
+    const char *root = fontreg_effective_root ();
+    if (root) {
+        int written = snprintf (index_path, sizeof (index_path), "%s/hershey/index.json", root);
+        if (written > 0 && (size_t)written < sizeof (index_path))
+            fp = fopen (index_path, "r");
+        else
+            LOGW ("шлях до hershey/index.json занадто довгий відносно бази: %s", root);
+    }
+    if (!fp)
+        fp = fopen ("hershey/index.json", "r");
     if (!fp) {
         LOGE ("не знайдено hershey/index.json");
         return -2;
@@ -192,8 +245,13 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             memset (&arr[*count], 0, sizeof (arr[*count]));
             copy_string (arr[*count].id, sizeof (arr[*count].id), key);
             copy_string (arr[*count].name, sizeof (arr[*count].name), name);
-            int written
-                = snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
+            int written;
+            if (root)
+                written = snprintf (
+                    arr[*count].path, sizeof (arr[*count].path), "%s/hershey/%s", root, file);
+            else
+                written
+                    = snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
             if (written < 0 || (size_t)written >= sizeof (arr[*count].path)) {
                 LOGW ("шлях до шрифту занадто довгий: hershey/%s", file);
             } else {

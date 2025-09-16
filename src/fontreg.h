@@ -5,14 +5,27 @@
 #ifndef FONTREG_H
 #define FONTREG_H
 
+#include <limits.h>
 #include <stddef.h>
 
 /// Гарнітура Hershey, як у hershey/index.json.
 typedef struct {
-    char id[64];    /**< stable key from index.json */
-    char name[96];  /**< human-friendly name */
-    char path[128]; /**< relative file path under hershey/ */
+    char id[64];         /**< stable key from index.json */
+    char name[96];       /**< human-friendly name */
+    char path[PATH_MAX]; /**< шлях до SVG (може бути абсолютним) */
 } font_face_t;
+
+/**
+ * Встановити базовий каталог, відносно якого шукати hershey/.
+ *
+ * Якщо передати NULL або порожній рядок, використовується каталог поточного
+ * процесу (поведінка за замовчуванням, сумісна зі старими збірками).
+ * Встановлення бази дозволяє пакетам (deb/pkg) розміщувати ресурси у
+ * системних директоріях, не змінюючи робочий каталог користувача.
+ *
+ * @param path Абсолютний шлях до каталогу з підкаталогом hershey.
+ */
+void fontreg_set_root (const char *path);
 
 /**
  * Завантажити реєстр шрифтів Hershey з hershey/index.json.

@@ -12,14 +12,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: Зчитати версію проєкту
+        id: meta
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -E '^VERSION\s*:=' project.conf | awk '{print $3}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up dependencies (Linux)
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential
+          sudo apt-get install -y build-essential fakeroot dpkg-dev
 
       - name: Set up dependencies (macOS)
         if: startsWith(matrix.os, 'macos')
@@ -27,15 +37,66 @@ jobs:
           brew update || true
           brew install llvm || true
 
-      - name: Build release and dist
-        run: |
-          make dist
+      - name: Build release binary
+        run: make release
 
-      - name: Upload artifact
+      - name: Створити Debian-пакет
+        if: startsWith(matrix.os, 'ubuntu')
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          ARCH=$(dpkg --print-architecture)
+          PKGROOT=$(pwd)/build/deb-root
+          rm -rf "$PKGROOT"
+          mkdir -p "$PKGROOT/DEBIAN" \
+                   "$PKGROOT/usr/lib/cplot" \
+                   "$PKGROOT/usr/bin" \
+                   "$PKGROOT/usr/share/doc/cplot" \
+                   "$PKGROOT/usr/share/licenses/cplot"
+          install -m 0755 bin/cplot "$PKGROOT/usr/lib/cplot/cplot"
+          cp -R hershey "$PKGROOT/usr/lib/cplot/"
+          install -m 0644 README.md "$PKGROOT/usr/share/doc/cplot/README.md"
+          install -m 0644 LICENSE "$PKGROOT/usr/share/licenses/cplot/LICENSE"
+          install -m 0755 packaging/cplot-wrapper-linux.sh "$PKGROOT/usr/bin/cplot"
+          sed \
+            -e "s/@VERSION@/${VERSION}/" \
+            -e "s/@ARCH@/${ARCH}/" \
+            packaging/debian/control > "$PKGROOT/DEBIAN/control"
+          mkdir -p dist
+          dpkg-deb --build --root-owner-group "$PKGROOT" "dist/cplot-${VERSION}-${ARCH}.deb"
+
+      - name: Створити macOS pkg-пакет
+        if: startsWith(matrix.os, 'macos')
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          ARCH=$(uname -m)
+          PKGROOT=$(pwd)/build/pkg-root
+          rm -rf "$PKGROOT"
+          mkdir -p "$PKGROOT/usr/local/lib/cplot" \
+                   "$PKGROOT/usr/local/bin" \
+                   "$PKGROOT/usr/local/share/doc/cplot" \
+                   "$PKGROOT/usr/local/share/licenses/cplot"
+          install -m 0755 bin/cplot "$PKGROOT/usr/local/lib/cplot/cplot"
+          cp -R hershey "$PKGROOT/usr/local/lib/cplot/"
+          install -m 0644 README.md "$PKGROOT/usr/local/share/doc/cplot/README.md"
+          install -m 0644 LICENSE "$PKGROOT/usr/local/share/licenses/cplot/LICENSE"
+          install -m 0755 packaging/cplot-wrapper-macos.sh "$PKGROOT/usr/local/bin/cplot"
+          mkdir -p dist
+          pkgbuild \
+            --root "$PKGROOT" \
+            --identifier "io.github.cplot" \
+            --version "$VERSION" \
+            --install-location "/" \
+            "dist/cplot-${VERSION}-${ARCH}.pkg"
+
+      - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cplot-${{ runner.os }}
-          path: dist/*.tar.gz
+          name: cplot-${{ runner.os }}-${{ steps.meta.outputs.version }}
+          path: dist/*
 
   publish:
     needs: build
@@ -53,7 +114,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/**/**/*.tar.gz
+            dist/**/**/*.deb
+            dist/**/**/*.pkg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
