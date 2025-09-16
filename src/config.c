@@ -199,45 +199,97 @@ int config_get_path (char *buf, size_t buflen) {
 static int parse_json (const char *s, config_t *c) {
     if (!s || !c)
         return -1;
-    /* naive parsing: use strstr to find numbers */
-    struct {
-        const char *k;
-        double *d;
-        int *i;
-    } map[] = {
-        { "paper_w_mm", &c->paper_w_mm, NULL },
-        { "paper_h_mm", &c->paper_h_mm, NULL },
-        { "margin_top_mm", &c->margin_top_mm, NULL },
-        { "margin_right_mm", &c->margin_right_mm, NULL },
-        { "margin_bottom_mm", &c->margin_bottom_mm, NULL },
-        { "margin_left_mm", &c->margin_left_mm, NULL },
-        { "speed_mm_s", &c->speed_mm_s, NULL },
-        { "accel_mm_s2", &c->accel_mm_s2, NULL },
-        { "orientation", NULL, &c->orientation },
-        { "pen_up_pos", NULL, &c->pen_up_pos },
-        { "pen_down_pos", NULL, &c->pen_down_pos },
-        { "pen_up_speed", NULL, &c->pen_up_speed },
-        { "pen_down_speed", NULL, &c->pen_down_speed },
-        { "pen_up_delay_ms", NULL, &c->pen_up_delay_ms },
-        { "pen_down_delay_ms", NULL, &c->pen_down_delay_ms },
-        { "servo_timeout_s", NULL, &c->servo_timeout_s },
-        { "version", NULL, &c->version },
+    typedef enum { FIELD_DOUBLE, FIELD_INT, FIELD_ENUM } field_kind_t;
+
+    struct field_spec {
+        const char *key;
+        field_kind_t kind;
+        void *ptr;
+    } specs[] = {
+        { "paper_w_mm", FIELD_DOUBLE, &c->paper_w_mm },
+        { "paper_h_mm", FIELD_DOUBLE, &c->paper_h_mm },
+        { "margin_top_mm", FIELD_DOUBLE, &c->margin_top_mm },
+        { "margin_right_mm", FIELD_DOUBLE, &c->margin_right_mm },
+        { "margin_bottom_mm", FIELD_DOUBLE, &c->margin_bottom_mm },
+        { "margin_left_mm", FIELD_DOUBLE, &c->margin_left_mm },
+        { "speed_mm_s", FIELD_DOUBLE, &c->speed_mm_s },
+        { "accel_mm_s2", FIELD_DOUBLE, &c->accel_mm_s2 },
+        { "orientation", FIELD_ENUM, &c->orientation },
+        { "pen_up_pos", FIELD_INT, &c->pen_up_pos },
+        { "pen_down_pos", FIELD_INT, &c->pen_down_pos },
+        { "pen_up_speed", FIELD_INT, &c->pen_up_speed },
+        { "pen_down_speed", FIELD_INT, &c->pen_down_speed },
+        { "pen_up_delay_ms", FIELD_INT, &c->pen_up_delay_ms },
+        { "pen_down_delay_ms", FIELD_INT, &c->pen_down_delay_ms },
+        { "servo_timeout_s", FIELD_INT, &c->servo_timeout_s },
+        { "version", FIELD_INT, &c->version },
     };
-    for (size_t i = 0; i < sizeof (map) / sizeof (map[0]); ++i) {
-        const char *p = strstr (s, map[i].k);
-        if (!p)
+
+    const char *p = s;
+    while (*p) {
+        while (*p
+               && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ',' || *p == '{'
+                   || *p == '}'))
+            ++p;
+        if (*p != '"') {
+            if (*p)
+                ++p;
             continue;
-        p = strchr (p, ':');
-        if (!p)
-            continue;
-        p++;
-        while (*p == ' ' || *p == '\t')
-            p++;
-        if (map[i].d) {
-            map[i].d[0] = strtod (p, NULL);
-        } else if (map[i].i) {
-            map[i].i[0] = (int)strtol (p, NULL, 10);
         }
+        ++p;
+        const char *key_start = p;
+        while (*p && *p != '"') {
+            if (*p == '\\' && p[1]) {
+                p += 2;
+                continue;
+            }
+            ++p;
+        }
+        if (*p != '"')
+            break;
+        size_t key_len = (size_t)(p - key_start);
+        char key_buf[32];
+        if (key_len >= sizeof (key_buf)) {
+            ++p;
+            continue;
+        }
+        memcpy (key_buf, key_start, key_len);
+        key_buf[key_len] = '\0';
+        ++p;
+        while (*p == ' ' || *p == '\t')
+            ++p;
+        if (*p != ':')
+            continue;
+        ++p;
+        while (*p == ' ' || *p == '\t')
+            ++p;
+
+        struct field_spec *spec = NULL;
+        for (size_t i = 0; i < sizeof (specs) / sizeof (specs[0]); ++i) {
+            if (strcmp (key_buf, specs[i].key) == 0) {
+                spec = &specs[i];
+                break;
+            }
+        }
+        if (!spec)
+            continue;
+
+        char *endptr = NULL;
+        if (spec->kind == FIELD_DOUBLE) {
+            double val = strtod (p, &endptr);
+            if (endptr && endptr != p)
+                *(double *)spec->ptr = val;
+        } else {
+            long val = strtol (p, &endptr, 10);
+            if (endptr && endptr != p) {
+                if (spec->kind == FIELD_INT)
+                    *(int *)spec->ptr = (int)val;
+                else
+                    *(orientation_t *)spec->ptr = (orientation_t)val;
+            }
+        }
+        if (endptr)
+            p = endptr;
     }
     return 0;
 }
@@ -306,7 +358,7 @@ int config_validate (const config_t *c, char *err, size_t errlen) {
             snprintf (err, errlen, "Поля перевищують доступну область друку");
         return -4;
     }
-    if (c->orientation != 1 && c->orientation != 2) {
+    if (c->orientation != ORIENT_PORTRAIT && c->orientation != ORIENT_LANDSCAPE) {
         if (err)
             snprintf (err, errlen, "Орієнтація має бути 1 (портрет) або 2 (альбом)");
         return -5;

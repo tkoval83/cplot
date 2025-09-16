@@ -20,7 +20,7 @@ typedef struct {
     int version; /**< інкремент при зміні формату на диску */
 
     // Сторінка та розміщення
-    int orientation; /**< 1=портрет, 2=альбом (див. orientation_t) */
+    orientation_t orientation; /**< орієнтація сторінки */
     double paper_w_mm;
     double paper_h_mm;
     double margin_top_mm;
