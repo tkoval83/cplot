@@ -14,6 +14,9 @@ struct glyph {
     char *path_data;
 };
 
+/**
+ * @brief Скопіювати рядок у новий буфер.
+ */
 static int duplicate_string (const char *src, char **out_dst) {
     if (!src || !out_dst)
         return -2;
@@ -26,6 +29,9 @@ static int duplicate_string (const char *src, char **out_dst) {
     return 0;
 }
 
+/**
+ * @copydoc glyph_create_from_svg_path
+ */
 int glyph_create_from_svg_path (
     uint32_t codepoint, double advance_width, const char *path_data, glyph_t **out_glyph) {
     if (!path_data || !out_glyph)
@@ -43,6 +49,9 @@ int glyph_create_from_svg_path (
     return 0;
 }
 
+/**
+ * @copydoc glyph_get_info
+ */
 int glyph_get_info (const glyph_t *glyph, glyph_info_t *out) {
     if (!glyph || !out)
         return -1;
@@ -51,12 +60,18 @@ int glyph_get_info (const glyph_t *glyph, glyph_info_t *out) {
     return 0;
 }
 
+/**
+ * @copydoc glyph_get_path_data
+ */
 const char *glyph_get_path_data (const glyph_t *glyph) {
     if (!glyph)
         return NULL;
     return glyph->path_data;
 }
 
+/**
+ * @copydoc glyph_release
+ */
 int glyph_release (glyph_t *glyph) {
     if (!glyph)
         return 0;

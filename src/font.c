@@ -18,6 +18,14 @@ struct font {
     font_metrics_t metrics;
 };
 
+/**
+ * @brief Прочитати файл цілком у пам'ять.
+ *
+ * @param path     Шлях до файлу.
+ * @param out_data Вихідний буфер (malloc), який згодом звільняє викликач.
+ * @param out_len  Довжина прочитаних байтів (може бути NULL).
+ * @return 0 при успіху; -1 при помилці I/O або пам'яті; -2 при некоректних аргументах.
+ */
 static int read_entire_file (const char *path, char **out_data, size_t *out_len) {
     if (!path || !out_data)
         return -2;
@@ -55,6 +63,15 @@ static int read_entire_file (const char *path, char **out_data, size_t *out_len)
     return 0;
 }
 
+/**
+ * @brief Знайти сегмент тегу в тексті SVG.
+ *
+ * @param data      Повний вміст SVG.
+ * @param tag       Пошуковий префікс тегу (наприклад, "<font ").
+ * @param out_start Повертає вказівник на початок сегмента (у data).
+ * @param out_len   Довжина сегмента з урахуванням символа '>'.
+ * @return 0 при успіху; 1 якщо тег не знайдено; від'ємний код при помилці.
+ */
 static int
 find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
     if (!data || !tag || !out_start || !out_len)
@@ -73,6 +90,15 @@ find_tag_segment (const char *data, const char *tag, const char **out_start, siz
     return 0;
 }
 
+/**
+ * @brief Виділити значення атрибуту з сегмента тегу.
+ *
+ * @param segment   Сегмент тегу.
+ * @param seg_len   Розмір сегмента.
+ * @param attr      Назва атрибуту з символом '=' (напр., "id=").
+ * @param out_value Результат (malloc), належить викликачеві.
+ * @return 0 при успіху; 1 якщо не знайдено; -1 при помилці, -2 при некоректних аргументах.
+ */
 static int
 extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
     if (!segment || !attr || !out_value)
@@ -109,6 +135,9 @@ extract_attribute (const char *segment, size_t seg_len, const char *attr, char *
     return 1;
 }
 
+/**
+ * @brief Розібрати числовий атрибут або повернути fallback.
+ */
 static double
 parse_double_with_default (const char *segment, size_t seg_len, const char *attr, double fallback) {
     char *value = NULL;
@@ -125,6 +154,9 @@ parse_double_with_default (const char *segment, size_t seg_len, const char *attr
     return result;
 }
 
+/**
+ * @brief Записати значення строкового атрибуту у поле структури.
+ */
 static int set_string_field (char **field, const char *segment, size_t seg_len, const char *attr) {
     if (!field)
         return -2;
@@ -140,6 +172,9 @@ static int set_string_field (char **field, const char *segment, size_t seg_len, 
     return 0;
 }
 
+/**
+ * @copydoc font_load_from_file
+ */
 int font_load_from_file (const char *path, font_t **out_font) {
     if (!path || !out_font)
         return -2;
@@ -186,6 +221,9 @@ int font_load_from_file (const char *path, font_t **out_font) {
     return 0;
 }
 
+/**
+ * @brief Скопіювати рядок у буфер користувача.
+ */
 static int copy_string_field (const char *source, char *buffer, size_t buflen) {
     if (!source)
         return 0;
@@ -199,18 +237,27 @@ static int copy_string_field (const char *source, char *buffer, size_t buflen) {
     return (int)strlen (source);
 }
 
+/**
+ * @copydoc font_get_id
+ */
 int font_get_id (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
     return copy_string_field (font->id, buffer, buflen);
 }
 
+/**
+ * @copydoc font_get_family_name
+ */
 int font_get_family_name (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
     return copy_string_field (font->family, buffer, buflen);
 }
 
+/**
+ * @copydoc font_get_metrics
+ */
 int font_get_metrics (const font_t *font, font_metrics_t *out) {
     if (!font || !out)
         return -1;
@@ -218,6 +265,9 @@ int font_get_metrics (const font_t *font, font_metrics_t *out) {
     return 0;
 }
 
+/**
+ * @copydoc font_find_glyph
+ */
 int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out_glyph) {
     (void)font;
     (void)codepoint;
@@ -225,6 +275,9 @@ int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out
     return 1; /* поки що шукати гліфи не реалізовано */
 }
 
+/**
+ * @copydoc font_release
+ */
 int font_release (font_t *font) {
     if (!font)
         return 0;
