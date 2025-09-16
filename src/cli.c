@@ -93,7 +93,7 @@ int cli_dispatch (const options_t *options) {
         string_t input = { .chars = (const char *)buf, .len = len, .enc = STR_ENC_UTF8 };
         if (options->preview) {
             bytes_t out;
-            rc = cmd_print_preview (
+            rc = cmd_print_preview_execute (
                 input, options->font_family[0] ? options->font_family : NULL, options->paper_w_mm,
                 options->paper_h_mm, options->margin_top_mm, options->margin_right_mm,
                 options->margin_bottom_mm, options->margin_left_mm, options->orientation,

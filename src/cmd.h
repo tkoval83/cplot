@@ -103,7 +103,7 @@ cmd_result_t cmd_print_execute (
  * через free()).
  * @return 0 успіх; ненульовий код — помилка. На помилці out->bytes==NULL, out->len==0.
  */
-cmd_result_t cmd_print_preview (
+cmd_result_t cmd_print_preview_execute (
     string_t in,
     const char *font_family,
     double paper_w_mm,
