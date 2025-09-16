@@ -5,10 +5,13 @@
 
 #include "font.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <stdbool.h>
 
 struct font {
     char *svg_data;
@@ -16,6 +19,10 @@ struct font {
     char *id;
     char *family;
     font_metrics_t metrics;
+    glyph_t **glyphs;
+    uint32_t *glyph_codes;
+    size_t glyph_count;
+    bool glyphs_loaded;
 };
 
 /**
@@ -172,6 +179,169 @@ static int set_string_field (char **field, const char *segment, size_t seg_len, 
     return 0;
 }
 
+static int decode_utf8_char (const char *input, uint32_t *out_cp, size_t *out_len) {
+    if (!input || !out_cp)
+        return -2;
+    const unsigned char *s = (const unsigned char *)input;
+    if (s[0] == '\0')
+        return -1;
+    uint32_t cp = 0;
+    size_t used = 0;
+    if ((s[0] & 0x80) == 0) {
+        cp = s[0];
+        used = 1;
+    } else if ((s[0] & 0xE0) == 0xC0) {
+        if ((s[1] & 0xC0) != 0x80)
+            return -1;
+        cp = ((uint32_t)(s[0] & 0x1F) << 6) | (uint32_t)(s[1] & 0x3F);
+        used = 2;
+        if (cp < 0x80)
+            return -1;
+    } else if ((s[0] & 0xF0) == 0xE0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80)
+            return -1;
+        cp = ((uint32_t)(s[0] & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6)
+             | (uint32_t)(s[2] & 0x3F);
+        used = 3;
+        if (cp < 0x800)
+            return -1;
+    } else if ((s[0] & 0xF8) == 0xF0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80)
+            return -1;
+        cp = ((uint32_t)(s[0] & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12)
+             | ((uint32_t)(s[2] & 0x3F) << 6) | (uint32_t)(s[3] & 0x3F);
+        used = 4;
+        if (cp < 0x10000 || cp > 0x10FFFF)
+            return -1;
+    } else {
+        return -1;
+    }
+    if (out_len)
+        *out_len = used;
+    *out_cp = cp;
+    return 0;
+}
+
+static int parse_codepoint (const char *value, uint32_t *out_cp) {
+    if (!value || !out_cp)
+        return -2;
+    if (value[0] == '\0')
+        return -1;
+    if (value[0] == '&' && value[1] == '#') {
+        int base = 10;
+        const char *p = value + 2;
+        if (*p == 'x' || *p == 'X') {
+            base = 16;
+            ++p;
+        }
+        char *end = NULL;
+        errno = 0;
+        long parsed = strtol (p, &end, base);
+        if (errno != 0)
+            return -1;
+        if (end == p)
+            return -1;
+        if (*end == ';')
+            ++end;
+        if (*end != '\0')
+            return -1;
+        if (parsed < 0 || parsed > 0x10FFFF)
+            return -1;
+        *out_cp = (uint32_t)parsed;
+        return 0;
+    } else {
+        uint32_t cp = 0;
+        if (decode_utf8_char (value, &cp, NULL) != 0)
+            return -1;
+        *out_cp = cp;
+        return 0;
+    }
+}
+
+static int append_glyph_entry (font_t *font, glyph_t *glyph, uint32_t codepoint) {
+    size_t new_count = font->glyph_count + 1;
+    glyph_t **glyphs = (glyph_t **)malloc (new_count * sizeof (*glyphs));
+    if (!glyphs)
+        return -1;
+    uint32_t *codes = (uint32_t *)malloc (new_count * sizeof (*codes));
+    if (!codes) {
+        free (glyphs);
+        return -1;
+    }
+    if (font->glyph_count > 0) {
+        memcpy (glyphs, font->glyphs, font->glyph_count * sizeof (*glyphs));
+        memcpy (codes, font->glyph_codes, font->glyph_count * sizeof (*codes));
+    }
+    glyphs[font->glyph_count] = glyph;
+    codes[font->glyph_count] = codepoint;
+    free (font->glyphs);
+    free (font->glyph_codes);
+    font->glyphs = glyphs;
+    font->glyph_codes = codes;
+    font->glyph_count = new_count;
+    return 0;
+}
+
+static int ensure_glyphs_loaded (font_t *font) {
+    if (font->glyphs_loaded)
+        return 0;
+    const char *cursor = font->svg_data;
+    while (cursor && *cursor) {
+        const char *glyph_tag = strstr (cursor, "<glyph");
+        if (!glyph_tag)
+            break;
+        const char *end = strchr (glyph_tag, '>');
+        if (!end)
+            break;
+        size_t seg_len = (size_t)(end - glyph_tag + 1);
+        char *unicode_val = NULL;
+        if (extract_attribute (glyph_tag, seg_len, "unicode=", &unicode_val) != 0) {
+            cursor = end + 1;
+            continue;
+        }
+        uint32_t codepoint = 0;
+        if (parse_codepoint (unicode_val, &codepoint) != 0) {
+            free (unicode_val);
+            cursor = end + 1;
+            continue;
+        }
+        free (unicode_val);
+        bool duplicate = false;
+        for (size_t i = 0; i < font->glyph_count; ++i) {
+            if (font->glyph_codes[i] == codepoint) {
+                duplicate = true;
+                break;
+            }
+        }
+        double adv = parse_double_with_default (
+            glyph_tag, seg_len, "horiz-adv-x=", font->metrics.units_per_em);
+        char *path_val = NULL;
+        const char *path_data = "";
+        if (extract_attribute (glyph_tag, seg_len, "d=", &path_val) == 0 && path_val)
+            path_data = path_val;
+        glyph_t *glyph = NULL;
+        if (!duplicate && glyph_create_from_svg_path (codepoint, adv, path_data, &glyph) != 0)
+            glyph = NULL;
+        if (path_val)
+            free (path_val);
+        if (!glyph) {
+            cursor = end + 1;
+            continue;
+        }
+        if (duplicate) {
+            glyph_release (glyph);
+        } else {
+            if (append_glyph_entry (font, glyph, codepoint) != 0) {
+                glyph_release (glyph);
+                return -1;
+            }
+        }
+        cursor = end + 1;
+    }
+    font->glyphs_loaded = true;
+    return 0;
+}
+
 /**
  * @copydoc font_load_from_file
  */
@@ -269,10 +439,18 @@ int font_get_metrics (const font_t *font, font_metrics_t *out) {
  * @copydoc font_find_glyph
  */
 int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out_glyph) {
-    (void)font;
-    (void)codepoint;
-    (void)out_glyph;
-    return 1; /* поки що шукати гліфи не реалізовано */
+    if (!font || !out_glyph)
+        return -1;
+    font_t *mutable_font = (font_t *)font;
+    if (ensure_glyphs_loaded (mutable_font) != 0)
+        return -1;
+    for (size_t i = 0; i < mutable_font->glyph_count; ++i) {
+        if (mutable_font->glyph_codes[i] == codepoint) {
+            *out_glyph = mutable_font->glyphs[i];
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /**
@@ -281,6 +459,12 @@ int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out
 int font_release (font_t *font) {
     if (!font)
         return 0;
+    if (font->glyphs) {
+        for (size_t i = 0; i < font->glyph_count; ++i)
+            glyph_release (font->glyphs[i]);
+    }
+    free (font->glyphs);
+    free (font->glyph_codes);
     free (font->svg_data);
     free (font->id);
     free (font->family);
