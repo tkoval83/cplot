@@ -43,7 +43,7 @@ cmd_result_t cmd_print_execute (
     int orientation,
     bool dry_run,
     verbose_level_t verbose) {
-    LOGI ("Почато побудову та друк (заглушка)");
+    LOGI ("Почато побудову та друк");
     (void)paper_w_mm;
     (void)paper_h_mm;
     (void)margin_top_mm;
@@ -85,7 +85,7 @@ cmd_result_t cmd_print_preview_execute (
     (void)margin_left_mm;
     (void)orientation;
     (void)verbose;
-    LOGI ("Попередній перегляд (заглушка)");
+    LOGI ("Попередній перегляд");
     if (!out) {
         LOGE ("Внутрішня помилка: не задано вихідні параметри прев’ю");
         return 1;
@@ -265,7 +265,7 @@ cmd_result_t cmd_device_execute (
  */
 cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose) {
     (void)verbose;
-    LOGI ("Системна інформація (заглушка)");
+    LOGI ("Системна інформація");
     fprintf (stdout, "Системна інформація: ще не реалізовано\n");
     return 0;
 }
@@ -275,7 +275,7 @@ cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose) {
 /// Вивести перелік доступних векторних шрифтів (деталізована функція).
 cmd_result_t cmd_font_list_execute (verbose_level_t verbose) {
     (void)verbose;
-    LOGI ("Перелік доступних шрифтів (заглушка)");
+    LOGI ("Перелік доступних шрифтів");
     fprintf (stdout, "Шрифти: ще не реалізовано\n");
     return 0;
 }
@@ -284,7 +284,7 @@ cmd_result_t cmd_font_list_execute (verbose_level_t verbose) {
 cmd_result_t cmd_config_show (const config_t *cfg, verbose_level_t verbose) {
     (void)cfg;
     (void)verbose;
-    LOGI ("Поточні налаштування (заглушка)");
+    LOGI ("Поточні налаштування");
     fprintf (stdout, "Налаштування (показ): ще не реалізовано\n");
     return 0;
 }
@@ -293,7 +293,7 @@ cmd_result_t cmd_config_show (const config_t *cfg, verbose_level_t verbose) {
 cmd_result_t cmd_config_reset (config_t *inout_cfg, verbose_level_t verbose) {
     (void)inout_cfg;
     (void)verbose;
-    LOGI ("Скидання налаштувань (заглушка)");
+    LOGI ("Скидання налаштувань");
     fprintf (stdout, "Налаштування (скидання): ще не реалізовано\n");
     return 0;
 }
@@ -303,7 +303,7 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, verbose
     (void)inout_cfg;
     (void)verbose;
     (void)set_pairs;
-    LOGI ("Застосування нових налаштувань (заглушка)");
+    LOGI ("Застосування нових налаштувань");
     fprintf (stdout, "Налаштування (встановлення): ще не реалізовано\n");
     return 0;
 }
@@ -312,7 +312,7 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, verbose
 cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
     (void)verbose;
     (void)model;
-    LOGI ("Перелік доступних портів (заглушка)");
+    LOGI ("Перелік доступних портів");
     fprintf (stdout, "Порти: ще не реалізовано\n");
     return 0;
 }
@@ -322,7 +322,7 @@ cmd_result_t cmd_device_pen_up (const char *port, const char *model, verbose_lev
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Підйом пера (заглушка)");
+    LOGI ("Підйом пера");
     fprintf (stdout, "Перо вгору: ще не реалізовано\n");
     return 0;
 }
@@ -332,7 +332,7 @@ cmd_result_t cmd_device_pen_down (const char *port, const char *model, verbose_l
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Опускання пера (заглушка)");
+    LOGI ("Опускання пера");
     fprintf (stdout, "Перо вниз: ще не реалізовано\n");
     return 0;
 }
@@ -342,7 +342,7 @@ cmd_result_t cmd_device_pen_toggle (const char *port, const char *model, verbose
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Перемикання пера (заглушка)");
+    LOGI ("Перемикання пера");
     fprintf (stdout, "Перемикання пера: ще не реалізовано\n");
     return 0;
 }
@@ -352,7 +352,7 @@ cmd_result_t cmd_device_motors_on (const char *port, const char *model, verbose_
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Увімкнення моторів (заглушка)");
+    LOGI ("Увімкнення моторів");
     fprintf (stdout, "Мотори увімкнено: ще не реалізовано\n");
     return 0;
 }
@@ -362,7 +362,7 @@ cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Вимкнення моторів (заглушка)");
+    LOGI ("Вимкнення моторів");
     fprintf (stdout, "Мотори вимкнено: ще не реалізовано\n");
     return 0;
 }
@@ -372,7 +372,7 @@ cmd_result_t cmd_device_home (const char *port, const char *model, verbose_level
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Повернення у початкову позицію (заглушка)");
+    LOGI ("Повернення у початкову позицію");
     fprintf (stdout, "Домашня позиція: ще не реалізовано\n");
     return 0;
 }
@@ -383,7 +383,7 @@ cmd_result_t cmd_device_jog (
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Ручний зсув: по іксу %.3f мм, по ігреку %.3f мм (заглушка)", dx_mm, dy_mm);
+    LOGI ("Ручний зсув: по іксу %.3f мм, по ігреку %.3f мм", dx_mm, dy_mm);
     fprintf (stdout, "Ручний зсув: ще не реалізовано\n");
     return 0;
 }
@@ -393,7 +393,7 @@ cmd_result_t cmd_device_version (const char *port, const char *model, verbose_le
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Версія контролера (заглушка)");
+    LOGI ("Версія контролера");
     fprintf (stdout, "Версія: ще не реалізовано\n");
     return 0;
 }
@@ -403,7 +403,7 @@ cmd_result_t cmd_device_status (const char *port, const char *model, verbose_lev
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Стан пристрою (заглушка)");
+    LOGI ("Стан пристрою");
     fprintf (stdout, "Стан: ще не реалізовано\n");
     return 0;
 }
@@ -413,7 +413,7 @@ cmd_result_t cmd_device_position (const char *port, const char *model, verbose_l
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Поточна позиція (заглушка)");
+    LOGI ("Поточна позиція");
     fprintf (stdout, "Позиція: ще не реалізовано\n");
     return 0;
 }
@@ -423,7 +423,7 @@ cmd_result_t cmd_device_reset (const char *port, const char *model, verbose_leve
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Скидання контролера (заглушка)");
+    LOGI ("Скидання контролера");
     fprintf (stdout, "Скидання: ще не реалізовано\n");
     return 0;
 }
@@ -433,7 +433,7 @@ cmd_result_t cmd_device_reboot (const char *port, const char *model, verbose_lev
     (void)verbose;
     (void)port;
     (void)model;
-    LOGI ("Перезавантаження контролера (заглушка)");
+    LOGI ("Перезавантаження контролера");
     fprintf (stdout, "Перезавантаження: ще не реалізовано\n");
     return 0;
 }
