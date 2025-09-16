@@ -4,11 +4,13 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "args.h"
 #include "cli.h"
 #include "help.h"
 #include "log.h"
+#include "mcp.h"
 
 /**
  * Точка входу програми.
@@ -21,6 +23,10 @@
  * @return Код завершення процесу: 0 при успіху або код помилки підкоманди.
  */
 int main (int argc, char *argv[]) {
+    /* Спеціальний режим: якщо перший аргумент дорівнює "--mcp", запускаємо MCP‑сервер. */
+    if (argc > 1 && argv[1] && strcmp (argv[1], "--mcp") == 0) {
+        return mcp_server_run ();
+    }
 
     /* Зчитати опції командного рядка */
     options_t options;
