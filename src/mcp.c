@@ -324,9 +324,9 @@ static void handle_call_tool_print (const char *id_ptr, size_t id_len, const cha
     }
 
     char *orient = json_get_string (args_ptr, "orientation", NULL);
-    int orientation = 1; /* portrait */
+    int orientation = ORIENT_PORTRAIT;
     if (orient && strcmp (orient, "landscape") == 0)
-        orientation = 2;
+        orientation = ORIENT_LANDSCAPE;
     free (orient);
 
     size_t in_len = 0;

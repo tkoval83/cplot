@@ -121,7 +121,9 @@ void help (void) {
         } else if (d->type == CFGK_ENUM) {
             // special-case orientation mapping to text
             if (strcmp (d->key, "orient") == 0) {
-                fprintf (stdout, " (типово %s)", (def.orientation == 2) ? "landscape" : "portrait");
+                fprintf (
+                    stdout, " (типово %s)",
+                    (def.orientation == ORIENT_LANDSCAPE) ? "landscape" : "portrait");
             }
         }
 #if defined(__clang__)
