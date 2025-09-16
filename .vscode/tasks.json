@@ -169,6 +169,16 @@
 				"$gcc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Build (make)",
+			"type": "shell",
+			"command": "make",
+			"args": [
+				"-j"
+			],
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }

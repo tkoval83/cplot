@@ -1,14 +1,15 @@
 /**
  * @file mcp.c
- * @brief Простий MCP‑сервер (JSON‑RPC 2.0 через stdio, NDJSON).
+ * @brief Простий MCP‑режим (JSON‑RPC 2.0 через stdio, NDJSON).
  *
  * Реалізує сервер, що читає запити JSON‑RPC 2.0 з stdin (по одному JSON на рядок)
  * та друкує відповіді у stdout. Призначено для інтеграції із агентами через MCP.
  *
- * Підтримувані методи:
- * - ping → { pong: true }
- * - list_tools → перелік інструментів/можливостей
- * - call_tool → виклик інструменту (початково: print із режимом preview)
+ * Підтримувані методи (MCP):
+ * - initialize → узгодження версії протоколу та можливостей
+ * - tools/list → перелік інструментів
+ * - tools/call → виклик інструменту (початково: print у режимі прев’ю)
+ * Додаткові псевдоніми для зручності (поза MCP): ping, list_tools, call_tool.
  *
  * Обмеження:
  * - Парсинг JSON виконано мінімалістично через утиліти json.c; це не повний валідатор.
@@ -20,6 +21,7 @@
 #include "cmd.h"
 #include "json.h"
 #include "log.h"
+#include "proginfo.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -139,6 +141,43 @@ static void write_json_err (const char *id_ptr, size_t id_len, int code, const c
 
 /* ---- Обробники методів -------------------------------------------------- */
 
+/* initialize */
+struct init_ctx {
+    const char *protocol_version;
+    const char *server_name;
+    const char *server_version;
+};
+
+static void emit_initialize_result (json_writer_t *w, void *vctx) {
+    struct init_ctx *c = (struct init_ctx *)vctx;
+    jsonw_begin_object (w);
+    jsonw_key (w, "protocolVersion");
+    jsonw_string_cstr (w, c->protocol_version);
+    jsonw_key (w, "capabilities");
+    jsonw_begin_object (w);
+    jsonw_key (w, "tools");
+    jsonw_begin_object (w);
+    jsonw_key (w, "listChanged");
+    jsonw_bool (w, 0);
+    jsonw_end_object (w);
+    jsonw_end_object (w);
+    jsonw_key (w, "serverInfo");
+    jsonw_begin_object (w);
+    jsonw_key (w, "name");
+    jsonw_string_cstr (w, c->server_name);
+    jsonw_key (w, "version");
+    jsonw_string_cstr (w, c->server_version);
+    jsonw_end_object (w);
+    jsonw_end_object (w);
+}
+
+static void handle_initialize (const char *id_ptr, size_t id_len) {
+    struct init_ctx ctx = { .protocol_version = "2025-06-18",
+                            .server_name = __PROGRAM_NAME__,
+                            .server_version = __PROGRAM_VERSION__ };
+    write_json_ok (id_ptr, id_len, emit_initialize_result, &ctx);
+}
+
 /**
  * Обробити метод ping.
  * @param id_ptr Сирий id.
@@ -166,32 +205,65 @@ static void emit_list_tools_result (json_writer_t *w, void *ctx) {
     jsonw_begin_object (w);
     jsonw_key (w, "tools");
     jsonw_begin_array (w);
-    const struct {
-        const char *name;
-        const char *desc;
-    } tools[] = {
-        { "print", "Попередній перегляд або друк розкладки" },
-        { "device", "Операції з пристроєм" },
-        { "fonts", "Перелік шрифтів" },
-        { "config", "Налаштування" },
-        { "version", "Версія застосунку" },
-        { "sysinfo", "Діагностика" },
-    };
-    for (size_t i = 0; i < sizeof tools / sizeof tools[0]; ++i) {
-        jsonw_begin_object (w);
-        jsonw_key (w, "name");
-        jsonw_string_cstr (w, tools[i].name);
-        jsonw_key (w, "description");
-        jsonw_string_cstr (w, tools[i].desc);
-        jsonw_end_object (w);
-    }
+    /* Єдиний інструмент: прев’ю друку */
+    jsonw_begin_object (w);
+    jsonw_key (w, "name");
+    jsonw_string_cstr (w, "cplot.print_preview");
+    jsonw_key (w, "title");
+    jsonw_string_cstr (w, "Попередній перегляд друку");
+    jsonw_key (w, "description");
+    jsonw_string_cstr (w, "Згенерувати прев’ю макету як SVG або PNG");
+    jsonw_key (w, "inputSchema");
+    /* JSON Schema (спрощено) */
+    jsonw_begin_object (w);
+    jsonw_key (w, "type");
+    jsonw_string_cstr (w, "object");
+    jsonw_key (w, "properties");
+    jsonw_begin_object (w);
+    jsonw_key (w, "content");
+    jsonw_begin_object (w);
+    jsonw_key (w, "type");
+    jsonw_string_cstr (w, "string");
+    jsonw_key (w, "description");
+    jsonw_string_cstr (w, "Вхідний вміст для побудови прев’ю (UTF‑8)");
+    jsonw_end_object (w);
+    jsonw_key (w, "fmt");
+    jsonw_begin_object (w);
+    jsonw_key (w, "type");
+    jsonw_string_cstr (w, "string");
+    jsonw_key (w, "enum");
+    jsonw_begin_array (w);
+    jsonw_string_cstr (w, "svg");
+    jsonw_string_cstr (w, "png");
+    jsonw_end_array (w);
+    jsonw_key (w, "description");
+    jsonw_string_cstr (w, "Бажаний формат прев’ю");
+    jsonw_end_object (w);
+    jsonw_key (w, "orientation");
+    jsonw_begin_object (w);
+    jsonw_key (w, "type");
+    jsonw_string_cstr (w, "string");
+    jsonw_key (w, "enum");
+    jsonw_begin_array (w);
+    jsonw_string_cstr (w, "portrait");
+    jsonw_string_cstr (w, "landscape");
+    jsonw_end_array (w);
+    jsonw_end_object (w);
+    jsonw_end_object (w); /* properties */
+    jsonw_key (w, "required");
+    jsonw_begin_array (w);
+    jsonw_string_cstr (w, "content");
+    jsonw_end_array (w);
+    jsonw_end_object (w); /* inputSchema */
+    jsonw_end_object (w);
+
     jsonw_end_array (w);
     jsonw_end_object (w);
 }
 
 /* Контекст та емітер для prev'ю print */
 struct preview_ctx {
-    const char *fmt;
+    const char *mime;
     const char *b64;
     size_t b64len;
 };
@@ -199,12 +271,17 @@ struct preview_ctx {
 static void emit_preview_result (json_writer_t *w, void *vctx) {
     struct preview_ctx *c = (struct preview_ctx *)vctx;
     jsonw_begin_object (w);
-    jsonw_key (w, "ok");
-    jsonw_bool (w, 1);
-    jsonw_key (w, "fmt");
-    jsonw_string_cstr (w, c->fmt);
-    jsonw_key (w, "preview_b64");
+    jsonw_key (w, "content");
+    jsonw_begin_array (w);
+    jsonw_begin_object (w);
+    jsonw_key (w, "type");
+    jsonw_string_cstr (w, "image");
+    jsonw_key (w, "data");
     jsonw_string (w, c->b64, c->b64len);
+    jsonw_key (w, "mimeType");
+    jsonw_string_cstr (w, c->mime);
+    jsonw_end_object (w);
+    jsonw_end_array (w);
     jsonw_end_object (w);
 }
 
@@ -226,25 +303,36 @@ static void handle_call_tool_print (const char *id_ptr, size_t id_len, const cha
     /* Параметри: args.preview, args.png, args.orientation, margins/paper/family/verbose/dry_run,
      * input */
     /* Спрощення: підтримуємо лише preview=true; інші — типові значення */
-    int preview = json_get_bool (json, "preview", 0);
-    int png = json_get_bool (json, "png", 0);
-    char *orient = json_get_string (json, "orientation", NULL);
+    /* Параметри MCP у params.arguments */
+    const char *args_ptr = NULL;
+    size_t args_len = 0;
+    if (!json_get_raw (json, "arguments", &args_ptr, &args_len)) {
+        write_json_err (id_ptr, id_len, -32602, "Відсутні arguments для tools/call");
+        return;
+    }
+
+    int png = 0; /* типово SVG */
+    /* Якщо fmt=="png" → png=1, якщо "svg" або відсутнє → png=0 */
+    char *fmt = json_get_string (args_ptr, "fmt", NULL);
+    if (fmt) {
+        if (strcmp (fmt, "png") == 0)
+            png = 1;
+        else
+            png = 0;
+        free (fmt);
+    }
+
+    char *orient = json_get_string (args_ptr, "orientation", NULL);
     int orientation = 1; /* portrait */
     if (orient && strcmp (orient, "landscape") == 0)
         orientation = 2;
     free (orient);
 
     size_t in_len = 0;
-    char *in_str = json_get_string (json, "input", &in_len);
+    char *in_str = json_get_string (args_ptr, "content", &in_len);
     string_t in_view = { .chars = in_str ? in_str : "",
                          .len = in_len ? in_len : (in_str ? strlen (in_str) : 0),
                          .enc = STR_ENC_UTF8 };
-
-    if (!preview) {
-        free (in_str);
-        write_json_err (id_ptr, id_len, -32602, "Режим друку без прев’ю наразі недоступний у MCP");
-        return;
-    }
 
     bytes_t out = { 0 };
     int rc = cmd_print_preview_execute (
@@ -267,7 +355,8 @@ static void handle_call_tool_print (const char *id_ptr, size_t id_len, const cha
         write_json_err (id_ptr, id_len, -32001, "Недостатньо пам’яті для кодування base64");
         return;
     }
-    struct preview_ctx ctx = { .fmt = png ? "png" : "svg", .b64 = b64, .b64len = b64len };
+    struct preview_ctx ctx
+        = { .mime = png ? "image/png" : "image/svg+xml", .b64 = b64, .b64len = b64len };
     write_json_ok (id_ptr, id_len, emit_preview_result, &ctx);
     free (b64);
 }
@@ -285,7 +374,7 @@ static void handle_call_tool (const char *id_ptr, size_t id_len, const char *jso
         write_json_err (id_ptr, id_len, -32602, "Відсутня назва інструменту");
         return;
     }
-    if (strcmp (name, "print") == 0) {
+    if (strcmp (name, "print") == 0 || strcmp (name, "cplot.print_preview") == 0) {
         free (name);
         handle_call_tool_print (id_ptr, id_len, json);
         return;
@@ -304,8 +393,8 @@ static void handle_call_tool (const char *id_ptr, size_t id_len, const char *jso
  *
  * @return 0 — нормальне завершення (EOF), 1 — помилка вводу/виводу (не використовується наразі).
  */
-int mcp_server_run (void) {
-    LOGI ("Запуск MCP‑сервера (stdio, NDJSON)");
+int mcp_run (void) {
+    LOGI ("Запуск MCP‑режиму (stdio, NDJSON)");
     char *line = NULL;
     size_t cap = 0;
     ssize_t n;
@@ -325,11 +414,17 @@ int mcp_server_run (void) {
             write_json_err (id_ptr, id_len, -32600, "Некоректний запит (відсутній method)");
             continue;
         }
-        if (strcmp (method, "ping") == 0) {
-            handle_ping (id_ptr, id_len);
-        } else if (strcmp (method, "list_tools") == 0) {
+        if (strcmp (method, "initialize") == 0) {
+            handle_initialize (id_ptr, id_len);
+        } else if (strcmp (method, "tools/list") == 0) {
             handle_list_tools (id_ptr, id_len);
-        } else if (strcmp (method, "call_tool") == 0) {
+        } else if (strcmp (method, "tools/call") == 0) {
+            handle_call_tool (id_ptr, id_len, line);
+        } else if (strcmp (method, "ping") == 0) { /* поза MCP, діагностика */
+            handle_ping (id_ptr, id_len);
+        } else if (strcmp (method, "list_tools") == 0) { /* псевдонім */
+            handle_list_tools (id_ptr, id_len);
+        } else if (strcmp (method, "call_tool") == 0) { /* псевдонім */
             handle_call_tool (id_ptr, id_len, line);
         } else {
             write_json_err (id_ptr, id_len, -32601, "Невідомий метод");
@@ -337,6 +432,6 @@ int mcp_server_run (void) {
         free (method);
     }
     free (line);
-    LOGI ("MCP‑сервер завершено (EOF)");
+    LOGI ("MCP‑режим завершено (EOF)");
     return 0;
 }

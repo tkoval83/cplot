@@ -25,7 +25,7 @@
 int main (int argc, char *argv[]) {
     /* Спеціальний режим: якщо перший аргумент дорівнює "--mcp", запускаємо MCP‑сервер. */
     if (argc > 1 && argv[1] && strcmp (argv[1], "--mcp") == 0) {
-        return mcp_server_run ();
+        return mcp_run ();
     }
 
     /* Зчитати опції командного рядка */
