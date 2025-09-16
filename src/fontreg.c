@@ -22,6 +22,20 @@ static void strlower (char *s) {
 }
 
 /**
+ * Скопіювати рядок у буфер з гарантією завершення NUL.
+ */
+static void copy_string (char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0)
+        return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    strncpy (dst, src, dst_size - 1);
+    dst[dst_size - 1] = '\0';
+}
+
+/**
  * Прочитати список шрифтів із hershey/index.json.
  *
  * Читає весь файл як один JSON‑рядок (об’єкт верхнього рівня) ітерацією по
@@ -176,10 +190,14 @@ int fontreg_list (font_face_t **faces, size_t *count) {
                 arr = na;
             }
             memset (&arr[*count], 0, sizeof (arr[*count]));
-            strncpy (arr[*count].id, key, sizeof (arr[*count].id) - 1);
-            strncpy (arr[*count].name, name, sizeof (arr[*count].name) - 1);
-            snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
-            (*count)++;
+            copy_string (arr[*count].id, sizeof (arr[*count].id), key);
+            copy_string (arr[*count].name, sizeof (arr[*count].name), name);
+            int written = snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
+            if (written < 0 || (size_t)written >= sizeof (arr[*count].path)) {
+                LOGW ("шлях до шрифту занадто довгий: hershey/%s", file);
+            } else {
+                (*count)++;
+            }
         }
         free (file);
         free (name);
@@ -225,17 +243,14 @@ int fontreg_resolve (const char *query, font_face_t *out) {
     int found = 0;
     if (query && *query) {
         char q[96];
-        strncpy (q, query, sizeof (q) - 1);
-        q[sizeof (q) - 1] = '\0';
+        copy_string (q, sizeof (q), query);
         strlower (q);
         for (size_t i = 0; i < count; ++i) {
             char id[64];
-            strncpy (id, faces[i].id, sizeof (id) - 1);
-            id[sizeof (id) - 1] = '\0';
+            copy_string (id, sizeof (id), faces[i].id);
             strlower (id);
             char nm[96];
-            strncpy (nm, faces[i].name, sizeof (nm) - 1);
-            nm[sizeof (nm) - 1] = '\0';
+            copy_string (nm, sizeof (nm), faces[i].name);
             strlower (nm);
             if (strstr (id, q) || strstr (nm, q)) {
                 *out = faces[i];

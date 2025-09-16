@@ -345,9 +345,14 @@ int serial_guess_axidraw_port (char *out_path, size_t out_len) {
     int rc = -1;
     while ((e = readdir (d)) != NULL) {
         if (strncmp (e->d_name, "tty.usbmodem", 12) == 0) {
-            snprintf (out_path, out_len, "/dev/%s", e->d_name);
-            rc = 0;
-            break;
+            int written = snprintf (out_path, out_len, "/dev/%s", e->d_name);
+            if (written < 0 || (size_t)written >= out_len) {
+                LOGW ("шлях до tty занадто довгий: %s", e->d_name);
+                rc = -1;
+            } else {
+                rc = 0;
+                break;
+            }
         }
     }
     closedir (d);
