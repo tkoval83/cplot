@@ -34,7 +34,7 @@ typedef struct device_profile {
 
 static const device_profile_t k_device_profiles[] = {
     { "minikit2", 1, 160.0, 101.0, 254.0, 200.0 },
-    { "axidraw_v3", 1, 300.0, 220.0, 300.0, 250.0 },
+    { "axidraw_v3", 1, 300.0, 218.0, 381.0, 250.0 },
 };
 
 static int strings_equal_ci (const char *a, const char *b) {
