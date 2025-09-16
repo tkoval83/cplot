@@ -66,17 +66,30 @@ static device_action_t device_action_from_token (const char *token) {
     return DEV_NONE;
 }
 
-/**
- * Обробити позиційні аргументи підкоманди device, визначивши дію та зсуви jog.
- */
-static void parse_device_tokens (int argc, char *argv[], options_t *options) {
-    if (options->cmd != CMD_DEVICE)
-        return;
+typedef struct {
+    device_action_t action;
+    bool action_set;
+    double jog_dx_mm;
+    bool dx_set;
+    double jog_dy_mm;
+    bool dy_set;
+} device_parse_result_t;
 
-    if (options->device_action == DEV_NONE && optind < argc) {
-        device_action_t candidate = device_action_from_token (argv[optind]);
-        if (candidate != DEV_NONE)
-            options->device_action = candidate;
+/**
+ * Проаналізувати позиційні токени підкоманди device та повернути результат.
+ */
+static device_parse_result_t parse_device_tokens (
+    int argc, char *argv[], int current_optind, device_action_t initial_action) {
+    device_parse_result_t result
+        = { .action = initial_action, .action_set = (initial_action != DEV_NONE), .jog_dx_mm = 0.0,
+            .dx_set = false, .jog_dy_mm = 0.0, .dy_set = false };
+
+    if (!result.action_set && current_optind < argc) {
+        device_action_t candidate = device_action_from_token (argv[current_optind]);
+        if (candidate != DEV_NONE) {
+            result.action = candidate;
+            result.action_set = true;
+        }
     }
 
     for (int i = 1; i < argc; ++i) {
@@ -85,25 +98,26 @@ static void parse_device_tokens (int argc, char *argv[], options_t *options) {
             continue;
         if (token[0] == '-') {
             if (strcmp (token, "--dx") == 0 && i + 1 < argc) {
-                options->jog_dx_mm = atof (argv[i + 1]);
-                LOGD ("jog dx=%.3f мм", options->jog_dx_mm);
+                result.jog_dx_mm = atof (argv[i + 1]);
+                result.dx_set = true;
                 ++i;
             } else if (strcmp (token, "--dy") == 0 && i + 1 < argc) {
-                options->jog_dy_mm = atof (argv[i + 1]);
-                LOGD ("jog dy=%.3f мм", options->jog_dy_mm);
+                result.jog_dy_mm = atof (argv[i + 1]);
+                result.dy_set = true;
                 ++i;
             }
             continue;
         }
-        if (options->device_action == DEV_NONE) {
+        if (!result.action_set) {
             device_action_t candidate = device_action_from_token (token);
-            if (candidate != DEV_NONE)
-                options->device_action = candidate;
+            if (candidate != DEV_NONE) {
+                result.action = candidate;
+                result.action_set = true;
+            }
         }
     }
 
-    if (options->device_action != DEV_NONE)
-        LOGD ("device action: %d", options->device_action);
+    return result;
 }
 
 /**
@@ -482,7 +496,22 @@ void options_parser (int argc, char *argv[], options_t *options) {
     /* Handle device positional action (e.g., up, down, jog). On some libc
      * (e.g., macOS), getopt_long stops at the first non-option token, so make a
      * robust pass to capture positional action and any dx/dy that follow it. */
-    parse_device_tokens (argc, argv, options);
+    if (options->cmd == CMD_DEVICE) {
+        device_parse_result_t parsed
+            = parse_device_tokens (argc, argv, optind, options->device_action);
+        if (parsed.action_set) {
+            options->device_action = parsed.action;
+            LOGD ("device action: %d", options->device_action);
+        }
+        if (parsed.dx_set) {
+            options->jog_dx_mm = parsed.jog_dx_mm;
+            LOGD ("jog dx=%.3f мм", options->jog_dx_mm);
+        }
+        if (parsed.dy_set) {
+            options->jog_dy_mm = parsed.jog_dy_mm;
+            LOGD ("jog dy=%.3f мм", options->jog_dy_mm);
+        }
+    }
 
     // Отримати ім'я файлу або використати stdin; тільки для команд, що беруть файл
     if (options->cmd == CMD_PRINT || options->cmd == CMD_NONE) {
