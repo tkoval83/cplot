@@ -34,10 +34,9 @@ static cmd_t parse_command_name (const char *name) {
     static const struct {
         const char *name;
         cmd_t cmd;
-    } k_cmd_map[] = {
-        { "print", CMD_PRINT },   { "device", CMD_DEVICE }, { "fonts", CMD_FONTS },
-        { "config", CMD_CONFIG }, { "version", CMD_VERSION }, { "sysinfo", CMD_SYSINFO }
-    };
+    } k_cmd_map[]
+        = { { "print", CMD_PRINT },   { "device", CMD_DEVICE },   { "fonts", CMD_FONTS },
+            { "config", CMD_CONFIG }, { "version", CMD_VERSION }, { "sysinfo", CMD_SYSINFO } };
     for (size_t i = 0; i < sizeof (k_cmd_map) / sizeof (k_cmd_map[0]); ++i) {
         if (strcmp (name, k_cmd_map[i].name) == 0)
             return k_cmd_map[i].cmd;
@@ -52,13 +51,13 @@ static device_action_t device_action_from_token (const char *token) {
     static const struct {
         const char *token;
         device_action_t action;
-    } k_device_map[] = {
-        { "list", DEV_LIST },         { "up", DEV_UP },           { "down", DEV_DOWN },
-        { "toggle", DEV_TOGGLE },     { "motors-on", DEV_MOTORS_ON },
-        { "motors-off", DEV_MOTORS_OFF }, { "home", DEV_HOME },   { "jog", DEV_JOG },
-        { "version", DEV_VERSION },   { "status", DEV_STATUS },   { "position", DEV_POSITION },
-        { "reset", DEV_RESET },       { "reboot", DEV_REBOOT }
-    };
+    } k_device_map[] = { { "list", DEV_LIST },           { "up", DEV_UP },
+                         { "down", DEV_DOWN },           { "toggle", DEV_TOGGLE },
+                         { "motors-on", DEV_MOTORS_ON }, { "motors-off", DEV_MOTORS_OFF },
+                         { "home", DEV_HOME },           { "jog", DEV_JOG },
+                         { "version", DEV_VERSION },     { "status", DEV_STATUS },
+                         { "position", DEV_POSITION },   { "reset", DEV_RESET },
+                         { "reboot", DEV_REBOOT } };
     for (size_t i = 0; i < sizeof (k_device_map) / sizeof (k_device_map[0]); ++i) {
         if (strcmp (token, k_device_map[i].token) == 0)
             return k_device_map[i].action;
@@ -78,11 +77,14 @@ typedef struct {
 /**
  * Проаналізувати позиційні токени підкоманди device та повернути результат.
  */
-static device_parse_result_t parse_device_tokens (
-    int argc, char *argv[], int current_optind, device_action_t initial_action) {
-    device_parse_result_t result
-        = { .action = initial_action, .action_set = (initial_action != DEV_NONE), .jog_dx_mm = 0.0,
-            .dx_set = false, .jog_dy_mm = 0.0, .dy_set = false };
+static device_parse_result_t
+parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t initial_action) {
+    device_parse_result_t result = { .action = initial_action,
+                                     .action_set = (initial_action != DEV_NONE),
+                                     .jog_dx_mm = 0.0,
+                                     .dx_set = false,
+                                     .jog_dy_mm = 0.0,
+                                     .dy_set = false };
 
     if (!result.action_set && current_optind < argc) {
         device_action_t candidate = device_action_from_token (argv[current_optind]);

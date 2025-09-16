@@ -126,18 +126,18 @@ char *json_get_string (const char *json, const char *key, size_t *out_len) {
     if (!buf)
         return NULL;
 
-#define ENSURE_CAP(extra)                                                                                 \
-    do {                                                                                                   \
-        if (len + (extra) >= cap) {                                                                        \
-            size_t new_cap = cap ? cap : 64;                                                               \
-            while (len + (extra) >= new_cap)                                                               \
-                new_cap *= 2;                                                                              \
-            char *tmp = (char *)realloc (buf, new_cap);                                                    \
-            if (!tmp)                                                                                      \
-                goto fail;                                                                                 \
-            buf = tmp;                                                                                     \
-            cap = new_cap;                                                                                 \
-        }                                                                                                  \
+#define ENSURE_CAP(extra)                                                                          \
+    do {                                                                                           \
+        if (len + (extra) >= cap) {                                                                \
+            size_t new_cap = cap ? cap : 64;                                                       \
+            while (len + (extra) >= new_cap)                                                       \
+                new_cap *= 2;                                                                      \
+            char *tmp = (char *)realloc (buf, new_cap);                                            \
+            if (!tmp)                                                                              \
+                goto fail;                                                                         \
+            buf = tmp;                                                                             \
+            cap = new_cap;                                                                         \
+        }                                                                                          \
     } while (0)
 
     while (*p) {

@@ -192,7 +192,8 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             memset (&arr[*count], 0, sizeof (arr[*count]));
             copy_string (arr[*count].id, sizeof (arr[*count].id), key);
             copy_string (arr[*count].name, sizeof (arr[*count].name), name);
-            int written = snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
+            int written
+                = snprintf (arr[*count].path, sizeof (arr[*count].path), "hershey/%s", file);
             if (written < 0 || (size_t)written >= sizeof (arr[*count].path)) {
                 LOGW ("шлях до шрифту занадто довгий: hershey/%s", file);
             } else {
