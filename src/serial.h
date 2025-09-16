@@ -32,7 +32,8 @@ typedef struct serial_port_s serial_port_t;
  * @param errlen       Розмір буфера помилки (0, якщо errbuf == NULL).
  * @return Вказівник на serial_port_t або NULL у разі помилки.
  */
-serial_port_t *serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size_t errlen);
+serial_port_t *
+serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size_t errlen);
 
 /** Закрити порт і звільнити ресурс. */
 void serial_close (serial_port_t *sp);
