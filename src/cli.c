@@ -42,7 +42,8 @@ int cli_dispatch (const options_t *options) {
         return cmd_fonts_execute (verbose);
     case CMD_CONFIG: {
         config_t cfg; /* TODO: load real config */
-        config_factory_defaults (&cfg);
+        const char *model = options->device_model[0] ? options->device_model : CONFIG_DEFAULT_MODEL;
+        config_factory_defaults (&cfg, model);
         const char *pairs = options->config_set_pairs[0] ? options->config_set_pairs : NULL;
         return cmd_config_execute (options->config_action, pairs, &cfg, verbose);
     }

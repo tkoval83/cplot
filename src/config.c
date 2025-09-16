@@ -4,6 +4,7 @@
  */
 #include "config.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,48 @@
 #define CONFIG_VERSION 1
 
 #include "log.h"
+
+typedef struct device_profile {
+    const char *model;
+    int orientation;
+    double paper_w_mm;
+    double paper_h_mm;
+    double speed_mm_s;
+    double accel_mm_s2;
+} device_profile_t;
+
+static const device_profile_t k_device_profiles[] = {
+    { "minikit2", 1, 160.0, 101.0, 254.0, 200.0 },
+    { "axidraw_v3", 1, 300.0, 220.0, 300.0, 250.0 },
+};
+
+static int strings_equal_ci (const char *a, const char *b) {
+    if (!a || !b)
+        return 0;
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a;
+        unsigned char cb = (unsigned char)*b;
+        if (tolower (ca) != tolower (cb))
+            return 0;
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static const device_profile_t *profile_for_model (const char *device_model) {
+    if (device_model && *device_model) {
+        for (size_t i = 0; i < sizeof (k_device_profiles) / sizeof (k_device_profiles[0]); ++i) {
+            if (strings_equal_ci (device_model, k_device_profiles[i].model))
+                return &k_device_profiles[i];
+        }
+    }
+    for (size_t i = 0; i < sizeof (k_device_profiles) / sizeof (k_device_profiles[0]); ++i) {
+        if (strings_equal_ci (CONFIG_DEFAULT_MODEL, k_device_profiles[i].model))
+            return &k_device_profiles[i];
+    }
+    return &k_device_profiles[0];
+}
 
 /**
  * Перевірити, чи існує каталог за заданим шляхом.
@@ -75,28 +118,37 @@ static int mkdir_p (const char *path) {
  * @param c Вказівник на конфігурацію для ініціалізації (безпечно передавати NULL — нічого не
  * робить).
  */
-void config_factory_defaults (config_t *c) {
+int config_factory_defaults (config_t *c, const char *device_model) {
     if (!c)
-        return;
+        return -1;
+    const char *model = (device_model && *device_model) ? device_model : CONFIG_DEFAULT_MODEL;
+    const device_profile_t *profile = profile_for_model (model);
     memset (c, 0, sizeof (*c));
     c->version = CONFIG_VERSION;
-    c->orientation = 1; /* portrait */
+    c->orientation = 1;
     c->paper_w_mm = 160.0;
     c->paper_h_mm = 101.0;
     c->margin_top_mm = 10.0;
     c->margin_right_mm = 10.0;
     c->margin_bottom_mm = 10.0;
     c->margin_left_mm = 10.0;
-    c->speed_mm_s = 254.0;  /* AxiDraw MiniKit 2 max speed */
-    c->accel_mm_s2 = 200.0; /* placeholder */
-    /* Pen defaults (per spec recommendations) */
-    c->pen_down_pos = 40;
+    c->speed_mm_s = 254.0;
+    c->accel_mm_s2 = 200.0;
     c->pen_up_pos = 60;
-    c->pen_down_speed = 150;
+    c->pen_down_pos = 40;
     c->pen_up_speed = 150;
-    c->pen_down_delay_ms = 0;
+    c->pen_down_speed = 150;
     c->pen_up_delay_ms = 0;
-    c->servo_timeout_s = 60; /* auto power-off */
+    c->pen_down_delay_ms = 0;
+    c->servo_timeout_s = 60;
+    if (profile) {
+        c->orientation = profile->orientation;
+        c->paper_w_mm = profile->paper_w_mm;
+        c->paper_h_mm = profile->paper_h_mm;
+        c->speed_mm_s = profile->speed_mm_s;
+        c->accel_mm_s2 = profile->accel_mm_s2;
+    }
+    return 0;
 }
 
 /**
@@ -313,7 +365,7 @@ int config_validate (const config_t *c, char *err, size_t errlen) {
 int config_load (config_t *out) {
     if (!out)
         return -1;
-    config_factory_defaults (out);
+    config_factory_defaults (out, CONFIG_DEFAULT_MODEL);
     char path[512];
     if (config_get_path (path, sizeof (path)) != 0)
         return -2;
@@ -345,7 +397,7 @@ int config_load (config_t *out) {
     /* Validate */
     if (config_validate (out, NULL, 0) != 0) {
         /* If invalid, fall back to factory */
-        config_factory_defaults (out);
+        config_factory_defaults (out, CONFIG_DEFAULT_MODEL);
         LOGW ("конфігурацію визнано невалідною — застосовано значення за замовчуванням");
     }
     return 0;
@@ -412,6 +464,6 @@ int config_save (const config_t *cfg) {
  */
 int config_reset (void) {
     config_t c;
-    config_factory_defaults (&c);
+    config_factory_defaults (&c, CONFIG_DEFAULT_MODEL);
     return config_save (&c);
 }

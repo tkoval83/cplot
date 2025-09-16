@@ -87,7 +87,7 @@ void help (void) {
     size_t nkeys = 0;
     const cli_config_desc_t *keys = argdefs_config_keys (&nkeys);
     config_t def;
-    config_factory_defaults (&def);
+    config_factory_defaults (&def, CONFIG_DEFAULT_MODEL);
     for (size_t i = 0; i < nkeys; ++i) {
         const cli_config_desc_t *d = &keys[i];
         fprintf (stdout, "  %-16s", d->key);

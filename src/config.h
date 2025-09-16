@@ -36,11 +36,18 @@ typedef struct {
     int servo_timeout_s;   /**< 0 вимикає авто-вимкнення; типово 60 */
 } config_t;
 
+/** Типова модель пристрою, яку використовує CLI. */
+#define CONFIG_DEFAULT_MODEL "minikit2"
+
 /**
- * Заповнити конфігурацію заводськими налаштуваннями для MiniKit2.
- * @param c Структура конфігурації для ініціалізації (не NULL).
+ * Заповнити конфігурацію заводськими налаштуваннями для заданої моделі AxiDraw.
+ *
+ * @param c            Структура конфігурації для ініціалізації (не NULL).
+ * @param device_model Ідентифікатор моделі (напр., "minikit2", "axidraw_v3"). NULL або порожній
+ *                     рядок означає використати CONFIG_DEFAULT_MODEL.
+ * @return 0 при успіху; -1 при некоректних аргументах.
  */
-void config_factory_defaults (config_t *c);
+int config_factory_defaults (config_t *c, const char *device_model);
 
 /**
  * Завантажити активну конфігурацію з диска, якщо є; інакше застосувати заводські значення.
