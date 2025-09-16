@@ -25,7 +25,6 @@
 
 typedef struct device_profile {
     const char *model;
-    int orientation;
     double paper_w_mm;
     double paper_h_mm;
     double speed_mm_s;
@@ -33,8 +32,8 @@ typedef struct device_profile {
 } device_profile_t;
 
 static const device_profile_t k_device_profiles[] = {
-    { "minikit2", 1, 160.0, 101.0, 254.0, 200.0 },
-    { "axidraw_v3", 1, 300.0, 218.0, 381.0, 250.0 },
+    { "minikit2", 160.0, 101.0, 254.0, 200.0 },
+    { "axidraw_v3", 300.0, 218.0, 381.0, 250.0 },
 };
 
 static int strings_equal_ci (const char *a, const char *b) {
@@ -142,7 +141,6 @@ int config_factory_defaults (config_t *c, const char *device_model) {
     c->pen_down_delay_ms = 0;
     c->servo_timeout_s = 60;
     if (profile) {
-        c->orientation = profile->orientation;
         c->paper_w_mm = profile->paper_w_mm;
         c->paper_h_mm = profile->paper_h_mm;
         c->speed_mm_s = profile->speed_mm_s;
