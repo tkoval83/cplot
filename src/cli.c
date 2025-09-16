@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "args.h"
 #include "cli.h"
@@ -51,67 +52,41 @@ int cli_dispatch (const options_t *options) {
             options->device_model[0] ? options->device_model : NULL, options->jog_dx_mm,
             options->jog_dy_mm, verbose);
     case CMD_PRINT: {
-        /* Зчитати вхідний файл або stdin у пам'ять */
+        /* Приймаємо вхідні дані ТІЛЬКИ зі stdin (конвеєр/редирект). */
+        if (options->file_name[0]
+            && !(options->file_name[0] == '-' && options->file_name[1] == '\0')) {
+            LOGE ("Вхідні дані приймаються лише через stdin (конвеєр або редирект). Читання з "
+                  "файлу не підтримується.");
+            return 2;
+        }
+        if (isatty (fileno (stdin))) {
+            LOGE ("Немає даних у stdin. Передайте дані через конвеєр або редирект (наприклад: echo "
+                  "'...' | cplot print --preview -)");
+            return 2;
+        }
+
+        /* Зчитати stdin у пам'ять (розширюваний буфер) */
         uint8_t *buf = NULL;
         size_t len = 0;
-        FILE *fp = NULL;
-        if (options->file_name[0] == '-' && options->file_name[1] == '\0') {
-            fp = stdin;
-        } else {
-            fp = fopen (options->file_name, "rb");
-            if (!fp) {
-                LOGE ("Не вдалося відкрити вхідний файл");
-                return 1;
-            }
+        size_t cap = 64 * 1024;
+        buf = (uint8_t *)malloc (cap);
+        if (!buf) {
+            LOGE ("Недостатньо пам'яті для читання даних");
+            return 1;
         }
-        /* прочитати весь вміст */
-        if (fp == stdin) {
-            /* читання зі stdin у розширюваний буфер */
-            size_t cap = 64 * 1024;
-            buf = (uint8_t *)malloc (cap);
-            if (!buf) {
-                if (fp != stdin)
-                    fclose (fp);
-                LOGE ("Недостатньо пам'яті для читання даних");
-                return 1;
-            }
-            size_t n;
-            while ((n = fread (buf + len, 1, cap - len, fp)) > 0) {
-                len += n;
-                if (len == cap) {
-                    cap *= 2;
-                    uint8_t *nb = (uint8_t *)realloc (buf, cap);
-                    if (!nb) {
-                        free (buf);
-                        if (fp != stdin)
-                            fclose (fp);
-                        LOGE ("Недостатньо пам'яті для читання даних");
-                        return 1;
-                    }
-                    buf = nb;
+        size_t n;
+        while ((n = fread (buf + len, 1, cap - len, stdin)) > 0) {
+            len += n;
+            if (len == cap) {
+                cap *= 2;
+                uint8_t *nb = (uint8_t *)realloc (buf, cap);
+                if (!nb) {
+                    free (buf);
+                    LOGE ("Недостатньо пам'яті для читання даних");
+                    return 1;
                 }
+                buf = nb;
             }
-        } else {
-            if (fseek (fp, 0, SEEK_END) != 0) {
-                fclose (fp);
-                LOGE ("Не вдалося визначити розмір файлу");
-                return 1;
-            }
-            long sz = ftell (fp);
-            if (sz < 0) {
-                fclose (fp);
-                LOGE ("Не вдалося визначити розмір файлу");
-                return 1;
-            }
-            rewind (fp);
-            buf = (uint8_t *)malloc ((size_t)sz);
-            if (!buf) {
-                fclose (fp);
-                LOGE ("Недостатньо пам'яті для читання файлу");
-                return 1;
-            }
-            len = fread (buf, 1, (size_t)sz, fp);
-            fclose (fp);
         }
 
         int rc;
