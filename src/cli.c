@@ -49,7 +49,7 @@ int cli_dispatch (const options_t *options) {
     }
     case CMD_DEVICE:
         return cmd_device_execute (
-            options->device_action, options->device_port[0] ? options->device_port : NULL,
+            &options->device_action, options->device_port[0] ? options->device_port : NULL,
             options->device_model[0] ? options->device_model : NULL, options->jog_dx_mm,
             options->jog_dy_mm, verbose);
     case CMD_PRINT: {

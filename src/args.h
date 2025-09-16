@@ -34,22 +34,54 @@ typedef enum {
 /// Опція орієнтації сторінки.
 typedef enum { ORIENT_AUTO = 0, ORIENT_PORTRAIT, ORIENT_LANDSCAPE } orientation_t;
 
-/// Дія пристрою для підкоманди `device`.
+/**
+ * @enum device_action_kind_t
+ * @brief Категорії верхнього рівня для підкоманди `device`.
+ *
+ * Визначає базову гілку логіки, яку буде виконано у cmd_device_execute().
+ */
 typedef enum {
-    DEV_NONE = 0,
-    DEV_LIST,
-    DEV_UP,
-    DEV_DOWN,
-    DEV_TOGGLE,
-    DEV_MOTORS_ON,
-    DEV_MOTORS_OFF,
-    DEV_HOME,
-    DEV_JOG,
-    DEV_VERSION,
-    DEV_STATUS,
-    DEV_POSITION,
-    DEV_RESET,
-    DEV_REBOOT
+    DEVICE_ACTION_NONE = 0,
+    DEVICE_ACTION_LIST,
+    DEVICE_ACTION_PEN,
+    DEVICE_ACTION_MOTORS,
+    DEVICE_ACTION_HOME,
+    DEVICE_ACTION_JOG,
+    DEVICE_ACTION_VERSION,
+    DEVICE_ACTION_STATUS,
+    DEVICE_ACTION_POSITION,
+    DEVICE_ACTION_RESET,
+    DEVICE_ACTION_REBOOT
+} device_action_kind_t;
+
+/**
+ * @enum device_pen_action_t
+ * @brief Деталізація дій для категорії DEVICE_ACTION_PEN.
+ */
+typedef enum {
+    DEVICE_PEN_NONE = 0,
+    DEVICE_PEN_UP,
+    DEVICE_PEN_DOWN,
+    DEVICE_PEN_TOGGLE
+} device_pen_action_t;
+
+/**
+ * @enum device_motor_action_t
+ * @brief Деталізація дій для категорії DEVICE_ACTION_MOTORS.
+ */
+typedef enum { DEVICE_MOTOR_NONE = 0, DEVICE_MOTOR_ON, DEVICE_MOTOR_OFF } device_motor_action_t;
+
+/**
+ * @struct device_action_t
+ * @brief Композитна дія пристрою з деталізацією для підкатегорій.
+ *
+ * Поле kind визначає гілку виконання, а pen/motor уточнюють поведінку для
+ * відповідних категорій. Для решти категорій ці уточнення ігноруються.
+ */
+typedef struct {
+    device_action_kind_t kind;   /**< базова категорія дії */
+    device_pen_action_t pen;     /**< уточнення для дій пера */
+    device_motor_action_t motor; /**< уточнення для дій моторів */
 } device_action_t;
 
 /// Дія конфігурації для підкоманди `config`.
@@ -155,7 +187,7 @@ struct options {
     char device_model[32];
 
     // Прапорці пристрою (підкоманда device)
-    device_action_t device_action;
+    device_action_t device_action; /**< обрана дія пристрою */
     char device_port[128];
     double jog_dx_mm;
     double jog_dy_mm;

@@ -25,6 +25,39 @@ static void copy_string (char *dst, size_t dst_size, const char *src) {
     dst[dst_size - 1] = '\0';
 }
 
+/// Утиліта для конструювання "порожньої" дії пристрою.
+static device_action_t device_action_make_none (void) {
+    device_action_t action
+        = { .kind = DEVICE_ACTION_NONE, .pen = DEVICE_PEN_NONE, .motor = DEVICE_MOTOR_NONE };
+    return action;
+}
+
+/// Утиліта для простих (без уточнень) дій пристрою.
+static device_action_t device_action_make_simple (device_action_kind_t kind) {
+    device_action_t action = device_action_make_none ();
+    action.kind = kind;
+    return action;
+}
+
+/// Утиліта для дій пера.
+static device_action_t device_action_make_pen (device_pen_action_t pen) {
+    device_action_t action = device_action_make_simple (DEVICE_ACTION_PEN);
+    action.pen = pen;
+    return action;
+}
+
+/// Утиліта для дій моторів.
+static device_action_t device_action_make_motor (device_motor_action_t motor) {
+    device_action_t action = device_action_make_simple (DEVICE_ACTION_MOTORS);
+    action.motor = motor;
+    return action;
+}
+
+/// Перевірити, що дія встановлена (не NONE).
+static bool device_action_is_set (const device_action_t *action) {
+    return action && action->kind != DEVICE_ACTION_NONE;
+}
+
 /**
  * Перетворити рядок підкоманди на відповідне значення cmd_t.
  */
@@ -47,22 +80,36 @@ static cmd_t parse_command_name (const char *name) {
 /** Відобразити рядок дії пристрою у device_action_t. */
 static device_action_t device_action_from_token (const char *token) {
     if (!token)
-        return DEV_NONE;
-    static const struct {
-        const char *token;
-        device_action_t action;
-    } k_device_map[] = { { "list", DEV_LIST },           { "up", DEV_UP },
-                         { "down", DEV_DOWN },           { "toggle", DEV_TOGGLE },
-                         { "motors-on", DEV_MOTORS_ON }, { "motors-off", DEV_MOTORS_OFF },
-                         { "home", DEV_HOME },           { "jog", DEV_JOG },
-                         { "version", DEV_VERSION },     { "status", DEV_STATUS },
-                         { "position", DEV_POSITION },   { "reset", DEV_RESET },
-                         { "reboot", DEV_REBOOT } };
-    for (size_t i = 0; i < sizeof (k_device_map) / sizeof (k_device_map[0]); ++i) {
-        if (strcmp (token, k_device_map[i].token) == 0)
-            return k_device_map[i].action;
-    }
-    return DEV_NONE;
+        return device_action_make_none ();
+
+    if (strcmp (token, "list") == 0)
+        return device_action_make_simple (DEVICE_ACTION_LIST);
+    if (strcmp (token, "up") == 0)
+        return device_action_make_pen (DEVICE_PEN_UP);
+    if (strcmp (token, "down") == 0)
+        return device_action_make_pen (DEVICE_PEN_DOWN);
+    if (strcmp (token, "toggle") == 0)
+        return device_action_make_pen (DEVICE_PEN_TOGGLE);
+    if (strcmp (token, "motors-on") == 0)
+        return device_action_make_motor (DEVICE_MOTOR_ON);
+    if (strcmp (token, "motors-off") == 0)
+        return device_action_make_motor (DEVICE_MOTOR_OFF);
+    if (strcmp (token, "home") == 0)
+        return device_action_make_simple (DEVICE_ACTION_HOME);
+    if (strcmp (token, "jog") == 0)
+        return device_action_make_simple (DEVICE_ACTION_JOG);
+    if (strcmp (token, "version") == 0)
+        return device_action_make_simple (DEVICE_ACTION_VERSION);
+    if (strcmp (token, "status") == 0)
+        return device_action_make_simple (DEVICE_ACTION_STATUS);
+    if (strcmp (token, "position") == 0)
+        return device_action_make_simple (DEVICE_ACTION_POSITION);
+    if (strcmp (token, "reset") == 0)
+        return device_action_make_simple (DEVICE_ACTION_RESET);
+    if (strcmp (token, "reboot") == 0)
+        return device_action_make_simple (DEVICE_ACTION_REBOOT);
+
+    return device_action_make_none ();
 }
 
 typedef struct {
@@ -80,7 +127,7 @@ typedef struct {
 static device_parse_result_t
 parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t initial_action) {
     device_parse_result_t result = { .action = initial_action,
-                                     .action_set = (initial_action != DEV_NONE),
+                                     .action_set = device_action_is_set (&initial_action),
                                      .jog_dx_mm = 0.0,
                                      .dx_set = false,
                                      .jog_dy_mm = 0.0,
@@ -88,7 +135,7 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
 
     if (!result.action_set && current_optind < argc) {
         device_action_t candidate = device_action_from_token (argv[current_optind]);
-        if (candidate != DEV_NONE) {
+        if (device_action_is_set (&candidate)) {
             result.action = candidate;
             result.action_set = true;
         }
@@ -112,7 +159,7 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
         }
         if (!result.action_set) {
             device_action_t candidate = device_action_from_token (token);
-            if (candidate != DEV_NONE) {
+            if (device_action_is_set (&candidate)) {
                 result.action = candidate;
                 result.action_set = true;
             }
@@ -147,7 +194,7 @@ static void set_default_options (options_t *options) {
     options->verbose = false;
     options->font_family[0] = '\0';
     options->device_model[0] = '\0';
-    options->device_action = DEV_NONE;
+    options->device_action = device_action_make_none ();
     options->device_port[0] = '\0';
     options->jog_dx_mm = 0.0;
     options->jog_dy_mm = 0.0;
@@ -457,7 +504,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
             LOGD ("детальний вивід (--verbose)");
             break;
         case ARG_LIST:
-            options->device_action = DEV_LIST;
+            options->device_action = device_action_make_simple (DEVICE_ACTION_LIST);
             LOGD ("device: --list");
             break;
         case ARG_PORT:
@@ -503,7 +550,9 @@ void options_parser (int argc, char *argv[], options_t *options) {
             = parse_device_tokens (argc, argv, optind, options->device_action);
         if (parsed.action_set) {
             options->device_action = parsed.action;
-            LOGD ("device action: %d", options->device_action);
+            LOGD (
+                "device action: kind=%d pen=%d motor=%d", (int)options->device_action.kind,
+                (int)options->device_action.pen, (int)options->device_action.motor);
         }
         if (parsed.dx_set) {
             options->jog_dx_mm = parsed.jog_dx_mm;

@@ -216,44 +216,58 @@ cmd_result_t cmd_config_execute (
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_execute (
-    int action,
+    const device_action_t *action,
     const char *port,
     const char *model,
     double jog_dx_mm,
     double jog_dy_mm,
     verbose_level_t verbose) {
-    switch (action) {
-    case 0:
+    if (!action || action->kind == DEVICE_ACTION_NONE) {
         LOGW ("Не вказано дію для пристрою");
         return 2;
-    case 1: /* LIST */
+    }
+
+    switch (action->kind) {
+    case DEVICE_ACTION_LIST:
         return cmd_device_list (model, verbose);
-    case 2: /* UP */
-        return cmd_device_pen_up (port, model, verbose);
-    case 3: /* DOWN */
-        return cmd_device_pen_down (port, model, verbose);
-    case 4: /* TOGGLE */
-        return cmd_device_pen_toggle (port, model, verbose);
-    case 5: /* MOTORS_ON */
-        return cmd_device_motors_on (port, model, verbose);
-    case 6: /* MOTORS_OFF */
-        return cmd_device_motors_off (port, model, verbose);
-    case 7: /* HOME */
+    case DEVICE_ACTION_PEN:
+        switch (action->pen) {
+        case DEVICE_PEN_UP:
+            return cmd_device_pen_up (port, model, verbose);
+        case DEVICE_PEN_DOWN:
+            return cmd_device_pen_down (port, model, verbose);
+        case DEVICE_PEN_TOGGLE:
+            return cmd_device_pen_toggle (port, model, verbose);
+        default:
+            LOGW ("Невідома дія пера");
+            return 2;
+        }
+    case DEVICE_ACTION_MOTORS:
+        switch (action->motor) {
+        case DEVICE_MOTOR_ON:
+            return cmd_device_motors_on (port, model, verbose);
+        case DEVICE_MOTOR_OFF:
+            return cmd_device_motors_off (port, model, verbose);
+        default:
+            LOGW ("Невідома дія моторів");
+            return 2;
+        }
+    case DEVICE_ACTION_HOME:
         return cmd_device_home (port, model, verbose);
-    case 8: /* JOG */
+    case DEVICE_ACTION_JOG:
         return cmd_device_jog (port, model, jog_dx_mm, jog_dy_mm, verbose);
-    case 9: /* VERSION */
+    case DEVICE_ACTION_VERSION:
         return cmd_device_version (port, model, verbose);
-    case 10: /* STATUS */
+    case DEVICE_ACTION_STATUS:
         return cmd_device_status (port, model, verbose);
-    case 11: /* POSITION */
+    case DEVICE_ACTION_POSITION:
         return cmd_device_position (port, model, verbose);
-    case 12: /* RESET */
+    case DEVICE_ACTION_RESET:
         return cmd_device_reset (port, model, verbose);
-    case 13: /* REBOOT */
+    case DEVICE_ACTION_REBOOT:
         return cmd_device_reboot (port, model, verbose);
     default:
-        LOGW ("Невідома дія для пристрою");
+        LOGW ("Невідома категорія дій пристрою");
         return 2;
     }
 }

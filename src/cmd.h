@@ -5,6 +5,7 @@
 #ifndef CPLOT_CMD_H
 #define CPLOT_CMD_H
 
+#include "args.h"
 #include "config.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -170,7 +171,7 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, verbose
 /**
  * Операції над пристроєм (list/jog/pen/...)
  *
- * @param action   Дія пристрою (див. device_action_t у args.h).
+ * @param action   Дія пристрою (див. device_action_t у args.h; не NULL).
  * @param port     Шлях до серійного порту або NULL для автопошуку.
  * @param model    Ідентифікатор моделі або NULL для типової.
  * @param jog_dx_mm Зсув по X у мм для дії jog.
@@ -179,7 +180,7 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, verbose
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_execute (
-    int action,
+    const device_action_t *action,
     const char *port,
     const char *model,
     double jog_dx_mm,
