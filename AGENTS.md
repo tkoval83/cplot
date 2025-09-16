@@ -40,6 +40,13 @@ This file gives repo‑specific guidance to AI agents and contributors. It appli
 - Language standard: GNU99, with strict warnings and stack protection (see `Makefile`).
 - Keep changes minimal and consistent with existing style; prefer small, focused diffs.
 
+### Pre‑commit checklist (обов’язково)
+- Документація: усі публічні та внутрішні API мають бути задокументовані в `.h` і `.c` (Doxygen‑стиль, див. нижче).
+- Форматування: запустіть `make fmt` і переконайтеся, що дифи лише за суттю.
+- Якість збірки: `make -j` без попереджень (див. Portability & Quality).
+- README/docs: оновіть опис і приклади, якщо зміни впливають на CLI чи публічні API.
+- Пам’ять/валідність (за можливості): прогон `make valgrind` без витоків/помилок.
+
 ### Документація та коментарі (обов'язково)
 - Усі публічні та внутрішні функції МАЮТЬ бути задокументовані як у заголовках (`.h`), так і у реалізаціях (`.c`).
 - Стиль документації — Doxygen: короткий опис, далі теги `@param` для кожного параметра та `@return` для значень, за потреби `@note`, `@warning`.
