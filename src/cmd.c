@@ -612,6 +612,8 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         return 1;
     }
 
+    axistate_enable_auto_print (true);
+
     axidraw_device_t dev;
     axidraw_device_init (&dev);
     bool connected = false;
@@ -924,6 +926,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         axistate_update ("disconnect", "disconnect", 0, 0, NULL);
     }
     axidraw_device_lock_release (lock_fd);
+    axistate_enable_auto_print (false);
     LOGI ("Інтерактивну сесію завершено");
     return 0;
 }

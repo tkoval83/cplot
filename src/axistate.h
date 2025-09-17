@@ -33,6 +33,7 @@ void axistate_update (
     int wait_rc,
     const ebb_status_snapshot_t *snapshot);
 bool axistate_get (axistate_t *out);
+void axistate_enable_auto_print (bool enable);
 
 #ifdef __cplusplus
 }
