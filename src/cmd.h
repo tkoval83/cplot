@@ -193,8 +193,8 @@ cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose);
 /**
  * Перелічити доступні порти.
  *
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose);
@@ -202,8 +202,8 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose);
  * Підняти перо.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_pen_up (const char *port, const char *model, verbose_level_t verbose);
@@ -211,8 +211,8 @@ cmd_result_t cmd_device_pen_up (const char *port, const char *model, verbose_lev
  * Опустити перо.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_pen_down (const char *port, const char *model, verbose_level_t verbose);
@@ -220,8 +220,8 @@ cmd_result_t cmd_device_pen_down (const char *port, const char *model, verbose_l
  * Перемкнути стан пера.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_pen_toggle (const char *port, const char *model, verbose_level_t verbose);
@@ -229,8 +229,8 @@ cmd_result_t cmd_device_pen_toggle (const char *port, const char *model, verbose
  * Увімкнути мотори.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_motors_on (const char *port, const char *model, verbose_level_t verbose);
@@ -238,17 +238,17 @@ cmd_result_t cmd_device_motors_on (const char *port, const char *model, verbose_
  * Вимкнути мотори.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose_level_t verbose);
 /**
  * Поїхати у home.
  *
- * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param port     Шлях до серійного порту або NULL для автопошуку.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_home (const char *port, const char *model, verbose_level_t verbose);
@@ -256,10 +256,10 @@ cmd_result_t cmd_device_home (const char *port, const char *model, verbose_level
  * Ручний зсув (jog).
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param dx_mm   Зсув по X, мм.
- * @param dy_mm   Зсув по Y, мм.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param dx_mm    Зсув по X, мм.
+ * @param dy_mm    Зсув по Y, мм.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_jog (
@@ -268,8 +268,8 @@ cmd_result_t cmd_device_jog (
  * Запит версії прошивки пристрою.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_version (const char *port, const char *model, verbose_level_t verbose);
@@ -277,8 +277,8 @@ cmd_result_t cmd_device_version (const char *port, const char *model, verbose_le
  * Запит статусу пристрою.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_status (const char *port, const char *model, verbose_level_t verbose);
@@ -286,8 +286,8 @@ cmd_result_t cmd_device_status (const char *port, const char *model, verbose_lev
  * Запит позиції координат.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_position (const char *port, const char *model, verbose_level_t verbose);
@@ -295,17 +295,17 @@ cmd_result_t cmd_device_position (const char *port, const char *model, verbose_l
  * Скидання контролера.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_reset (const char *port, const char *model, verbose_level_t verbose);
 /**
  * Перезавантаження контролера.
  *
- * @param port    Шлях до серійного порту або NULL для автопошуку.
- * @param model   Ідентифікатор моделі або NULL для типової.
- * @param verbose Рівень деталізації логів.
+ * @param port     Шлях до серійного порту або NULL для автопошуку.
+ * @param model    Ідентифікатор моделі або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_reboot (const char *port, const char *model, verbose_level_t verbose);

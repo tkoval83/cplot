@@ -515,3 +515,43 @@ int ebb_collect_status (serial_port_t *sp, ebb_status_snapshot_t *snapshot, int 
 
     return 0;
 }
+
+/**
+ * @brief Реалізація команди SC (Stepper/Servo configure).
+ *
+ * @param sp         Відкритий послідовний порт.
+ * @param param_id   Ідентифікатор параметра (0..255).
+ * @param value      Значення параметра (0..65535).
+ * @param timeout_ms Тайм-аут очікування відповіді OK.
+ * @return 0 при успіху; -1 при помилці або некоректних аргументах.
+ */
+int ebb_configure_mode (serial_port_t *sp, int param_id, int value, int timeout_ms) {
+    if (!sp)
+        return -1;
+    if (param_id < 0 || param_id > 255) {
+        LOGE ("Некоректний параметр SC: %d", param_id);
+        return -1;
+    }
+    if (value < 0 || value > 65535) {
+        LOGE ("Некоректне значення SC: %d", value);
+        return -1;
+    }
+    return ebb_send_command (sp, timeout_ms, "SC,%d,%d", param_id, value);
+}
+
+/**
+ * @brief Реалізація команди SR (servo power timeout).
+ *
+ * @param sp             Відкритий послідовний порт.
+ * @param timeout_ms     Тайм-аут у мілісекундах (0 → вимкнути авто-відключення).
+ * @param power_state    -1 → не змінювати; 0 → вимкнути; 1 → увімкнути живлення сервоприводу.
+ * @param cmd_timeout_ms Тайм-аут очікування відповіді OK.
+ * @return 0 при успіху; -1 при помилці/некоректних аргументах.
+ */
+int ebb_set_servo_power_timeout (serial_port_t *sp, uint32_t timeout_ms, int power_state, int cmd_timeout_ms) {
+    if (!sp)
+        return -1;
+    if (power_state == 0 || power_state == 1)
+        return ebb_send_command (sp, cmd_timeout_ms, "SR,%u,%d", timeout_ms, power_state);
+    return ebb_send_command (sp, cmd_timeout_ms, "SR,%u", timeout_ms);
+}

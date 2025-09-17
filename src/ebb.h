@@ -246,6 +246,28 @@ int ebb_query_version (serial_port_t *sp, char *version_buf, size_t version_len,
  */
 int ebb_collect_status (serial_port_t *sp, ebb_status_snapshot_t *snapshot, int timeout_ms);
 
+/**
+ * @brief Налаштувати параметр режиму (команда SC).
+ *
+ * @param sp          Відкритий послідовний порт.
+ * @param param_id    Ідентифікатор параметра (0..255).
+ * @param value       Значення параметра (0..65535).
+ * @param timeout_ms  Тайм-аут очікування відповіді.
+ * @return 0 при успіху; -1 при помилці або хибних аргументах.
+ */
+int ebb_configure_mode (serial_port_t *sp, int param_id, int value, int timeout_ms);
+
+/**
+ * @brief Встановити тайм-аут живлення сервоприводу (команда SR).
+ *
+ * @param sp          Відкритий послідовний порт.
+ * @param timeout_ms  Тайм-аут авто-вимкнення сервоприводу у мс.
+ * @param power_state -1, щоб не змінювати стан живлення; 0 → вимкнути; 1 → увімкнути.
+ * @param cmd_timeout_ms Тайм-аут очікування відповіді на команду.
+ * @return 0 при успіху; -1 при помилці або хибних аргументах.
+ */
+int ebb_set_servo_power_timeout (serial_port_t *sp, uint32_t timeout_ms, int power_state, int cmd_timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif

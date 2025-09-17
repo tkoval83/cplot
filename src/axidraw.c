@@ -12,6 +12,10 @@
 #include <time.h>
 
 #define AXIDRAW_DEFAULT_FIFO_LIMIT 3
+#define AXIDRAW_DEFAULT_MIN_INTERVAL_MS 5.0
+#define AXIDRAW_SERVO_MIN 7500
+#define AXIDRAW_SERVO_MAX 28000
+#define AXIDRAW_SERVO_SPEED_SCALE 5
 
 #include "log.h"
 
@@ -45,6 +49,61 @@ static void axidraw_reset_runtime (axidraw_device_t *dev) {
     dev->pending_commands = 0;
 }
 
+static void axidraw_sync_settings (axidraw_device_t *dev);
+static int axidraw_require_connection (axidraw_device_t *dev);
+
+/**
+ * @brief Скинути структуру налаштувань до типового стану.
+ *
+ * @param settings Структура налаштувань для ініціалізації (не NULL).
+ */
+void axidraw_settings_reset (axidraw_settings_t *settings) {
+    if (!settings)
+        return;
+    memset (settings, 0, sizeof (*settings));
+    settings->min_cmd_interval_ms = AXIDRAW_DEFAULT_MIN_INTERVAL_MS;
+    settings->fifo_limit = AXIDRAW_DEFAULT_FIFO_LIMIT;
+    settings->pen_up_delay_ms = 0;
+    settings->pen_down_delay_ms = 0;
+    settings->pen_up_pos = -1;
+    settings->pen_down_pos = -1;
+    settings->pen_up_speed = -1;
+    settings->pen_down_speed = -1;
+    settings->servo_timeout_s = -1;
+    settings->speed_mm_s = 0.0;
+    settings->accel_mm_s2 = 0.0;
+}
+
+/**
+ * @brief Отримати останні застосовані налаштування.
+ *
+ * @param dev Пристрій AxiDraw.
+ * @return Вказівник на внутрішню структуру налаштувань або NULL.
+ */
+const axidraw_settings_t *axidraw_device_settings (const axidraw_device_t *dev) {
+    if (!dev)
+        return NULL;
+    return &dev->settings;
+}
+
+/**
+ * @brief Застосувати набір налаштувань на стороні хоста (rate/FIFO).
+ *
+ * Якщо пристрій уже підключено, додатково оновлює параметри через SC/SR-команди.
+ *
+ * @param dev      Пристрій.
+ * @param settings Нові налаштування (не NULL).
+ */
+void axidraw_apply_settings (axidraw_device_t *dev, const axidraw_settings_t *settings) {
+    if (!dev || !settings)
+        return;
+    dev->settings = *settings;
+    axidraw_set_rate_limit (dev, dev->settings.min_cmd_interval_ms);
+    axidraw_set_fifo_limit (dev, dev->settings.fifo_limit);
+    if (axidraw_device_is_connected (dev))
+        axidraw_sync_settings (dev);
+}
+
 /** Ініціалізувати структуру dev типовими значеннями. */
 void axidraw_device_init (axidraw_device_t *dev) {
     if (!dev)
@@ -52,8 +111,9 @@ void axidraw_device_init (axidraw_device_t *dev) {
     memset (dev, 0, sizeof (*dev));
     dev->baud = 9600;
     dev->timeout_ms = 5000;
-    dev->min_cmd_interval = 5.0;
-    dev->max_fifo_commands = AXIDRAW_DEFAULT_FIFO_LIMIT;
+    axidraw_settings_reset (&dev->settings);
+    dev->min_cmd_interval = dev->settings.min_cmd_interval_ms;
+    dev->max_fifo_commands = dev->settings.fifo_limit;
     axidraw_reset_runtime (dev);
     LOGD (
         "axidraw: init (baud=%d timeout=%d min_interval=%.1f)", dev->baud, dev->timeout_ms,
@@ -138,6 +198,7 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     dev->port = sp;
     dev->connected = true;
     axidraw_reset_runtime (dev);
+    axidraw_sync_settings (dev);
     LOGI ("axidraw: підключено через %s", dev->port_path);
     return 0;
 }
@@ -168,6 +229,7 @@ void axidraw_set_rate_limit (axidraw_device_t *dev, double min_interval_ms) {
     if (!dev)
         return;
     dev->min_cmd_interval = min_interval_ms >= 0.0 ? min_interval_ms : 0.0;
+    dev->settings.min_cmd_interval_ms = dev->min_cmd_interval;
     LOGI ("axidraw: мін. інтервал між командами %.2f мс", dev->min_cmd_interval);
 }
 
@@ -181,11 +243,47 @@ void axidraw_set_fifo_limit (axidraw_device_t *dev, size_t max_fifo_commands) {
     if (!dev)
         return;
     dev->max_fifo_commands = max_fifo_commands;
+    dev->settings.fifo_limit = max_fifo_commands;
     if (max_fifo_commands == 0) {
         LOGI ("axidraw: ліміт FIFO команд вимкнено");
     } else {
         LOGI ("axidraw: ліміт FIFO команд %zu", dev->max_fifo_commands);
     }
+}
+
+/**
+ * @brief Перетворити відсоткове положення у значення SC (одиниці 83.3 нс).
+ *
+ * @param percent Положення у відсотках (0..100).
+ * @return Значення в діапазоні [1,65535], яке можна передати у SC,4/SC,5.
+ */
+static int axidraw_percent_to_servo (int percent) {
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
+    long range = (long)AXIDRAW_SERVO_MAX - (long)AXIDRAW_SERVO_MIN;
+    long value = (long)AXIDRAW_SERVO_MIN + ((range * percent + 50L) / 100L);
+    if (value < 1)
+        value = 1;
+    if (value > 65535)
+        value = 65535;
+    return (int)value;
+}
+
+/**
+ * @brief Перетворити швидкість сервоприводу у значення SC,11/SC,12.
+ *
+ * @param speed_percent Швидкість у відсотках/с (очікуваний діапазон ≥ 0).
+ * @return Значення у межах 0..65535 (після масштабування).
+ */
+static int axidraw_speed_to_rate (int speed_percent) {
+    if (speed_percent < 0)
+        speed_percent = 0;
+    long value = (long)speed_percent * AXIDRAW_SERVO_SPEED_SCALE;
+    if (value > 65535)
+        value = 65535;
+    return (int)value;
 }
 
 /**
@@ -340,29 +438,93 @@ static void axidraw_mark_dispatched (axidraw_device_t *dev) {
 }
 
 /**
- * Обгортка для виклику команд ebb_*, що додає rate limiter та логування.
+ * @brief Синхронізувати налаштування з прошивкою EBB.
+ *
+ * Надсилає команди SC/SR для позицій пера, швидкостей та тайм-ауту сервоприводу.
+ * Вимагає активного підключення.
+ *
+ * @param dev Пристрій AxiDraw.
  */
-static int axidraw_exec (axidraw_device_t *dev, int (*fn) (serial_port_t *, int), int timeout) {
+static void axidraw_sync_settings (axidraw_device_t *dev) {
+    if (!dev)
+        return;
+    if (axidraw_require_connection (dev) != 0)
+        return;
+
+    const axidraw_settings_t *cfg = &dev->settings;
+
+    /* Завжди гарантуємо, що використовується сервопривід */
+    if (ebb_configure_mode (dev->port, 1, 1, dev->timeout_ms) != 0)
+        LOGW ("axidraw: не вдалося активувати сервопривід (SC,1,1)");
+
+    if (cfg->pen_up_pos >= 0) {
+        int up = axidraw_percent_to_servo (cfg->pen_up_pos);
+        if (ebb_configure_mode (dev->port, 4, up, dev->timeout_ms) != 0)
+            LOGW ("axidraw: не вдалося налаштувати позицію пера вгору (SC,4,%d)", up);
+        else
+            LOGD ("axidraw: позиція пера вгору %d%% → %d", cfg->pen_up_pos, up);
+    }
+
+    if (cfg->pen_down_pos >= 0) {
+        int down = axidraw_percent_to_servo (cfg->pen_down_pos);
+        if (ebb_configure_mode (dev->port, 5, down, dev->timeout_ms) != 0)
+            LOGW ("axidraw: не вдалося налаштувати позицію пера вниз (SC,5,%d)", down);
+        else
+            LOGD ("axidraw: позиція пера вниз %d%% → %d", cfg->pen_down_pos, down);
+    }
+
+    if (cfg->pen_up_speed >= 0) {
+        int up_speed = axidraw_speed_to_rate (cfg->pen_up_speed);
+        if (ebb_configure_mode (dev->port, 11, up_speed, dev->timeout_ms) != 0)
+            LOGW ("axidraw: не вдалося налаштувати швидкість підйому пера (SC,11,%d)", up_speed);
+    }
+
+    if (cfg->pen_down_speed >= 0) {
+        int down_speed = axidraw_speed_to_rate (cfg->pen_down_speed);
+        if (ebb_configure_mode (dev->port, 12, down_speed, dev->timeout_ms) != 0)
+            LOGW ("axidraw: не вдалося налаштувати швидкість опускання пера (SC,12,%d)", down_speed);
+    }
+
+    if (cfg->servo_timeout_s >= 0) {
+        uint64_t timeout_ms = (uint64_t)cfg->servo_timeout_s * 1000ULL;
+        if (timeout_ms > UINT32_MAX)
+            timeout_ms = UINT32_MAX;
+        if (ebb_set_servo_power_timeout (dev->port, (uint32_t)timeout_ms, 1, dev->timeout_ms) != 0)
+            LOGW ("axidraw: не вдалося налаштувати тайм-аут сервоприводу (SR,%llu)",
+                (unsigned long long)timeout_ms);
+    }
+}
+
+/**
+ * @brief Надіслати команду SP з урахуванням налаштувань затримки.
+ *
+ * @param dev    Структура пристрою.
+ * @param pen_up true → підняти перо; false → опустити.
+ * @return 0 при успіху; -1 при помилці/відсутності з’єднання.
+ */
+static int axidraw_exec_pen (axidraw_device_t *dev, bool pen_up) {
     if (axidraw_require_connection (dev) != 0)
         return -1;
     if (axidraw_wait_slot (dev) != 0)
         return -1;
-    LOGD ("axidraw: виконання команди (timeout=%d)", timeout);
-    int rc = fn (dev->port, timeout);
-    if (rc == 0)
+    int delay_ms = pen_up ? dev->settings.pen_up_delay_ms : dev->settings.pen_down_delay_ms;
+    if (delay_ms < 0)
+        delay_ms = 0;
+    LOGD ("axidraw: перо %s (затримка %d мс)", pen_up ? "вгору" : "вниз", delay_ms);
+    int rc = ebb_pen_set (dev->port, pen_up, delay_ms, -1, dev->timeout_ms);
+    if (rc == 0) {
         axidraw_mark_dispatched (dev);
+    } else {
+        LOGE ("axidraw: команда пера повернула помилку (%d)", rc);
+    }
     return rc;
 }
 
 /** Підняти перо (SP,1). */
-int axidraw_pen_up (axidraw_device_t *dev) {
-    return axidraw_exec (dev, ebb_pen_up, dev->timeout_ms);
-}
+int axidraw_pen_up (axidraw_device_t *dev) { return axidraw_exec_pen (dev, true); }
 
 /** Опустити перо (SP,0). */
-int axidraw_pen_down (axidraw_device_t *dev) {
-    return axidraw_exec (dev, ebb_pen_down, dev->timeout_ms);
-}
+int axidraw_pen_down (axidraw_device_t *dev) { return axidraw_exec_pen (dev, false); }
 
 /**
  * Допоміжний виклик для рухових команд з тривалістю та двома параметрами.
