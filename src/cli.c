@@ -33,9 +33,10 @@ int cli_dispatch (const options_t *options) {
 
     switch (options->cmd) {
     case CMD_NONE:
-        LOGW ("не вказано підкоманду — показ довідки");
-        usage ();
-        return 2;
+        LOGI ("Запуск інтерактивного режиму AxiDraw");
+        return cmd_device_shell (
+            options->device_port[0] ? options->device_port : NULL,
+            options->device_model[0] ? options->device_model : NULL, verbose);
     case CMD_VERSION:
         return cmd_version_execute (verbose);
     case CMD_FONTS:

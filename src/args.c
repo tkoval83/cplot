@@ -166,6 +166,9 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
         }
     }
 
+    if (!result.action_set)
+        result.action = device_action_make_simple (DEVICE_ACTION_SHELL);
+
     return result;
 }
 

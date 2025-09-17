@@ -7,10 +7,13 @@
 #include "fontreg.h"
 #include "help.h"
 #include "log.h"
+#include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include <glob.h>
@@ -72,6 +75,36 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
 
 /** Кількість ітерацій очікування стану спокою після керуючої команди. */
 #define AXIDRAW_IDLE_WAIT_ATTEMPTS 200
+
+/**
+ * @brief Попередити користувача про зайнятість пристрою іншою сесією.
+ */
+static void warn_device_busy (void) {
+    char holder[64] = "невідомий процес";
+    const char *lock_path = axidraw_device_lock_file ();
+    FILE *lf = fopen (lock_path, "r");
+    if (lf) {
+        if (fgets (holder, sizeof (holder), lf)) {
+            holder[strcspn (holder, "\r\n")] = '\0';
+            if (holder[0] == '\0')
+                snprintf (holder, sizeof (holder), "%s", "невідомий процес");
+        }
+        fclose (lf);
+    }
+    LOGW ("AxiDraw вже використовується (%s)", holder);
+}
+
+static bool parse_double_str (const char *s, double *out_value) {
+    if (!s || !*s || !out_value)
+        return false;
+    errno = 0;
+    char *endptr = NULL;
+    double value = strtod (s, &endptr);
+    if (errno != 0 || !endptr || *endptr != '\0' || !isfinite (value))
+        return false;
+    *out_value = value;
+    return true;
+}
 
 /**
  * @brief Перетворити переміщення у міліметрах у кроки двигунів.
@@ -157,18 +190,7 @@ static cmd_result_t with_axidraw_device (
     cmd_result_t status = 0;
     int lock_fd = -1;
     if (axidraw_device_lock_acquire (&lock_fd) != 0) {
-        char holder[64] = "невідомий процес";
-        const char *lock_path = axidraw_device_lock_file ();
-        FILE *lf = fopen (lock_path, "r");
-        if (lf) {
-            if (fgets (holder, sizeof (holder), lf)) {
-                holder[strcspn (holder, "\r\n")] = '\0';
-                if (holder[0] == '\0')
-                    snprintf (holder, sizeof (holder), "%s", "невідомий процес");
-            }
-            fclose (lf);
-        }
-        LOGW ("AxiDraw вже використовується (%s)", holder);
+        warn_device_busy ();
         return 1;
     }
 
@@ -442,6 +464,285 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
     return 0;
 }
 
+static void shell_print_help (void) {
+    fprintf (stdout, "Доступні команди:\n");
+    fprintf (stdout, "  help                 — показати це повідомлення\n");
+    fprintf (stdout, "  quit | exit          — завершити інтерактивну сесію\n");
+    fprintf (stdout, "  connect [PORT|auto]  — підключитися до пристрою (auto → спроба авто-пошуку)\n");
+    fprintf (stdout, "  disconnect           — розірвати з’єднання\n");
+    fprintf (stdout, "  model [NAME]         — показати або встановити модель (наприклад, minikit2)\n");
+    fprintf (stdout, "  list                 — перелік потенційних портів AxiDraw\n");
+    fprintf (stdout, "  pen up|down|toggle   — керування пером\n");
+    fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
+    fprintf (stdout, "  jog <dx> <dy>        — ручний зсув на dx/dy мм\n");
+    fprintf (stdout, "  home                 — повернутися у початкову позицію\n");
+    fprintf (stdout, "  status               — показати агрегований стан контролера\n");
+    fprintf (stdout, "  position             — показати поточну позицію\n");
+    fprintf (stdout, "  version              — показати версію прошивки контролера\n");
+    fprintf (stdout, "  reset                — підняти перо, очистити лічильники й вимкнути мотори\n");
+    fprintf (stdout, "  reboot               — перезавантажити контролер EBB\n");
+}
+
+cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_level_t verbose) {
+    int lock_fd = -1;
+    if (axidraw_device_lock_acquire (&lock_fd) != 0) {
+        warn_device_busy ();
+        return 1;
+    }
+
+    axidraw_device_t dev;
+    axidraw_device_init (&dev);
+    bool connected = false;
+    bool settings_loaded = false;
+    axidraw_settings_t settings;
+
+    char current_model[32];
+    if (model && *model)
+        strncpy (current_model, model, sizeof (current_model) - 1);
+    else
+        strncpy (current_model, CONFIG_DEFAULT_MODEL, sizeof (current_model) - 1);
+    current_model[sizeof (current_model) - 1] = '\0';
+
+    if (load_axidraw_settings (current_model, &settings)) {
+        axidraw_apply_settings (&dev, &settings);
+        settings_loaded = true;
+    } else {
+        LOGE ("Не вдалося завантажити налаштування для моделі %s", current_model);
+    }
+
+    if (settings_loaded) {
+        axidraw_device_config (
+            &dev, (port && *port) ? port : NULL, 9600, 5000, settings.min_cmd_interval_ms);
+        if (!port || !*port)
+            dev.port_path[0] = '\0';
+        char errbuf[256];
+        if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) == 0) {
+            connected = true;
+            LOGI ("Підключено до AxiDraw через %s", dev.port_path);
+        } else {
+            connected = false;
+            dev.port_path[0] = '\0';
+            LOGW ("Автопідключення не вдалося: %s", errbuf);
+        }
+    }
+
+    fprintf (
+        stdout,
+        "Інтерактивний режим AxiDraw. Введіть 'help' для списку команд, 'quit' для виходу.\n");
+
+    char *line = NULL;
+    size_t linecap = 0;
+    bool quit = false;
+    while (!quit) {
+        fprintf (stdout, "cplot> ");
+        fflush (stdout);
+        ssize_t read = getline (&line, &linecap, stdin);
+        if (read < 0)
+            break;
+        while (read > 0 && (line[read - 1] == '\n' || line[read - 1] == '\r'))
+            line[--read] = '\0';
+
+        char *cursor = line;
+        while (*cursor && isspace ((unsigned char)*cursor))
+            ++cursor;
+        if (*cursor == '\0')
+            continue;
+
+        /* Лімітуємо кількість токенів до 8, цього достатньо для наших команд. */
+        char *tokens[8];
+        size_t ntokens = 0;
+        char *saveptr = NULL;
+        char *tok = strtok_r (cursor, " \t", &saveptr);
+        while (tok && ntokens < 8) {
+            tokens[ntokens++] = tok;
+            tok = strtok_r (NULL, " \t", &saveptr);
+        }
+        if (ntokens == 0)
+            continue;
+
+        const char *cmd = tokens[0];
+
+        if (strcasecmp (cmd, "help") == 0 || strcasecmp (cmd, "?") == 0) {
+            shell_print_help ();
+            continue;
+        }
+        if (strcasecmp (cmd, "quit") == 0 || strcasecmp (cmd, "exit") == 0) {
+            quit = true;
+            continue;
+        }
+        if (strcasecmp (cmd, "model") == 0) {
+            if (ntokens == 1) {
+                fprintf (stdout, "Поточна модель: %s\n", current_model);
+            } else {
+                const char *new_model = tokens[1];
+                axidraw_settings_t new_settings;
+                if (!load_axidraw_settings (new_model, &new_settings)) {
+                    LOGE ("Не вдалося завантажити налаштування для моделі %s", new_model);
+                } else {
+                    strncpy (current_model, new_model, sizeof (current_model) - 1);
+                    current_model[sizeof (current_model) - 1] = '\0';
+                    settings = new_settings;
+                    settings_loaded = true;
+                    axidraw_apply_settings (&dev, &settings);
+                    if (connected)
+                        LOGI ("Налаштування моделі застосовані до активного з’єднання");
+                }
+            }
+            continue;
+        }
+        if (strcasecmp (cmd, "list") == 0) {
+            cmd_device_list (current_model, verbose);
+            continue;
+        }
+        if (strcasecmp (cmd, "connect") == 0) {
+            const char *req_port = (ntokens >= 2) ? tokens[1] : NULL;
+            if (!settings_loaded) {
+                if (!load_axidraw_settings (current_model, &settings)) {
+                    LOGE ("Не вдалося завантажити налаштування для моделі %s", current_model);
+                    continue;
+                }
+                settings_loaded = true;
+            }
+            axidraw_apply_settings (&dev, &settings);
+            if (connected) {
+                axidraw_device_disconnect (&dev);
+                connected = false;
+            }
+            if (req_port && strcmp (req_port, "auto") != 0)
+                axidraw_device_config (&dev, req_port, 9600, 5000, settings.min_cmd_interval_ms);
+            else {
+                axidraw_device_config (&dev, NULL, 9600, 5000, settings.min_cmd_interval_ms);
+                dev.port_path[0] = '\0';
+            }
+            char errbuf[256];
+            if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) == 0) {
+                connected = true;
+                LOGI ("Підключено через %s", dev.port_path);
+            } else {
+                connected = false;
+                dev.port_path[0] = '\0';
+                LOGE ("Не вдалося підключитися: %s", errbuf);
+            }
+            continue;
+        }
+        if (strcasecmp (cmd, "disconnect") == 0) {
+            if (connected) {
+                axidraw_device_disconnect (&dev);
+                connected = false;
+                LOGI ("З’єднання розірвано");
+            } else {
+                LOGW ("З’єднання ще не встановлено");
+            }
+            continue;
+        }
+
+        if (!connected) {
+            LOGE ("Немає активного з’єднання. Використайте команду connect");
+            continue;
+        }
+
+        if (strcasecmp (cmd, "pen") == 0) {
+            if (ntokens < 2) {
+                LOGW ("Формат: pen up|down|toggle");
+                continue;
+            }
+            int rc = 0;
+            if (strcasecmp (tokens[1], "up") == 0)
+                rc = device_pen_up_cb (&dev, NULL);
+            else if (strcasecmp (tokens[1], "down") == 0)
+                rc = device_pen_down_cb (&dev, NULL);
+            else if (strcasecmp (tokens[1], "toggle") == 0)
+                rc = device_pen_toggle_cb (&dev, NULL);
+            else {
+                LOGW ("Невідомий параметр пера");
+                continue;
+            }
+            if (rc != 0)
+                LOGE ("Команда не виконана");
+            continue;
+        }
+        if (strcasecmp (cmd, "motors") == 0) {
+            if (ntokens < 2) {
+                LOGW ("Формат: motors on|off");
+                continue;
+            }
+            int rc = 0;
+            if (strcasecmp (tokens[1], "on") == 0)
+                rc = device_motors_on_cb (&dev, NULL);
+            else if (strcasecmp (tokens[1], "off") == 0)
+                rc = device_motors_off_cb (&dev, NULL);
+            else {
+                LOGW ("Невідомий параметр моторів");
+                continue;
+            }
+            if (rc != 0)
+                LOGE ("Команда не виконана");
+            continue;
+        }
+        if (strcasecmp (cmd, "home") == 0) {
+            if (device_home_cb (&dev, NULL) != 0)
+                LOGE ("Не вдалося повернутися у початкову позицію");
+            continue;
+        }
+        if (strcasecmp (cmd, "jog") == 0) {
+            if (ntokens < 3) {
+                LOGW ("Формат: jog <dx мм> <dy мм>");
+                continue;
+            }
+            double dx = 0.0;
+            double dy = 0.0;
+            if (!parse_double_str (tokens[1], &dx) || !parse_double_str (tokens[2], &dy)) {
+                LOGW ("Некоректні значення dx/dy");
+                continue;
+            }
+            struct jog_ctx ctx = { .dx_mm = dx, .dy_mm = dy };
+            if (device_jog_cb (&dev, &ctx) != 0)
+                LOGE ("Не вдалося виконати зсув");
+            continue;
+        }
+        if (strcasecmp (cmd, "status") == 0) {
+            if (device_status_cb (&dev, NULL) != 0)
+                LOGE ("Не вдалося отримати статус");
+            continue;
+        }
+        if (strcasecmp (cmd, "position") == 0) {
+            if (device_position_cb (&dev, NULL) != 0)
+                LOGE ("Не вдалося отримати позицію");
+            continue;
+        }
+        if (strcasecmp (cmd, "version") == 0) {
+            if (device_version_cb (&dev, NULL) != 0)
+                LOGE ("Не вдалося отримати версію контролера");
+            continue;
+        }
+        if (strcasecmp (cmd, "reset") == 0) {
+            if (device_reset_cb (&dev, NULL) != 0)
+                LOGE ("Не вдалося скинути стан");
+            continue;
+        }
+        if (strcasecmp (cmd, "reboot") == 0) {
+            if (device_reboot_cb (&dev, NULL) == 0) {
+                axidraw_device_disconnect (&dev);
+                connected = false;
+                settings_loaded = false;
+                LOGI ("Контролер перезавантажується — підключіться знову після готовності");
+            } else {
+                LOGE ("Не вдалося ініціювати перезавантаження");
+            }
+            continue;
+        }
+
+        LOGW ("Невідома команда. Використайте 'help'");
+    }
+
+    free (line);
+    if (connected)
+        axidraw_device_disconnect (&dev);
+    axidraw_device_lock_release (lock_fd);
+    LOGI ("Інтерактивну сесію завершено");
+    return 0;
+}
+
 /**
  * Виконати підкоманду print (побудова розкладки та відправлення на пристрій).
  *
@@ -662,6 +963,8 @@ cmd_result_t cmd_device_execute (
     switch (action->kind) {
     case DEVICE_ACTION_LIST:
         return cmd_device_list (model, verbose);
+    case DEVICE_ACTION_SHELL:
+        return cmd_device_shell (port, model, verbose);
     case DEVICE_ACTION_PEN:
         switch (action->pen) {
         case DEVICE_PEN_UP:

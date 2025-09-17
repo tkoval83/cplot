@@ -199,6 +199,15 @@ cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose);
  */
 cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose);
 /**
+ * Запустити інтерактивну оболонку керування AxiDraw.
+ *
+ * @param port    Початковий порт (NULL → автопошук).
+ * @param model   Початкова модель (NULL → типовий профіль).
+ * @param verbose Рівень деталізації логів.
+ * @return 0 успіх; ненульовий код — помилка.
+ */
+cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_level_t verbose);
+/**
  * Підняти перо.
  *
  * @param port    Шлях до серійного порту або NULL для автопошуку.
