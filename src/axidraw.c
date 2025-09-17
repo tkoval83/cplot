@@ -23,6 +23,7 @@
 #define AXIDRAW_SERVO_SPEED_SCALE 5
 
 #include "log.h"
+#include "trace.h"
 
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 0
@@ -171,6 +172,11 @@ void axidraw_device_config (
     LOGI (
         "axidraw: config port=%s baud=%d timeout=%d min_interval=%.1f", dev->port_path, dev->baud,
         dev->timeout_ms, dev->min_cmd_interval);
+    trace_write (
+        LOG_INFO,
+        "axidraw config: port=%s baud=%d timeout=%d min_interval=%.1f",
+        dev->port_path[0] ? dev->port_path : "<невказано>", dev->baud, dev->timeout_ms,
+        dev->min_cmd_interval);
 }
 
 /**
@@ -191,10 +197,12 @@ static int axidraw_guess_port (axidraw_device_t *dev, char *buf, size_t len) {
         strncpy (dev->port_path, buf, sizeof (dev->port_path) - 1);
         dev->port_path[sizeof (dev->port_path) - 1] = '\0';
         LOGI ("axidraw: guessed port %s", dev->port_path);
+        trace_write (LOG_INFO, "axidraw: автоматично знайдено порт %s", dev->port_path);
         return 0;
     }
 #endif
     LOGW ("axidraw: не вдалося автоматично знайти порт");
+    trace_write (LOG_WARN, "axidraw: автоматичний пошук порту не дав результату");
     return -1;
 }
 
@@ -209,6 +217,7 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     if (dev->port_path[0] == '\0') {
         if (axidraw_guess_port (dev, guess_buf, sizeof (guess_buf)) != 0) {
             LOGE ("Не вказано порт AxiDraw");
+            trace_write (LOG_ERROR, "axidraw: порт не вказано");
             return -1;
         }
     }
@@ -220,6 +229,9 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     if (!sp) {
         if (!errbuf)
             LOGE ("Не вдалося відкрити порт: %s", err_dst);
+        trace_write (
+            LOG_ERROR, "axidraw: помилка відкриття порту %s (%s)",
+            dev->port_path[0] ? dev->port_path : "<невідомий>", err_dst);
         return -1;
     }
     serial_flush_input (sp);
@@ -227,6 +239,7 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
         if (!errbuf)
             LOGE ("axidraw: пристрій не відповідає на команду V");
         serial_close (sp);
+        trace_write (LOG_ERROR, "axidraw: пристрій не відповідає на команду V");
         return -1;
     }
     dev->port = sp;
@@ -234,6 +247,7 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     axidraw_reset_runtime (dev);
     axidraw_sync_settings (dev);
     LOGI ("axidraw: підключено через %s", dev->port_path);
+    trace_write (LOG_INFO, "axidraw: підключено %s @%d бод", dev->port_path, dev->baud);
     return 0;
 }
 
@@ -245,6 +259,7 @@ void axidraw_device_disconnect (axidraw_device_t *dev) {
         serial_close (dev->port);
         dev->port = NULL;
         LOGI ("axidraw: відключено від %s", dev->port_path);
+        trace_write (LOG_INFO, "axidraw: відключено %s", dev->port_path);
     }
     dev->connected = false;
     axidraw_reset_runtime (dev);

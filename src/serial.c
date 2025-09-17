@@ -5,6 +5,7 @@
 #include "serial.h"
 
 #include "log.h"
+#include "trace.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -74,12 +75,14 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
     if (!path || !*path) {
         if (errbuf && errlen)
             snprintf (errbuf, errlen, "не вказано шлях до порту");
+        trace_write (LOG_ERROR, "serial: не вказано шлях до порту");
         return NULL;
     }
     int fd = open (path, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
         if (errbuf && errlen)
             snprintf (errbuf, errlen, "open('%s'): %s", path, strerror (errno));
+        trace_write (LOG_ERROR, "serial: помилка open('%s'): %s", path, strerror (errno));
         return NULL;
     }
 
@@ -90,6 +93,7 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
             if (errbuf && errlen)
                 snprintf (errbuf, errlen, "tcgetattr: %s", strerror (errno));
             close (fd);
+            trace_write (LOG_ERROR, "serial: tcgetattr для '%s' завершився помилкою %s", path, strerror (errno));
             return NULL;
         }
         cfmakeraw (&tio);
@@ -109,6 +113,7 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
             if (errbuf && errlen)
                 snprintf (errbuf, errlen, "tcsetattr: %s", strerror (errno));
             close (fd);
+            trace_write (LOG_ERROR, "serial: tcsetattr для '%s' завершився помилкою %s", path, strerror (errno));
             return NULL;
         }
     }
@@ -121,12 +126,14 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
         if (errbuf && errlen)
             snprintf (errbuf, errlen, "нестача пам’яті");
         close (fd);
+        trace_write (LOG_ERROR, "serial: нестача пам'яті для дескриптора '%s'", path);
         return NULL;
     }
     sp->fd = fd;
     sp->default_timeout_ms = (read_timeout_ms > 0) ? read_timeout_ms : 1000;
 
     LOGD ("відкрито порт: %s @ %d бод", path, baud);
+    trace_write (LOG_INFO, "serial: відкрито %s @%d бод timeout=%d", path, baud, sp->default_timeout_ms);
     return sp;
 }
 
@@ -137,8 +144,10 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
 void serial_close (serial_port_t *sp) {
     if (!sp)
         return;
-    if (sp->fd >= 0)
+    if (sp->fd >= 0) {
+        trace_write (LOG_INFO, "serial: закрито fd=%d", sp->fd);
         close (sp->fd);
+    }
     free (sp);
 }
 

@@ -12,6 +12,7 @@
 #include "log.h"
 #include "mcp.h"
 #include "axistate.h"
+#include "trace.h"
 
 /**
  * Точка входу програми.
@@ -25,9 +26,22 @@
  */
 int main (int argc, char *argv[]) {
     axistate_clear ();
+
+    if (trace_enable (NULL) != 0) {
+        fprintf (stderr, "[попередження] не вдалося увімкнути трасування у файл\n");
+    } else {
+        trace_write (LOG_INFO, "запуск програми argc=%d", argc);
+    }
     /* Спеціальний режим: якщо перший аргумент дорівнює "--mcp", запускаємо MCP‑сервер. */
     if (argc > 1 && argv[1] && strcmp (argv[1], "--mcp") == 0) {
-        return mcp_run ();
+        trace_write (LOG_INFO, "вмикаємо MCP-режим");
+        int mcp_rc = mcp_run ();
+        if (mcp_rc == 0)
+            trace_write (LOG_INFO, "MCP-режим завершено успішно");
+        else
+            trace_write (LOG_ERROR, "MCP-режим завершено з кодом %d", mcp_rc);
+        trace_disable ();
+        return mcp_rc;
     }
 
     /* Зчитати опції командного рядка */
@@ -40,18 +54,29 @@ int main (int argc, char *argv[]) {
 
     /* Швидка обробка help/version */
     if (options.help) {
+        trace_write (LOG_INFO, "запитано довідку CLI");
         help ();
+        trace_write (LOG_INFO, "вихід після показу довідки");
+        trace_disable ();
         return EXIT_SUCCESS;
     }
     if (options.version) {
+        trace_write (LOG_INFO, "запитано версію CLI");
         version ();
+        trace_write (LOG_INFO, "вихід після показу версії");
+        trace_disable ();
         return EXIT_SUCCESS;
     }
 
     /* Виклик підкоманди */
     int rc = cli_dispatch (&options);
-    if (rc != 0)
+    if (rc != 0) {
+        trace_write (LOG_ERROR, "програма завершена з кодом %d", rc);
+        trace_disable ();
         return rc;
+    }
 
+    trace_write (LOG_INFO, "програма завершена успішно");
+    trace_disable ();
     return EXIT_SUCCESS;
 }

@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "log.h"
+#include "trace.h"
 
 /** Максимальна довжина рядка команди EBB. */
 #define EBB_CMD_MAX 128
@@ -52,6 +53,7 @@ static int ebb_send_vcommand (serial_port_t *sp, int timeout_ms, const char *fmt
     }
 
     LOGD ("EBB → %s", cmd);
+    trace_write (LOG_DEBUG, "EBB → %s", cmd);
     if (serial_write_line (sp, cmd) != 0) {
         LOGE ("Не вдалося надіслати команду до EBB");
         return -1;
@@ -62,20 +64,24 @@ static int ebb_send_vcommand (serial_port_t *sp, int timeout_ms, const char *fmt
         ssize_t len = serial_read_line (sp, resp, sizeof (resp), timeout_ms);
         if (len <= 0) {
             LOGE ("EBB не відповів на команду або стався тайм-аут");
+            trace_write (LOG_ERROR, "EBB: відсутня відповідь або тайм-аут на '%s'", cmd);
             return -1;
         }
         resp[len] = '\0';
         LOGD ("EBB ← %s", resp);
+        trace_write (LOG_DEBUG, "EBB ← %s", resp);
         if (strcmp (resp, "OK") == 0)
             return 0;
         if (strncmp (resp, "ERR", 3) == 0 || resp[0] == '!') {
             LOGE ("EBB повернув помилку: %s", resp);
+            trace_write (LOG_ERROR, "EBB: помилка відповіді '%s'", resp);
             return -1;
         }
         /* Інформаційні рядки ігноруємо й читаємо наступний. */
     }
 
     LOGE ("EBB не надіслав підтвердження OK після команди");
+    trace_write (LOG_ERROR, "EBB: не отримав OK після '%s'", cmd);
     return -1;
 }
 
@@ -123,6 +129,7 @@ static int ebb_send_vquery (
     }
 
     LOGD ("EBB → %s", cmd);
+    trace_write (LOG_DEBUG, "EBB → %s", cmd);
     if (serial_write_line (sp, cmd) != 0) {
         LOGE ("Не вдалося надіслати команду до EBB");
         return -1;
@@ -135,30 +142,36 @@ static int ebb_send_vquery (
         ssize_t len = serial_read_line (sp, resp, sizeof (resp), timeout_ms);
         if (len <= 0) {
             LOGE ("EBB не відповів на запит або стався тайм-аут");
+            trace_write (LOG_ERROR, "EBB: тайм-аут або тиша на запит '%s'", cmd);
             return -1;
         }
         resp[len] = '\0';
         LOGD ("EBB ← %s", resp);
+        trace_write (LOG_DEBUG, "EBB ← %s", resp);
         if (strcmp (resp, "OK") == 0) {
             if (need_data && !data_received) {
                 LOGE ("EBB не повернув дані у відповіді");
+                trace_write (LOG_ERROR, "EBB: очікував дані від '%s', отримано лише OK", cmd);
                 return -1;
             }
             return 0;
         }
         if (strncmp (resp, "ERR", 3) == 0 || resp[0] == '!') {
             LOGE ("EBB повернув помилку: %s", resp);
+            trace_write (LOG_ERROR, "EBB: помилка відповіді '%s'", resp);
             return -1;
         }
         if (need_data && !data_received) {
             strncpy (resp_out, resp, resp_len - 1);
             resp_out[resp_len - 1] = '\0';
             data_received = true;
+            trace_write (LOG_DEBUG, "EBB дані: %s", resp_out);
         }
         /* Отримані додаткові рядки ігноруємо. */
     }
 
     LOGE ("EBB не надіслав підтвердження OK після запиту");
+    trace_write (LOG_ERROR, "EBB: не отримав OK після запиту '%s'", cmd);
     return -1;
 }
 

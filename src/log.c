@@ -105,7 +105,19 @@ void log_vprint (log_level_t level, const char *fmt, va_list ap) {
         fprintf (stderr, "%s[%s]%s ", col, lab, NO_COLOR);
     else
         fprintf (stderr, "[%s] ", lab);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
     vfprintf (stderr, fmt, ap);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     fputc ('\n', stderr);
 }
 

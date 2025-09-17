@@ -71,12 +71,15 @@ WARNS := -Wall -Wextra -pedantic -Wformat=2 -Wvla # -pedantic попереджа
 BUILD ?= debug
 
 # Flags for compiling
+CPPFLAGS :=
 ifeq ($(BUILD),release)
-	CFLAGS := -O3 $(STD) $(STACK) $(WARNS) -DNDEBUG
+	CFLAGS := -O3 $(STD) $(STACK) $(WARNS)
+  CPPFLAGS += -DNDEBUG
   DEBUG :=
 else
 	CFLAGS := -O0 $(STD) $(STACK) $(WARNS)
-  DEBUG := -g3 -DDEBUG=1
+  CPPFLAGS += -DDEBUG
+  DEBUG := -g3
 endif
 
 LDFLAGS :=
@@ -166,10 +169,11 @@ all: $(OBJECTS)
 
 
 # Rule for object binaries compilation
+
 $(LIBDIR)/%.o: $(SRCDIR)/%.$(SRCEXT)
 	@echo -en "$(BROWN)CC $(END_COLOR)";
 	@mkdir -p $(LIBDIR)
-	$(CC) $(DEBUG) $(CFLAGS) -MMD -MP -MF $(LIBDIR)/$*.d -c $< -o $@
+	$(CC) $(DEBUG) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF $(LIBDIR)/$*.d -c $< -o $@
 
 # Автоматична підстановка залежностей заголовків
 DEPS := $(OBJECTS:.o=.d)
