@@ -627,6 +627,8 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         }
         if (strcasecmp (cmd, "disconnect") == 0) {
             if (connected) {
+                if (wait_for_device_idle (&dev) != 0)
+                    LOGW ("Не вдалося підтвердити завершення команд перед відключенням");
                 axidraw_device_disconnect (&dev);
                 connected = false;
                 LOGI ("З’єднання розірвано");
@@ -722,6 +724,8 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         }
         if (strcasecmp (cmd, "reboot") == 0) {
             if (device_reboot_cb (&dev, NULL) == 0) {
+                if (wait_for_device_idle (&dev) != 0)
+                    LOGW ("Не вдалося підтвердити завершення команд перед перезавантаженням");
                 axidraw_device_disconnect (&dev);
                 connected = false;
                 settings_loaded = false;
@@ -736,8 +740,11 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
     }
 
     free (line);
-    if (connected)
+    if (connected) {
+        if (wait_for_device_idle (&dev) != 0)
+            LOGW ("Не вдалося підтвердити завершення команд перед відключенням");
         axidraw_device_disconnect (&dev);
+    }
     axidraw_device_lock_release (lock_fd);
     LOGI ("Інтерактивну сесію завершено");
     return 0;
