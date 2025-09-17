@@ -7,6 +7,7 @@
  * українською, формат сумісний із printf.
  */
 #include "log.h"
+#include "trace.h"
 
 #include <string.h>
 
@@ -97,6 +98,16 @@ static const char *level_color (log_level_t lv) {
  * @param ap    Список аргументів для форматування.
  */
 void log_vprint (log_level_t level, const char *fmt, va_list ap) {
+    if (!fmt)
+        return;
+
+    if (trace_is_enabled ()) {
+        va_list ap_trace;
+        va_copy (ap_trace, ap);
+        trace_vwrite (level, fmt, ap_trace);
+        va_end (ap_trace);
+    }
+
     if (level > g_cfg.level)
         return;
     const char *col = level_color (level);

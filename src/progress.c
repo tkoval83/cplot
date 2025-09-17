@@ -6,6 +6,7 @@
  * підтримкою «спінера», відсотків, швидкості (кроків/с) та розрахунку ETA.
  */
 #include "progress.h"
+#include "trace.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -69,6 +70,14 @@ void progress_init (progress_t *p, uint64_t total, const progress_opts_t *opt) {
     p->finished = false;
     p->started_at = now_s ();
     p->last_draw = 0;
+    trace_write (
+        LOG_DEBUG,
+        "progress: старт total=%llu width=%d throttle=%d colors=%d unicode=%d",
+        (unsigned long long)p->total,
+        p->opt.width,
+        p->opt.throttle_ms,
+        p->opt.use_colors ? 1 : 0,
+        p->opt.use_unicode ? 1 : 0);
 }
 
 /**
@@ -209,4 +218,9 @@ void progress_finish (progress_t *p) {
     FILE *out = p->opt.stream ? p->opt.stream : stderr;
     fprintf (out, "\n");
     fflush (out);
+    trace_write (
+        LOG_INFO,
+        "progress: завершено done=%llu total=%llu",
+        (unsigned long long)p->done,
+        (unsigned long long)p->total);
 }
