@@ -94,6 +94,28 @@ static void warn_device_busy (void) {
     LOGW ("AxiDraw вже використовується (%s)", holder);
 }
 
+#ifdef DEBUG
+static void debug_log_device_status (const char *phase, axidraw_device_t *dev) {
+    if (!dev)
+        return;
+    ebb_status_snapshot_t snapshot;
+    if (axidraw_status (dev, &snapshot) != 0) {
+        LOGD ("debug[%s]: не вдалося зчитати статус", phase);
+        return;
+    }
+    LOGD (
+        "debug[%s]: active=%d motorX=%d motorY=%d fifo=%d pen_up=%d pos=(%ld,%ld)", phase,
+        snapshot.motion.command_active, snapshot.motion.motor1_active, snapshot.motion.motor2_active,
+        snapshot.motion.fifo_pending, snapshot.pen_up, (long)snapshot.steps_axis1,
+        (long)snapshot.steps_axis2);
+}
+#else
+static void debug_log_device_status (const char *phase, axidraw_device_t *dev) {
+    (void)phase;
+    (void)dev;
+}
+#endif
+
 static bool parse_double_str (const char *s, double *out_value) {
     if (!s || !*s || !out_value)
         return false;
@@ -218,6 +240,8 @@ static cmd_result_t with_axidraw_device (
         LOGI ("Виконання дії '%s' на порту %s", action_name, dev.port_path);
     }
 
+    debug_log_device_status ("before", &dev);
+
     int rc = 0;
     if (cb)
         rc = cb (&dev, ctx);
@@ -227,6 +251,13 @@ static cmd_result_t with_axidraw_device (
     int idle_rc = 0;
     if (rc == 0 && wait_idle)
         idle_rc = wait_for_device_idle (&dev);
+
+    if (rc == 0) {
+        if (wait_idle && idle_rc == 0)
+            debug_log_device_status ("after_wait", &dev);
+        else
+            debug_log_device_status ("after", &dev);
+    }
 
     axidraw_device_disconnect (&dev);
 
