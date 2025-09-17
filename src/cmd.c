@@ -583,6 +583,26 @@ static void shell_watch (double interval, int max_iter) {
     }
 }
 
+static bool shell_get_position (axidraw_device_t *dev, double *x_mm, double *y_mm) {
+    update_state_from_device (dev, "query", "query", 0, 0);
+    axistate_t state;
+    if (!axistate_get (&state) || !state.snapshot_valid)
+        return false;
+    if (x_mm)
+        *x_mm = state.snapshot.steps_axis1 / AXIDRAW_STEPS_PER_MM;
+    if (y_mm)
+        *y_mm = state.snapshot.steps_axis2 / AXIDRAW_STEPS_PER_MM;
+    return true;
+}
+
+static int shell_move_relative (
+    axidraw_device_t *dev, double dx_mm, double dy_mm, const char *phase, const char *action) {
+    struct jog_ctx ctx = { .dx_mm = dx_mm, .dy_mm = dy_mm };
+    int rc = device_jog_cb (dev, &ctx);
+    update_state_from_device (dev, phase, action, rc, 0);
+    return rc;
+}
+
 static void shell_print_help (void) {
     fprintf (stdout, "Доступні команди:\n");
     fprintf (stdout, "  help                 — показати це повідомлення\n");
@@ -596,6 +616,10 @@ static void shell_print_help (void) {
     fprintf (stdout, "  abort                — аварійно зупинити всі рухи\n");
     fprintf (stdout, "  state                — показати останній відомий стан пристрою\n");
     fprintf (stdout, "  watch [sec [n]]      — періодично показувати стан (Ctrl+C для переривання)\n");
+    fprintf (stdout, "  moveto <x> <y>       — переміститися у абсолютні координати (мм)\n");
+    fprintf (stdout, "  lineto <x> <y>       — провести лінію до абсолютних координат (мм)\n");
+    fprintf (stdout, "  move <dx> <dy>       — зсув на dx/dy мм\n");
+    fprintf (stdout, "  line <dx> <dy>       — провести лінію на dx/dy мм (відносно)\n");
     fprintf (stdout, "  jog <dx> <dy>        — ручний зсув на dx/dy мм\n");
     fprintf (stdout, "  home                 — повернутися у початкову позицію\n");
     fprintf (stdout, "  status               — показати агрегований стан контролера\n");
@@ -850,6 +874,62 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             if (rc != 0)
                 LOGE ("Не вдалося повернутися у початкову позицію");
             update_state_from_device (&dev, "home", "home", rc, 0);
+            continue;
+        }
+        if (strcasecmp (cmd, "move") == 0 || strcasecmp (cmd, "line") == 0) {
+            if (ntokens < 3) {
+                LOGW ("Формат: %s <dx мм> <dy мм>", cmd);
+                continue;
+            }
+            double dx = 0.0;
+            double dy = 0.0;
+            if (!parse_double_str (tokens[1], &dx) || !parse_double_str (tokens[2], &dy)) {
+                LOGW ("Некоректні значення dx/dy");
+                continue;
+            }
+            if (strcasecmp (cmd, "line") == 0) {
+                update_state_from_device (&dev, "query", "line", 0, 0);
+                axistate_t state;
+                if (axistate_get (&state) && state.snapshot_valid && state.snapshot.pen_up)
+                    LOGW ("Перo підняте — лінія виконується у повітрі");
+            }
+            int rc = shell_move_relative (
+                &dev, dx, dy, strcasecmp (cmd, "line") == 0 ? "line" : "move", cmd);
+            if (rc != 0)
+                LOGE ("Не вдалося виконати зсув");
+            continue;
+        }
+        if (strcasecmp (cmd, "moveto") == 0 || strcasecmp (cmd, "lineto") == 0) {
+            if (ntokens < 3) {
+                LOGW ("Формат: %s <x мм> <y мм>", cmd);
+                continue;
+            }
+            double target_x = 0.0;
+            double target_y = 0.0;
+            if (!parse_double_str (tokens[1], &target_x) || !parse_double_str (tokens[2], &target_y)) {
+                LOGW ("Некоректні координати");
+                continue;
+            }
+            double cur_x = 0.0;
+            double cur_y = 0.0;
+            if (!shell_get_position (&dev, &cur_x, &cur_y)) {
+                LOGW ("Не вдалося визначити поточну позицію");
+                continue;
+            }
+            double dx = target_x - cur_x;
+            double dy = target_y - cur_y;
+            if (fabs (dx) < 1e-3 && fabs (dy) < 1e-3)
+                continue;
+            if (strcasecmp (cmd, "lineto") == 0) {
+                update_state_from_device (&dev, "query", "lineto", 0, 0);
+                axistate_t state;
+                if (axistate_get (&state) && state.snapshot_valid && state.snapshot.pen_up)
+                    LOGW ("Перo підняте — лінія виконується у повітрі");
+            }
+            int rc = shell_move_relative (
+                &dev, dx, dy, strcasecmp (cmd, "lineto") == 0 ? "lineto" : "moveto", cmd);
+            if (rc != 0)
+                LOGE ("Не вдалося виконати переміщення");
             continue;
         }
         if (strcasecmp (cmd, "jog") == 0) {
