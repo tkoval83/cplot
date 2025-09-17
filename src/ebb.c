@@ -517,6 +517,15 @@ int ebb_collect_status (serial_port_t *sp, ebb_status_snapshot_t *snapshot, int 
 }
 
 /**
+ * @brief Виконати аварійну зупинку (ES).
+ */
+int ebb_emergency_stop (serial_port_t *sp, int timeout_ms) {
+    if (!sp)
+        return -1;
+    return ebb_send_command (sp, timeout_ms, "ES");
+}
+
+/**
  * @brief Реалізація команди SC (Stepper/Servo configure).
  *
  * @param sp         Відкритий послідовний порт.

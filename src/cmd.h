@@ -252,6 +252,7 @@ cmd_result_t cmd_device_motors_on (const char *port, const char *model, verbose_
  * @return 0 успіх; ненульовий код — помилка.
  */
 cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose_level_t verbose);
+cmd_result_t cmd_device_abort (const char *port, const char *model, verbose_level_t verbose);
 /**
  * Поїхати у home.
  *

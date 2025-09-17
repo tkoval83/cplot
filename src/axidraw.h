@@ -143,6 +143,14 @@ void axidraw_device_lock_release (int fd);
 const char *axidraw_device_lock_file (void);
 
 /**
+ * @brief Аварійно зупинити всі рухи пристрою.
+ *
+ * @param dev Структура пристрою.
+ * @return 0 при успіху; -1 при помилці/відсутності з’єднання.
+ */
+int axidraw_emergency_stop (axidraw_device_t *dev);
+
+/**
  * @brief Перевірити стан з’єднання.
  *
  * @param dev Структура пристрою.

@@ -300,6 +300,14 @@ static int device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
     return rc;
 }
 
+static int device_abort_cb (axidraw_device_t *dev, void *ctx) {
+    (void)ctx;
+    int rc = axidraw_emergency_stop (dev);
+    if (rc == 0)
+        fprintf (stdout, "Аварійна зупинка виконана\n");
+    return rc;
+}
+
 /**
  * @brief Контекст для ручного зсуву (jog).
  */
@@ -473,7 +481,8 @@ static void shell_print_help (void) {
     fprintf (stdout, "  model [NAME]         — показати або встановити модель (наприклад, minikit2)\n");
     fprintf (stdout, "  list                 — перелік потенційних портів AxiDraw\n");
     fprintf (stdout, "  pen up|down|toggle   — керування пером\n");
-    fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
+        fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
+    fprintf (stdout, "  abort                — аварійно зупинити всі рухи\n");
     fprintf (stdout, "  jog <dx> <dy>        — ручний зсув на dx/dy мм\n");
     fprintf (stdout, "  home                 — повернутися у початкову позицію\n");
     fprintf (stdout, "  status               — показати агрегований стан контролера\n");
@@ -679,6 +688,11 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             }
             if (rc != 0)
                 LOGE ("Команда не виконана");
+            continue;
+        }
+        if (strcasecmp (cmd, "abort") == 0) {
+            if (device_abort_cb (&dev, NULL) != 0)
+                LOGE ("Не вдалося виконати аварійну зупинку");
             continue;
         }
         if (strcasecmp (cmd, "home") == 0) {
@@ -998,6 +1012,8 @@ cmd_result_t cmd_device_execute (
         return cmd_device_home (port, model, verbose);
     case DEVICE_ACTION_JOG:
         return cmd_device_jog (port, model, jog_dx_mm, jog_dy_mm, verbose);
+    case DEVICE_ACTION_ABORT:
+        return cmd_device_abort (port, model, verbose);
     case DEVICE_ACTION_VERSION:
         return cmd_device_version (port, model, verbose);
     case DEVICE_ACTION_STATUS:
@@ -1265,6 +1281,13 @@ cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose
     LOGI ("Вимкнення моторів");
     return with_axidraw_device (
         port, model, verbose, "вимкнення моторів", device_motors_off_cb, NULL, false);
+}
+
+/// Аварійна зупинка (device abort).
+cmd_result_t cmd_device_abort (const char *port, const char *model, verbose_level_t verbose) {
+    LOGI ("Аварійна зупинка");
+    return with_axidraw_device (
+        port, model, verbose, "аварійна зупинка", device_abort_cb, NULL, false);
 }
 
 /// Перемістити у початкову позицію (home).

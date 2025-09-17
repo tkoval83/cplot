@@ -94,6 +94,8 @@ static device_action_t device_action_from_token (const char *token) {
         return device_action_make_motor (DEVICE_MOTOR_ON);
     if (strcmp (token, "motors-off") == 0)
         return device_action_make_motor (DEVICE_MOTOR_OFF);
+    if (strcmp (token, "abort") == 0)
+        return device_action_make_simple (DEVICE_ACTION_ABORT);
     if (strcmp (token, "home") == 0)
         return device_action_make_simple (DEVICE_ACTION_HOME);
     if (strcmp (token, "jog") == 0)

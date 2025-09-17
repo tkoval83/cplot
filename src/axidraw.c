@@ -299,6 +299,15 @@ void axidraw_device_lock_release (int fd) {
  */
 const char *axidraw_device_lock_file (void) { return axidraw_lock_path (); }
 
+int axidraw_emergency_stop (axidraw_device_t *dev) {
+    if (axidraw_require_connection (dev) != 0)
+        return -1;
+    int rc = ebb_emergency_stop (dev->port, dev->timeout_ms);
+    if (rc == 0)
+        axidraw_reset_runtime (dev);
+    return rc;
+}
+
 /** Перевірити, чи пристрій у стані connected. */
 bool axidraw_device_is_connected (const axidraw_device_t *dev) { return dev && dev->connected; }
 

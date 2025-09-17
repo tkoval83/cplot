@@ -268,6 +268,15 @@ int ebb_configure_mode (serial_port_t *sp, int param_id, int value, int timeout_
  */
 int ebb_set_servo_power_timeout (serial_port_t *sp, uint32_t timeout_ms, int power_state, int cmd_timeout_ms);
 
+/**
+ * @brief Аварійно зупинити всі рухи (команда ES).
+ *
+ * @param sp         Відкритий послідовний порт.
+ * @param timeout_ms Тайм-аут очікування відповіді.
+ * @return 0 при успіху; -1 при помилці.
+ */
+int ebb_emergency_stop (serial_port_t *sp, int timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif
