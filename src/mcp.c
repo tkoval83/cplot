@@ -19,6 +19,8 @@
 #include "mcp.h"
 
 #include "cmd.h"
+#include "axistate.h"
+#include "axidraw.h"
 #include "jsr.h"
 #include "jsw.h"
 #include "log.h"
@@ -29,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* JSON-утиліти винесено до json.c/json.h */
 
@@ -258,6 +261,25 @@ static void emit_list_tools_result (json_writer_t *w, void *ctx) {
     jsonw_end_object (w); /* inputSchema */
     jsonw_end_object (w);
 
+    jsonw_begin_object (w);
+    jsonw_key (w, "name");
+    jsonw_string_cstr (w, "cplot.get_state");
+    jsonw_key (w, "title");
+    jsonw_string_cstr (w, "Поточний стан AxiDraw");
+    jsonw_key (w, "description");
+    jsonw_string_cstr (w, "Отримати останній відомий стан контролера (телеметрія)");
+    jsonw_key (w, "inputSchema");
+    jsonw_begin_object (w);
+    jsonw_key (w, "type");
+    jsonw_string_cstr (w, "object");
+    jsonw_key (w, "properties");
+    jsonw_begin_object (w);
+    jsonw_end_object (w);
+    jsonw_key (w, "additionalProperties");
+    jsonw_bool (w, 0);
+    jsonw_end_object (w);
+    jsonw_end_object (w);
+
     jsonw_end_array (w);
     jsonw_end_object (w);
 }
@@ -267,6 +289,11 @@ struct preview_ctx {
     const char *mime;
     const char *b64;
     size_t b64len;
+};
+
+struct state_ctx {
+    bool available;
+    axistate_t state;
 };
 
 static void emit_preview_result (json_writer_t *w, void *vctx) {
@@ -284,6 +311,69 @@ static void emit_preview_result (json_writer_t *w, void *vctx) {
     jsonw_end_object (w);
     jsonw_end_array (w);
     jsonw_end_object (w);
+}
+
+static void emit_state_result (json_writer_t *w, void *vctx) {
+    struct state_ctx *c = (struct state_ctx *)vctx;
+    jsonw_begin_object (w);
+    jsonw_key (w, "stateAvailable");
+    jsonw_bool (w, c->available ? 1 : 0);
+    if (c->available) {
+        char timebuf[64];
+        struct tm tm_buf;
+        if (localtime_r (&c->state.ts.tv_sec, &tm_buf))
+            strftime (timebuf, sizeof (timebuf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+        else
+            snprintf (timebuf, sizeof (timebuf), "%lld", (long long)c->state.ts.tv_sec);
+        jsonw_key (w, "timestamp");
+        jsonw_string_cstr (w, timebuf);
+        jsonw_key (w, "phase");
+        jsonw_string_cstr (w, c->state.phase);
+        jsonw_key (w, "action");
+        jsonw_string_cstr (w, c->state.action);
+        jsonw_key (w, "commandRc");
+        jsonw_int (w, c->state.command_rc);
+        jsonw_key (w, "waitRc");
+        jsonw_int (w, c->state.wait_rc);
+        jsonw_key (w, "snapshotValid");
+        jsonw_bool (w, c->state.snapshot_valid ? 1 : 0);
+        if (c->state.snapshot_valid) {
+            const ebb_status_snapshot_t *snap = &c->state.snapshot;
+            jsonw_key (w, "status");
+            jsonw_begin_object (w);
+            jsonw_key (w, "commandActive");
+            jsonw_bool (w, snap->motion.command_active ? 1 : 0);
+            jsonw_key (w, "motor1Active");
+            jsonw_bool (w, snap->motion.motor1_active ? 1 : 0);
+            jsonw_key (w, "motor2Active");
+            jsonw_bool (w, snap->motion.motor2_active ? 1 : 0);
+            jsonw_key (w, "fifoPending");
+            jsonw_bool (w, snap->motion.fifo_pending ? 1 : 0);
+            jsonw_key (w, "penUp");
+            jsonw_bool (w, snap->pen_up ? 1 : 0);
+            jsonw_key (w, "servoPower");
+            jsonw_bool (w, snap->servo_power ? 1 : 0);
+            jsonw_key (w, "stepsAxis1");
+            jsonw_int (w, snap->steps_axis1);
+            jsonw_key (w, "stepsAxis2");
+            jsonw_int (w, snap->steps_axis2);
+            jsonw_key (w, "positionMm");
+            jsonw_begin_object (w);
+            jsonw_key (w, "x");
+            jsonw_double (w, snap->steps_axis1 / AXIDRAW_STEPS_PER_MM);
+            jsonw_key (w, "y");
+            jsonw_double (w, snap->steps_axis2 / AXIDRAW_STEPS_PER_MM);
+            jsonw_end_object (w);
+            jsonw_end_object (w);
+        }
+    }
+    jsonw_end_object (w);
+}
+
+static void handle_call_tool_state (const char *id_ptr, size_t id_len) {
+    struct state_ctx ctx;
+    ctx.available = axistate_get (&ctx.state);
+    write_json_ok (id_ptr, id_len, emit_state_result, &ctx);
 }
 
 static void handle_list_tools (const char *id_ptr, size_t id_len) {
@@ -378,6 +468,11 @@ static void handle_call_tool (const char *id_ptr, size_t id_len, const char *jso
     if (strcmp (name, "print") == 0 || strcmp (name, "cplot.print_preview") == 0) {
         free (name);
         handle_call_tool_print (id_ptr, id_len, json);
+        return;
+    }
+    if (strcmp (name, "state") == 0 || strcmp (name, "cplot.get_state") == 0) {
+        free (name);
+        handle_call_tool_state (id_ptr, id_len);
         return;
     }
     free (name);

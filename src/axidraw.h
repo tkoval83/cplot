@@ -13,6 +13,8 @@
 #include "ebb.h"
 #include "serial.h"
 
+#define AXIDRAW_STEPS_PER_MM 80.0
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -11,6 +11,7 @@
 #include "help.h"
 #include "log.h"
 #include "mcp.h"
+#include "axistate.h"
 
 /**
  * Точка входу програми.
@@ -23,6 +24,7 @@
  * @return Код завершення процесу: 0 при успіху або код помилки підкоманди.
  */
 int main (int argc, char *argv[]) {
+    axistate_clear ();
     /* Спеціальний режим: якщо перший аргумент дорівнює "--mcp", запускаємо MCP‑сервер. */
     if (argc > 1 && argv[1] && strcmp (argv[1], "--mcp") == 0) {
         return mcp_run ();

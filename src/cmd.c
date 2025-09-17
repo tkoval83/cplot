@@ -7,6 +7,7 @@
 #include "fontreg.h"
 #include "help.h"
 #include "log.h"
+#include "axistate.h"
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -67,9 +68,6 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
     return true;
 }
 
-/** Кількість мікрокроків на міліметр для типової кінематики AxiDraw. */
-#define AXIDRAW_STEPS_PER_MM 80.0
-
 /** Максимальна тривалість команди SM/XM відповідно до протоколу EBB. */
 #define AXIDRAW_MAX_DURATION_MS 16777215u
 
@@ -95,26 +93,39 @@ static void warn_device_busy (void) {
 }
 
 #ifdef DEBUG
-static void debug_log_device_status (const char *phase, axidraw_device_t *dev) {
-    if (!dev)
-        return;
-    ebb_status_snapshot_t snapshot;
-    if (axidraw_status (dev, &snapshot) != 0) {
-        LOGD ("debug[%s]: не вдалося зчитати статус", phase);
+static void debug_log_snapshot (
+    const char *phase, bool have_snapshot, const ebb_status_snapshot_t *snap) {
+    if (!have_snapshot || !snap) {
+        LOGD ("debug[%s]: статус недоступний", phase);
         return;
     }
     LOGD (
         "debug[%s]: active=%d motorX=%d motorY=%d fifo=%d pen_up=%d pos=(%ld,%ld)", phase,
-        snapshot.motion.command_active, snapshot.motion.motor1_active, snapshot.motion.motor2_active,
-        snapshot.motion.fifo_pending, snapshot.pen_up, (long)snapshot.steps_axis1,
-        (long)snapshot.steps_axis2);
+        snap->motion.command_active, snap->motion.motor1_active, snap->motion.motor2_active,
+        snap->motion.fifo_pending, snap->pen_up, (long)snap->steps_axis1, (long)snap->steps_axis2);
 }
 #else
-static void debug_log_device_status (const char *phase, axidraw_device_t *dev) {
+static void debug_log_snapshot (
+    const char *phase, bool have_snapshot, const ebb_status_snapshot_t *snap) {
     (void)phase;
-    (void)dev;
+    (void)have_snapshot;
+    (void)snap;
 }
 #endif
+
+static void update_state_from_device (
+    axidraw_device_t *dev,
+    const char *phase,
+    const char *action,
+    int command_rc,
+    int wait_rc) {
+    ebb_status_snapshot_t snap;
+    bool ok = false;
+    if (dev && axidraw_device_is_connected (dev))
+        ok = axidraw_status (dev, &snap) == 0;
+    debug_log_snapshot (phase, ok, ok ? &snap : NULL);
+    axistate_update (phase, action, command_rc, wait_rc, ok ? &snap : NULL);
+}
 
 static bool parse_double_str (const char *s, double *out_value) {
     if (!s || !*s || !out_value)
@@ -219,6 +230,7 @@ static cmd_result_t with_axidraw_device (
     axidraw_settings_t settings;
     if (!load_axidraw_settings (model, &settings)) {
         LOGE ("Не вдалося завантажити налаштування для моделі %s", model ? model : "(типова)");
+        axistate_update ("config_fail", action_name, -1, 0, NULL);
         status = 1;
         goto cleanup;
     }
@@ -231,6 +243,7 @@ static cmd_result_t with_axidraw_device (
     char errbuf[256];
     if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) != 0) {
         LOGE ("Не вдалося підключитися до AxiDraw: %s", errbuf);
+        axistate_update ("connect_fail", action_name, -1, 0, NULL);
         axidraw_device_disconnect (&dev);
         status = 1;
         goto cleanup;
@@ -240,7 +253,7 @@ static cmd_result_t with_axidraw_device (
         LOGI ("Виконання дії '%s' на порту %s", action_name, dev.port_path);
     }
 
-    debug_log_device_status ("before", &dev);
+    update_state_from_device (&dev, "before", action_name, 0, 0);
 
     int rc = 0;
     if (cb)
@@ -252,12 +265,8 @@ static cmd_result_t with_axidraw_device (
     if (rc == 0 && wait_idle)
         idle_rc = wait_for_device_idle (&dev);
 
-    if (rc == 0) {
-        if (wait_idle && idle_rc == 0)
-            debug_log_device_status ("after_wait", &dev);
-        else
-            debug_log_device_status ("after", &dev);
-    }
+    const char *phase = (rc != 0) ? "error" : ((wait_idle && idle_rc == 0) ? "after_wait" : "after");
+    update_state_from_device (&dev, phase, action_name, rc, wait_idle ? idle_rc : 0);
 
     axidraw_device_disconnect (&dev);
 
@@ -503,6 +512,77 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
     return 0;
 }
 
+static bool shell_print_state_once (void) {
+    axistate_t state;
+    bool have = axistate_get (&state);
+    if (!have || !state.valid) {
+        fprintf (stdout, "Стан контролера ще не доступний\n");
+        fflush (stdout);
+        return false;
+    }
+
+    char timebuf[64];
+    struct tm tm_buf;
+    time_t sec = state.ts.tv_sec;
+    if (localtime_r (&sec, &tm_buf))
+        strftime (timebuf, sizeof (timebuf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+    else
+        snprintf (timebuf, sizeof (timebuf), "%lld", (long long)sec);
+
+    long millis = state.ts.tv_nsec / 1000000L;
+    if (millis < 0)
+        millis = 0;
+
+    fprintf (
+        stdout, "Час оновлення: %s.%03ld\nФаза: %s; дія: %s; rc=%d; wait=%d\n",
+        timebuf, millis, state.phase[0] ? state.phase : "-", state.action[0] ? state.action : "-",
+        state.command_rc, state.wait_rc);
+
+    if (!state.snapshot_valid) {
+        fprintf (stdout, "Стан контролера недоступний\n\n");
+        fflush (stdout);
+        return true;
+    }
+
+    const ebb_status_snapshot_t *snap = &state.snapshot;
+    fprintf (
+        stdout,
+        "Рух: активна команда=%s, мотор X=%s, мотор Y=%s, FIFO=%s, перо підняте=%s, сервопривід=%s\n",
+        snap->motion.command_active ? "так" : "ні",
+        snap->motion.motor1_active ? "так" : "ні",
+        snap->motion.motor2_active ? "так" : "ні",
+        snap->motion.fifo_pending ? "так" : "ні",
+        snap->pen_up ? "так" : "ні",
+        snap->servo_power ? "так" : "ні");
+
+    double pos_x_mm = snap->steps_axis1 / AXIDRAW_STEPS_PER_MM;
+    double pos_y_mm = snap->steps_axis2 / AXIDRAW_STEPS_PER_MM;
+    fprintf (
+        stdout,
+        "Позиція: X=%.3f мм (кроки %ld), Y=%.3f мм (кроки %ld)\n\n",
+        pos_x_mm, (long)snap->steps_axis1, pos_y_mm, (long)snap->steps_axis2);
+    fflush (stdout);
+    return true;
+}
+
+static void shell_watch (double interval, int max_iter) {
+    if (interval <= 0.0)
+        interval = 1.0;
+    struct timespec sleep_ts;
+    sleep_ts.tv_sec = (time_t)interval;
+    sleep_ts.tv_nsec = (long)((interval - (double)sleep_ts.tv_sec) * 1e9);
+    if (sleep_ts.tv_nsec < 0)
+        sleep_ts.tv_nsec = 0;
+    if (max_iter < 0)
+        fprintf (stdout, "Натисніть Ctrl+C для зупинки watch\n");
+    for (int i = 0; max_iter < 0 || i < max_iter; ++i) {
+        shell_print_state_once ();
+        if (max_iter >= 0 && i + 1 >= max_iter)
+            break;
+        nanosleep (&sleep_ts, NULL);
+    }
+}
+
 static void shell_print_help (void) {
     fprintf (stdout, "Доступні команди:\n");
     fprintf (stdout, "  help                 — показати це повідомлення\n");
@@ -514,6 +594,8 @@ static void shell_print_help (void) {
     fprintf (stdout, "  pen up|down|toggle   — керування пером\n");
     fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
     fprintf (stdout, "  abort                — аварійно зупинити всі рухи\n");
+    fprintf (stdout, "  state                — показати останній відомий стан пристрою\n");
+    fprintf (stdout, "  watch [sec [n]]      — періодично показувати стан (Ctrl+C для переривання)\n");
     fprintf (stdout, "  jog <dx> <dy>        — ручний зсув на dx/dy мм\n");
     fprintf (stdout, "  home                 — повернутися у початкову позицію\n");
     fprintf (stdout, "  status               — показати агрегований стан контролера\n");
@@ -634,6 +716,34 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             cmd_device_list (current_model, verbose);
             continue;
         }
+        if (strcasecmp (cmd, "state") == 0 || strcasecmp (cmd, "stats") == 0) {
+            shell_print_state_once ();
+            continue;
+        }
+        if (strcasecmp (cmd, "watch") == 0) {
+            double interval = 1.0;
+            int max_iter = -1;
+            if (ntokens >= 2) {
+                if (!parse_double_str (tokens[1], &interval) || interval <= 0.0) {
+                    LOGW ("Некоректний інтервал watch");
+                    continue;
+                }
+            }
+            if (ntokens >= 3) {
+                char *endc = NULL;
+                long cnt = strtol (tokens[2], &endc, 10);
+                if (!tokens[2][0] || (endc && *endc)) {
+                    LOGW ("Некоректне значення лічильника для watch");
+                    continue;
+                }
+                if (cnt < 0)
+                    max_iter = -1;
+                else
+                    max_iter = (int)cnt;
+            }
+            shell_watch (interval, max_iter);
+            continue;
+        }
         if (strcasecmp (cmd, "connect") == 0) {
             const char *req_port = (ntokens >= 2) ? tokens[1] : NULL;
             if (!settings_loaded) {
@@ -658,10 +768,12 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) == 0) {
                 connected = true;
                 LOGI ("Підключено через %s", dev.port_path);
+                update_state_from_device (&dev, "connect", "connect", 0, 0);
             } else {
                 connected = false;
                 dev.port_path[0] = '\0';
                 LOGE ("Не вдалося підключитися: %s", errbuf);
+                axistate_update ("connect_fail", "connect", -1, 0, NULL);
             }
             continue;
         }
@@ -672,6 +784,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
                 axidraw_device_disconnect (&dev);
                 connected = false;
                 LOGI ("З’єднання розірвано");
+                axistate_update ("disconnect", "disconnect", 0, 0, NULL);
             } else {
                 LOGW ("З’єднання ще не встановлено");
             }
@@ -701,6 +814,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             }
             if (rc != 0)
                 LOGE ("Команда не виконана");
+            update_state_from_device (&dev, "pen", tokens[1], rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "motors") == 0) {
@@ -719,16 +833,21 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             }
             if (rc != 0)
                 LOGE ("Команда не виконана");
+            update_state_from_device (&dev, "motors", tokens[1], rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "abort") == 0) {
-            if (device_abort_cb (&dev, NULL) != 0)
+            int rc = device_abort_cb (&dev, NULL);
+            if (rc != 0)
                 LOGE ("Не вдалося виконати аварійну зупинку");
+            update_state_from_device (&dev, "abort", "abort", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "home") == 0) {
-            if (device_home_cb (&dev, NULL) != 0)
+            int rc = device_home_cb (&dev, NULL);
+            if (rc != 0)
                 LOGE ("Не вдалося повернутися у початкову позицію");
+            update_state_from_device (&dev, "home", "home", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "jog") == 0) {
@@ -743,41 +862,54 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
                 continue;
             }
             struct jog_ctx ctx = { .dx_mm = dx, .dy_mm = dy };
-            if (device_jog_cb (&dev, &ctx) != 0)
+            int rc = device_jog_cb (&dev, &ctx);
+            if (rc != 0)
                 LOGE ("Не вдалося виконати зсув");
+            update_state_from_device (&dev, "jog", "jog", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "status") == 0) {
-            if (device_status_cb (&dev, NULL) != 0)
+            int rc = device_status_cb (&dev, NULL);
+            if (rc != 0)
                 LOGE ("Не вдалося отримати статус");
+            update_state_from_device (&dev, "status", "status", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "position") == 0) {
-            if (device_position_cb (&dev, NULL) != 0)
+            int rc = device_position_cb (&dev, NULL);
+            if (rc != 0)
                 LOGE ("Не вдалося отримати позицію");
+            update_state_from_device (&dev, "position", "position", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "version") == 0) {
-            if (device_version_cb (&dev, NULL) != 0)
+            int rc = device_version_cb (&dev, NULL);
+            if (rc != 0)
                 LOGE ("Не вдалося отримати версію контролера");
+            update_state_from_device (&dev, "version", "version", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "reset") == 0) {
-            if (device_reset_cb (&dev, NULL) != 0)
+            int rc = device_reset_cb (&dev, NULL);
+            if (rc != 0)
                 LOGE ("Не вдалося скинути стан");
+            update_state_from_device (&dev, "reset", "reset", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "reboot") == 0) {
-            if (device_reboot_cb (&dev, NULL) == 0) {
-                if (wait_for_device_idle (&dev) != 0)
-                    LOGW ("Не вдалося підтвердити завершення команд перед перезавантаженням");
-                axidraw_device_disconnect (&dev);
-                connected = false;
-                settings_loaded = false;
-                LOGI ("Контролер перезавантажується — підключіться знову після готовності");
-            } else {
+            int rc = device_reboot_cb (&dev, NULL);
+            if (rc != 0) {
                 LOGE ("Не вдалося ініціювати перезавантаження");
+                update_state_from_device (&dev, "reboot_fail", "reboot", rc, 0);
+                continue;
             }
+            if (wait_for_device_idle (&dev) != 0)
+                LOGW ("Не вдалося підтвердити завершення команд перед перезавантаженням");
+            axistate_update ("reboot", "reboot", rc, 0, NULL);
+            axidraw_device_disconnect (&dev);
+            connected = false;
+            settings_loaded = false;
+            LOGI ("Контролер перезавантажується — підключіться знову після готовності");
             continue;
         }
 
@@ -789,6 +921,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         if (wait_for_device_idle (&dev) != 0)
             LOGW ("Не вдалося підтвердити завершення команд перед відключенням");
         axidraw_device_disconnect (&dev);
+        axistate_update ("disconnect", "disconnect", 0, 0, NULL);
     }
     axidraw_device_lock_release (lock_fd);
     LOGI ("Інтерактивну сесію завершено");
