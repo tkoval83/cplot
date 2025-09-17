@@ -27,6 +27,8 @@ typedef struct {
     int timeout_ms;           /**< Базовий тайм-аут для команд. */
     double min_cmd_interval;  /**< Мінімальний інтервал між командами (мс). */
     struct timespec last_cmd; /**< Час відправлення останньої команди. */
+    size_t max_fifo_commands; /**< Максимальна кількість команд, допущених у черзі EBB. */
+    size_t pending_commands;  /**< Команди, що вже надіслані та очікують виконання. */
     bool connected;           /**< Статус підключення. */
 } axidraw_device_t;
 
@@ -85,6 +87,14 @@ bool axidraw_device_is_connected (const axidraw_device_t *dev);
  * @param min_interval_ms Інтервал у мс (>= 0).
  */
 void axidraw_set_rate_limit (axidraw_device_t *dev, double min_interval_ms);
+
+/**
+ * @brief Обмежити кількість одночасних команд у FIFO EBB.
+ *
+ * @param dev              Структура пристрою.
+ * @param max_fifo_commands Максимальна кількість команд (0 → без обмеження).
+ */
+void axidraw_set_fifo_limit (axidraw_device_t *dev, size_t max_fifo_commands);
 
 /**
  * @brief Підняти перо (SP,1).
