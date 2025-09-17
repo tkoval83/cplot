@@ -481,7 +481,7 @@ static void shell_print_help (void) {
     fprintf (stdout, "  model [NAME]         — показати або встановити модель (наприклад, minikit2)\n");
     fprintf (stdout, "  list                 — перелік потенційних портів AxiDraw\n");
     fprintf (stdout, "  pen up|down|toggle   — керування пером\n");
-        fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
+    fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
     fprintf (stdout, "  abort                — аварійно зупинити всі рухи\n");
     fprintf (stdout, "  jog <dx> <dy>        — ручний зсув на dx/dy мм\n");
     fprintf (stdout, "  home                 — повернутися у початкову позицію\n");
