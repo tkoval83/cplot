@@ -6,6 +6,7 @@
 
 #include "jsr.h"
 #include "log.h"
+#include "trace.h"
 #include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
@@ -54,6 +55,7 @@ void fontreg_set_root (const char *path) {
     g_font_root_initialized = 1;
     if (!path || !*path) {
         g_font_root[0] = '\0';
+        trace_write (LOG_INFO, "fontreg: скинуто базовий каталог" );
         return;
     }
     copy_string (g_font_root, sizeof (g_font_root), path);
@@ -62,6 +64,7 @@ void fontreg_set_root (const char *path) {
         g_font_root[len - 1] = '\0';
         --len;
     }
+    trace_write (LOG_INFO, "fontreg: встановлено базовий каталог → %s", g_font_root);
 }
 
 /**
@@ -107,6 +110,8 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         fp = fopen ("hershey/index.json", "r");
     if (!fp) {
         LOGE ("не знайдено hershey/index.json");
+        trace_write (LOG_ERROR, "fontreg: не знайдено hershey/index.json (root=%s)",
+            root ? root : "<cwd>");
         return -2;
     }
     /* Зчитати увесь файл у пам'ять */
@@ -133,6 +138,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
     font_face_t *arr = (font_face_t *)malloc (cap * sizeof (*arr));
     if (!arr) {
         free (json);
+        trace_write (LOG_ERROR, "fontreg: нестача пам'яті під час читання index.json");
         return -3;
     }
 
@@ -142,6 +148,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         free (arr);
         free (json);
         LOGE ("некоректний формат hershey/index.json (очікувався об’єкт)");
+        trace_write (LOG_ERROR, "fontreg: некоректний формат index.json");
         return -4;
     }
     p++;
@@ -274,6 +281,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
 
     *faces = arr;
     LOGD ("завантажено шрифтів: %zu", *count);
+    trace_write (LOG_INFO, "fontreg: завантажено %zu шрифтів", *count);
     free (json);
     return 0;
 }
@@ -295,6 +303,7 @@ int fontreg_resolve (const char *query, font_face_t *out) {
     if (fontreg_list (&faces, &count) != 0 || count == 0) {
         free (faces);
         LOGE ("не вдалося завантажити реєстр шрифтів");
+        trace_write (LOG_ERROR, "fontreg: реєстр шрифтів недоступний");
         return -2;
     }
     /* Default to hershey_sans_med when query is NULL/empty */
@@ -330,8 +339,17 @@ int fontreg_resolve (const char *query, font_face_t *out) {
     free (faces);
     if (!found) {
         LOGW ("шрифт не знайдено: '%s'", (query && *query) ? query : "<типовий>");
+        trace_write (
+            LOG_WARN,
+            "fontreg: шрифт не знайдено (%s)",
+            (query && *query) ? query : "<типовий>");
         return -3;
     }
     LOGD ("вибрано шрифт: %s", out->id);
+    trace_write (
+        LOG_INFO,
+        "fontreg: обрано шрифт %s (%s)",
+        out->id,
+        (query && *query) ? query : "<типовий>");
     return 0;
 }

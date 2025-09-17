@@ -22,6 +22,7 @@
 #define CONFIG_VERSION 1
 
 #include "log.h"
+#include "trace.h"
 
 typedef struct device_profile {
     const char *model;
@@ -141,6 +142,14 @@ int config_factory_defaults (config_t *c, const char *device_model) {
     c->paper_h_mm = profile->paper_h_mm;
     c->speed_mm_s = profile->speed_mm_s;
     c->accel_mm_s2 = profile->accel_mm_s2;
+    trace_write (
+        LOG_DEBUG,
+        "config: заводські параметри для моделі %s (paper=%.1fx%.1f speed=%.1f accel=%.1f)",
+        model,
+        c->paper_w_mm,
+        c->paper_h_mm,
+        c->speed_mm_s,
+        c->accel_mm_s2);
     return 0;
 }
 
@@ -165,6 +174,7 @@ int config_get_path (char *buf, size_t buflen) {
             return -1;
         }
         LOGD ("шлях конфігурації з XDG_CONFIG_HOME: %s", buf);
+        trace_write (LOG_DEBUG, "config: шлях за XDG_CONFIG_HOME → %s", buf);
         return 0;
     }
     if (home && home[0]) {
@@ -175,6 +185,7 @@ int config_get_path (char *buf, size_t buflen) {
             return -1;
         }
         LOGD ("шлях конфігурації з $HOME: %s", buf);
+        trace_write (LOG_DEBUG, "config: шлях за $HOME → %s", buf);
         return 0;
     }
     int written = snprintf (buf, buflen, "./config.json");
@@ -183,6 +194,7 @@ int config_get_path (char *buf, size_t buflen) {
         return -1;
     }
     LOGW ("не вдалося визначити XDG/HOME; використано локальний шлях: %s", buf);
+    trace_write (LOG_WARN, "config: fallback шлях → %s", buf);
     return 0;
 }
 
@@ -418,6 +430,7 @@ int config_load (config_t *out) {
     if (!fp) {
         /* no file: keep defaults */
         LOGI ("файл конфігурації не знайдено — використано типові значення");
+        trace_write (LOG_INFO, "config: файл %s відсутній — застосовано типові значення", path);
         return 0;
     }
     fseek (fp, 0, SEEK_END);
@@ -444,6 +457,9 @@ int config_load (config_t *out) {
         /* If invalid, fall back to factory */
         config_factory_defaults (out, CONFIG_DEFAULT_MODEL);
         LOGW ("конфігурацію визнано невалідною — застосовано значення за замовчуванням");
+        trace_write (LOG_WARN, "config: файл %s містив невалідні дані", path);
+    } else {
+        trace_write (LOG_INFO, "config: конфігурацію завантажено з %s", path);
     }
     return 0;
 }
@@ -468,10 +484,11 @@ int config_save (const config_t *cfg) {
     char *last_sep = strrchr (dir, PATH_SEP);
     if (last_sep) {
         *last_sep = '\0';
-        if (mkdir_p (dir) != 0) {
-            LOGE ("не вдалося створити каталог: %s", dir);
-            return -7;
-        }
+    if (mkdir_p (dir) != 0) {
+        LOGE ("не вдалося створити каталог: %s", dir);
+        trace_write (LOG_ERROR, "config: не вдалося створити каталог %s", dir);
+        return -7;
+    }
     }
 
     /* Write to temp then rename */
@@ -480,25 +497,30 @@ int config_save (const config_t *cfg) {
     FILE *fp = fopen (tmp, "wb");
     if (!fp) {
         LOGE ("не вдалося відкрити файл для запису: %s", tmp);
+        trace_write (LOG_ERROR, "config: не вдалося відкрити %s для запису", tmp);
         return -3;
     }
     if (write_json (fp, cfg) != 0) {
         fclose (fp);
         remove (tmp);
         LOGE ("помилка під час запису конфігурації у JSON: %s", tmp);
+        trace_write (LOG_ERROR, "config: помилка запису у %s", tmp);
         return -4;
     }
     if (fclose (fp) != 0) {
         remove (tmp);
         LOGE ("помилка під час закриття файлу: %s", tmp);
+        trace_write (LOG_ERROR, "config: не вдалося закрити %s", tmp);
         return -5;
     }
     if (rename (tmp, path) != 0) {
         remove (tmp);
         LOGE ("не вдалося перейменувати %s у %s", tmp, path);
+        trace_write (LOG_ERROR, "config: не вдалося перейменувати %s у %s", tmp, path);
         return -6;
     }
     LOGI ("конфігурацію збережено: %s", path);
+    trace_write (LOG_INFO, "config: конфігурацію збережено до %s", path);
     return 0;
 }
 
@@ -510,5 +532,6 @@ int config_save (const config_t *cfg) {
 int config_reset (void) {
     config_t c;
     config_factory_defaults (&c, CONFIG_DEFAULT_MODEL);
+    trace_write (LOG_INFO, "config: reset до заводських налаштувань");
     return config_save (&c);
 }

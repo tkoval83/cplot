@@ -25,6 +25,7 @@
 #include "jsw.h"
 #include "log.h"
 #include "proginfo.h"
+#include "trace.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -179,6 +180,7 @@ static void handle_initialize (const char *id_ptr, size_t id_len) {
     struct init_ctx ctx = { .protocol_version = "2025-06-18",
                             .server_name = __PROGRAM_NAME__,
                             .server_version = __PROGRAM_VERSION__ };
+    trace_write (LOG_INFO, "mcp: initialize (server=%s v%s)", ctx.server_name, ctx.server_version);
     write_json_ok (id_ptr, id_len, emit_initialize_result, &ctx);
 }
 
@@ -196,6 +198,7 @@ static void emit_ping_result (json_writer_t *w, void *ctx) {
 }
 
 static void handle_ping (const char *id_ptr, size_t id_len) {
+    trace_write (LOG_DEBUG, "mcp: ping");
     write_json_ok (id_ptr, id_len, emit_ping_result, NULL);
 }
 
@@ -373,10 +376,12 @@ static void emit_state_result (json_writer_t *w, void *vctx) {
 static void handle_call_tool_state (const char *id_ptr, size_t id_len) {
     struct state_ctx ctx;
     ctx.available = axistate_get (&ctx.state);
+    trace_write (LOG_DEBUG, "mcp: state (available=%d)", ctx.available ? 1 : 0);
     write_json_ok (id_ptr, id_len, emit_state_result, &ctx);
 }
 
 static void handle_list_tools (const char *id_ptr, size_t id_len) {
+    trace_write (LOG_DEBUG, "mcp: tools/list");
     write_json_ok (id_ptr, id_len, emit_list_tools_result, NULL);
 }
 
@@ -401,6 +406,12 @@ static void handle_call_tool_print (const char *id_ptr, size_t id_len, const cha
         write_json_err (id_ptr, id_len, -32602, "Відсутні arguments для tools/call");
         return;
     }
+
+    trace_write (
+        LOG_INFO,
+        "mcp: tools/call.print id=%.*s",
+        (int)id_len,
+        id_ptr ? id_ptr : "null");
 
     int png = 0; /* типово SVG */
     /* Якщо fmt=="png" → png=1, якщо "svg" або відсутнє → png=0 */
@@ -435,6 +446,7 @@ static void handle_call_tool_print (const char *id_ptr, size_t id_len, const cha
     if (rc != 0) {
         free (in_str);
         write_json_err (id_ptr, id_len, -32000, "Не вдалося згенерувати прев’ю");
+        trace_write (LOG_ERROR, "mcp: прев’ю не сформовано (rc=%d)", rc);
         return;
     }
 
@@ -444,11 +456,13 @@ static void handle_call_tool_print (const char *id_ptr, size_t id_len, const cha
     free (in_str);
     if (!b64) {
         write_json_err (id_ptr, id_len, -32001, "Недостатньо пам’яті для кодування base64");
+        trace_write (LOG_ERROR, "mcp: бракує пам’яті для base64 (%zu байт)", out.len);
         return;
     }
     struct preview_ctx ctx
         = { .mime = png ? "image/png" : "image/svg+xml", .b64 = b64, .b64len = b64len };
     write_json_ok (id_ptr, id_len, emit_preview_result, &ctx);
+    trace_write (LOG_INFO, "mcp: прев’ю сформовано (%s, %zu байт)", ctx.mime, out.len);
     free (b64);
 }
 
@@ -465,6 +479,7 @@ static void handle_call_tool (const char *id_ptr, size_t id_len, const char *jso
         write_json_err (id_ptr, id_len, -32602, "Відсутня назва інструменту");
         return;
     }
+    trace_write (LOG_DEBUG, "mcp: tools/call name=%s", name);
     if (strcmp (name, "print") == 0 || strcmp (name, "cplot.print_preview") == 0) {
         free (name);
         handle_call_tool_print (id_ptr, id_len, json);
@@ -477,6 +492,7 @@ static void handle_call_tool (const char *id_ptr, size_t id_len, const char *jso
     }
     free (name);
     write_json_err (id_ptr, id_len, -32601, "Інструмент не підтримується у цій версії MCP");
+    trace_write (LOG_WARN, "mcp: інструмент не підтримується");
 }
 
 /* ---- Основний цикл ------------------------------------------------------ */
@@ -510,6 +526,7 @@ int mcp_run (void) {
             write_json_err (id_ptr, id_len, -32600, "Некоректний запит (відсутній method)");
             continue;
         }
+        trace_write (LOG_DEBUG, "mcp: запит method=%s", method);
         if (strcmp (method, "initialize") == 0) {
             handle_initialize (id_ptr, id_len);
         } else if (strcmp (method, "tools/list") == 0) {
@@ -529,5 +546,6 @@ int mcp_run (void) {
     }
     free (line);
     LOGI ("MCP‑режим завершено (EOF)");
+    trace_write (LOG_INFO, "mcp: завершення (EOF)");
     return 0;
 }

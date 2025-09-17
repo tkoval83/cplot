@@ -8,6 +8,7 @@
 #include "help.h"
 #include "log.h"
 #include "axistate.h"
+#include "trace.h"
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -1046,6 +1047,20 @@ cmd_result_t cmd_print_execute (
     bool dry_run,
     verbose_level_t verbose) {
     LOGI ("Почато побудову та друк");
+    trace_write (
+        LOG_INFO,
+        "cmd.print: bytes=%zu font=%s папір=%.1fx%.1f поля=%.1f/%.1f/%.1f/%.1f орієнтація=%d dry=%s verbose=%d",
+        in.len,
+        font_family ? font_family : "<типовий>",
+        paper_w_mm,
+        paper_h_mm,
+        margin_top_mm,
+        margin_right_mm,
+        margin_bottom_mm,
+        margin_left_mm,
+        orientation,
+        dry_run ? "так" : "ні",
+        verbose);
     (void)paper_w_mm;
     (void)paper_h_mm;
     (void)margin_top_mm;
@@ -1088,6 +1103,13 @@ cmd_result_t cmd_print_preview_execute (
     (void)orientation;
     (void)verbose;
     LOGI ("Попередній перегляд");
+    trace_write (
+        LOG_INFO,
+        "cmd.preview: bytes=%zu font=%s формат=%s орієнтація=%d",
+        in.len,
+        font_family ? font_family : "<типовий>",
+        format == PREVIEW_FMT_PNG ? "png" : "svg",
+        orientation);
     if (!out) {
         LOGE ("Внутрішня помилка: не задано вихідні параметри прев’ю");
         return 1;
@@ -1166,6 +1188,7 @@ cmd_result_t cmd_print_preview_execute (
 cmd_result_t cmd_version_execute (verbose_level_t verbose) {
     if (verbose)
         LOGI ("Докладний режим виводу");
+    trace_write (LOG_INFO, "cmd.version: виклик (verbose=%d)", verbose);
     version ();
     return 0;
 }
@@ -1223,6 +1246,17 @@ cmd_result_t cmd_device_execute (
     double jog_dx_mm,
     double jog_dy_mm,
     verbose_level_t verbose) {
+    trace_write (
+        LOG_INFO,
+        "cmd.device: kind=%d pen=%d motor=%d port=%s модель=%s jog=(%.3f,%.3f) verbose=%d",
+        action ? action->kind : 0,
+        action ? action->pen : 0,
+        action ? action->motor : 0,
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        jog_dx_mm,
+        jog_dy_mm,
+        verbose);
     if (!action || action->kind == DEVICE_ACTION_NONE) {
         LOGW ("Не вказано дію для пристрою");
         return 2;
@@ -1286,6 +1320,7 @@ cmd_result_t cmd_device_execute (
 cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose) {
     (void)verbose;
     LOGI ("Системна інформація");
+    trace_write (LOG_INFO, "cmd.sysinfo: запит (verbose=%d)", verbose);
     fprintf (stdout, "Системна інформація: ще не реалізовано\n");
     return 0;
 }
@@ -1296,6 +1331,7 @@ cmd_result_t cmd_sysinfo_execute (verbose_level_t verbose) {
 cmd_result_t cmd_font_list_execute (verbose_level_t verbose) {
     (void)verbose;
     LOGI ("Перелік доступних шрифтів");
+    trace_write (LOG_INFO, "cmd.fonts: перелік шрифтів (verbose=%d)", verbose);
     font_face_t *faces = NULL;
     size_t count = 0;
     int rc = fontreg_list (&faces, &count);
@@ -1317,6 +1353,7 @@ cmd_result_t cmd_config_show (const config_t *cfg, verbose_level_t verbose) {
     (void)cfg;
     (void)verbose;
     LOGI ("Поточні налаштування");
+    trace_write (LOG_INFO, "cmd.config: show (verbose=%d)", verbose);
     fprintf (stdout, "Налаштування (показ): ще не реалізовано\n");
     return 0;
 }
@@ -1326,6 +1363,7 @@ cmd_result_t cmd_config_reset (config_t *inout_cfg, verbose_level_t verbose) {
     (void)inout_cfg;
     (void)verbose;
     LOGI ("Скидання налаштувань");
+    trace_write (LOG_INFO, "cmd.config: reset (verbose=%d)", verbose);
     fprintf (stdout, "Налаштування (скидання): ще не реалізовано\n");
     return 0;
 }
@@ -1336,6 +1374,10 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, verbose
     (void)verbose;
     (void)set_pairs;
     LOGI ("Застосування нових налаштувань");
+    trace_write (
+        LOG_INFO,
+        "cmd.config: set (%s)",
+        set_pairs && *set_pairs ? set_pairs : "<порожньо>");
     fprintf (stdout, "Налаштування (встановлення): ще не реалізовано\n");
     return 0;
 }
@@ -1400,6 +1442,11 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
     (void)model;
     (void)verbose;
     LOGI ("Перелік доступних портів");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.list: модель=%s verbose=%d",
+        model ? model : "<типова>",
+        verbose);
 
     static const char *patterns[] = { "/dev/serial/by-id/usb-EiBotBoard*",
                                       "/dev/serial/by-id/usb-*-EiBotBoard*",
@@ -1499,12 +1546,24 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
 /// Підняти перо (device up).
 cmd_result_t cmd_device_pen_up (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Підйом пера");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.pen_up: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (port, model, verbose, "підйом пера", device_pen_up_cb, NULL, true);
 }
 
 /// Опустити перо (device down).
 cmd_result_t cmd_device_pen_down (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Опускання пера");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.pen_down: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "опускання пера", device_pen_down_cb, NULL, true);
 }
@@ -1512,6 +1571,12 @@ cmd_result_t cmd_device_pen_down (const char *port, const char *model, verbose_l
 /// Перемкнути стан пера (device toggle).
 cmd_result_t cmd_device_pen_toggle (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Перемикання пера");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.pen_toggle: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "перемикання пера", device_pen_toggle_cb, NULL, true);
 }
@@ -1519,6 +1584,12 @@ cmd_result_t cmd_device_pen_toggle (const char *port, const char *model, verbose
 /// Увімкнути мотори (device motors-on).
 cmd_result_t cmd_device_motors_on (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Увімкнення моторів");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.motors_on: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "увімкнення моторів", device_motors_on_cb, NULL, false);
 }
@@ -1526,6 +1597,12 @@ cmd_result_t cmd_device_motors_on (const char *port, const char *model, verbose_
 /// Вимкнути мотори (device motors-off).
 cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Вимкнення моторів");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.motors_off: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "вимкнення моторів", device_motors_off_cb, NULL, false);
 }
@@ -1533,6 +1610,12 @@ cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose
 /// Аварійна зупинка (device abort).
 cmd_result_t cmd_device_abort (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Аварійна зупинка");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.abort: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "аварійна зупинка", device_abort_cb, NULL, false);
 }
@@ -1540,6 +1623,12 @@ cmd_result_t cmd_device_abort (const char *port, const char *model, verbose_leve
 /// Перемістити у початкову позицію (home).
 cmd_result_t cmd_device_home (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Повернення у початкову позицію");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.home: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "повернення у домашню позицію", device_home_cb, NULL, false);
 }
@@ -1548,6 +1637,14 @@ cmd_result_t cmd_device_home (const char *port, const char *model, verbose_level
 cmd_result_t cmd_device_jog (
     const char *port, const char *model, double dx_mm, double dy_mm, verbose_level_t verbose) {
     LOGI ("Ручний зсув: по іксу %.3f мм, по ігреку %.3f мм", dx_mm, dy_mm);
+    trace_write (
+        LOG_INFO,
+        "cmd.device.jog: порт=%s модель=%s dx=%.3f dy=%.3f verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        dx_mm,
+        dy_mm,
+        verbose);
     struct jog_ctx ctx = { .dx_mm = dx_mm, .dy_mm = dy_mm };
     return with_axidraw_device (port, model, verbose, "ручний зсув", device_jog_cb, &ctx, false);
 }
@@ -1555,6 +1652,12 @@ cmd_result_t cmd_device_jog (
 /// Показати версію контролера (device version).
 cmd_result_t cmd_device_version (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Версія контролера");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.version: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "версія контролера", device_version_cb, NULL, false);
 }
@@ -1562,6 +1665,12 @@ cmd_result_t cmd_device_version (const char *port, const char *model, verbose_le
 /// Показати статус пристрою (device status).
 cmd_result_t cmd_device_status (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Стан пристрою");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.status: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "статус пристрою", device_status_cb, NULL, false);
 }
@@ -1569,6 +1678,12 @@ cmd_result_t cmd_device_status (const char *port, const char *model, verbose_lev
 /// Показати поточну позицію (device position).
 cmd_result_t cmd_device_position (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Поточна позиція");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.position: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "поточна позиція", device_position_cb, NULL, false);
 }
@@ -1576,6 +1691,12 @@ cmd_result_t cmd_device_position (const char *port, const char *model, verbose_l
 /// Скинути контролер (device reset).
 cmd_result_t cmd_device_reset (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Скидання контролера");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.reset: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "скидання стану", device_reset_cb, NULL, false);
 }
@@ -1583,6 +1704,12 @@ cmd_result_t cmd_device_reset (const char *port, const char *model, verbose_leve
 /// Перезавантажити контролер (device reboot).
 cmd_result_t cmd_device_reboot (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Перезавантаження контролера");
+    trace_write (
+        LOG_INFO,
+        "cmd.device.reboot: порт=%s модель=%s verbose=%d",
+        port ? port : "<авто>",
+        model ? model : "<типова>",
+        verbose);
     return with_axidraw_device (
         port, model, verbose, "перезавантаження контролера", device_reboot_cb, NULL, false);
 }
