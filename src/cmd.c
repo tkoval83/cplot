@@ -154,10 +154,29 @@ static cmd_result_t with_axidraw_device (
     device_cb_t cb,
     void *ctx,
     bool wait_idle) {
+    cmd_result_t status = 0;
+    int lock_fd = -1;
+    if (axidraw_device_lock_acquire (&lock_fd) != 0) {
+        char holder[64] = "невідомий процес";
+        const char *lock_path = axidraw_device_lock_file ();
+        FILE *lf = fopen (lock_path, "r");
+        if (lf) {
+            if (fgets (holder, sizeof (holder), lf)) {
+                holder[strcspn (holder, "\r\n")] = '\0';
+                if (holder[0] == '\0')
+                    snprintf (holder, sizeof (holder), "%s", "невідомий процес");
+            }
+            fclose (lf);
+        }
+        LOGW ("AxiDraw вже використовується (%s)", holder);
+        return 1;
+    }
+
     axidraw_settings_t settings;
     if (!load_axidraw_settings (model, &settings)) {
         LOGE ("Не вдалося завантажити налаштування для моделі %s", model ? model : "(типова)");
-        return 1;
+        status = 1;
+        goto cleanup;
     }
 
     axidraw_device_t dev;
@@ -169,7 +188,8 @@ static cmd_result_t with_axidraw_device (
     if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) != 0) {
         LOGE ("Не вдалося підключитися до AxiDraw: %s", errbuf);
         axidraw_device_disconnect (&dev);
-        return 1;
+        status = 1;
+        goto cleanup;
     }
 
     if (verbose == VERBOSE_ON) {
@@ -189,10 +209,13 @@ static cmd_result_t with_axidraw_device (
     axidraw_device_disconnect (&dev);
 
     if (rc != 0)
-        return 1;
-    if (wait_idle && idle_rc != 0)
-        return 1;
-    return 0;
+        status = 1;
+    else if (wait_idle && idle_rc != 0)
+        status = 1;
+
+cleanup:
+    axidraw_device_lock_release (lock_fd);
+    return status;
 }
 
 /**
@@ -358,14 +381,10 @@ static int device_status_cb (axidraw_device_t *dev, void *ctx) {
     if (axidraw_status (dev, &snapshot) != 0)
         return -1;
     fprintf (stdout, "Статус пристрою:\n");
-    fprintf (
-        stdout, "  Команда активна: %s\n", snapshot.motion.command_active ? "так" : "ні");
-    fprintf (
-        stdout, "  Мотор X активний: %s\n", snapshot.motion.motor1_active ? "так" : "ні");
-    fprintf (
-        stdout, "  Мотор Y активний: %s\n", snapshot.motion.motor2_active ? "так" : "ні");
-    fprintf (
-        stdout, "  FIFO непорожній: %s\n", snapshot.motion.fifo_pending ? "так" : "ні");
+    fprintf (stdout, "  Команда активна: %s\n", snapshot.motion.command_active ? "так" : "ні");
+    fprintf (stdout, "  Мотор X активний: %s\n", snapshot.motion.motor1_active ? "так" : "ні");
+    fprintf (stdout, "  Мотор Y активний: %s\n", snapshot.motion.motor2_active ? "так" : "ні");
+    fprintf (stdout, "  FIFO непорожній: %s\n", snapshot.motion.fifo_pending ? "так" : "ні");
     fprintf (stdout, "  Позиція X: %.3f мм\n", snapshot.steps_axis1 / AXIDRAW_STEPS_PER_MM);
     fprintf (stdout, "  Позиція Y: %.3f мм\n", snapshot.steps_axis2 / AXIDRAW_STEPS_PER_MM);
     fprintf (stdout, "  Перо підняте: %s\n", snapshot.pen_up ? "так" : "ні");
@@ -385,7 +404,8 @@ static int device_position_cb (axidraw_device_t *dev, void *ctx) {
         LOGE ("Не вдалося отримати позицію");
         return -1;
     }
-    fprintf (stdout, "Поточна позиція: X=%.3f мм, Y=%.3f мм\n", steps1 / AXIDRAW_STEPS_PER_MM,
+    fprintf (
+        stdout, "Поточна позиція: X=%.3f мм, Y=%.3f мм\n", steps1 / AXIDRAW_STEPS_PER_MM,
         steps2 / AXIDRAW_STEPS_PER_MM);
     return 0;
 }
@@ -751,10 +771,10 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, verbose
  * @brief Опис потенційного серійного порту AxiDraw для device --list.
  */
 typedef struct {
-    char path[PATH_MAX];    /**< Повний шлях до порту. */
-    bool responsive;        /**< true, якщо контролер відповів на запит V. */
-    char version[64];       /**< Рядок версії прошивки, якщо доступний. */
-    char detail[128];       /**< Пояснення у разі помилки. */
+    char path[PATH_MAX]; /**< Повний шлях до порту. */
+    bool responsive;     /**< true, якщо контролер відповів на запит V. */
+    char version[64];    /**< Рядок версії прошивки, якщо доступний. */
+    char detail[128];    /**< Пояснення у разі помилки. */
 } device_port_info_t;
 
 /**
@@ -779,11 +799,8 @@ static bool device_port_exists (const device_port_info_t *ports, size_t count, c
  * @param path     Шлях, який потрібно додати.
  * @return true при успіху; false у разі помилки алокації.
  */
-static bool device_port_add (
-    device_port_info_t **ports,
-    size_t *count,
-    size_t *capacity,
-    const char *path) {
+static bool
+device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, const char *path) {
     if (!ports || !count || !capacity || !path || !*path)
         return false;
     if (*ports && device_port_exists (*ports, *count, path))
@@ -811,12 +828,18 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
     (void)verbose;
     LOGI ("Перелік доступних портів");
 
-    static const char *patterns[]
-        = { "/dev/serial/by-id/usb-EiBotBoard*", "/dev/serial/by-id/usb-*-EiBotBoard*",
-              "/dev/serial/by-id/usb-*04d8*FD92*", "/dev/serial/by-id/usb-*04D8*FD92*",
-              "/dev/tty.usbserial-EiBotBoard*", "/dev/cu.usbserial-EiBotBoard*",
-              "/dev/cu.usbmodem*", "/dev/cu.usbserial*", "/dev/tty.usbmodem*",
-              "/dev/tty.usbserial*", "/dev/ttyACM*", "/dev/ttyUSB*" };
+    static const char *patterns[] = { "/dev/serial/by-id/usb-EiBotBoard*",
+                                      "/dev/serial/by-id/usb-*-EiBotBoard*",
+                                      "/dev/serial/by-id/usb-*04d8*FD92*",
+                                      "/dev/serial/by-id/usb-*04D8*FD92*",
+                                      "/dev/tty.usbserial-EiBotBoard*",
+                                      "/dev/cu.usbserial-EiBotBoard*",
+                                      "/dev/cu.usbmodem*",
+                                      "/dev/cu.usbserial*",
+                                      "/dev/tty.usbmodem*",
+                                      "/dev/tty.usbserial*",
+                                      "/dev/ttyACM*",
+                                      "/dev/ttyUSB*" };
 
     device_port_info_t *ports = NULL;
     size_t count = 0;
@@ -858,7 +881,8 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
     }
 
     if (count == 0) {
-        fprintf (stdout, "Потенційних портів AxiDraw не знайдено. Підключіть пристрій і повторіть.\n");
+        fprintf (
+            stdout, "Потенційних портів AxiDraw не знайдено. Підключіть пристрій і повторіть.\n");
         free (ports);
         return 0;
     }
@@ -880,7 +904,8 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
             strncpy (ports[i].version, version, sizeof (ports[i].version) - 1);
             ports[i].version[sizeof (ports[i].version) - 1] = '\0';
         } else {
-            strncpy (ports[i].detail, "немає відповіді від контролера", sizeof (ports[i].detail) - 1);
+            strncpy (
+                ports[i].detail, "немає відповіді від контролера", sizeof (ports[i].detail) - 1);
             ports[i].detail[sizeof (ports[i].detail) - 1] = '\0';
         }
         serial_close (sp);
@@ -912,8 +937,8 @@ cmd_result_t cmd_device_pen_up (const char *port, const char *model, verbose_lev
 /// Опустити перо (device down).
 cmd_result_t cmd_device_pen_down (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Опускання пера");
-    return with_axidraw_device (port, model, verbose, "опускання пера", device_pen_down_cb, NULL,
-        true);
+    return with_axidraw_device (
+        port, model, verbose, "опускання пера", device_pen_down_cb, NULL, true);
 }
 
 /// Перемкнути стан пера (device toggle).
@@ -940,8 +965,8 @@ cmd_result_t cmd_device_motors_off (const char *port, const char *model, verbose
 /// Перемістити у початкову позицію (home).
 cmd_result_t cmd_device_home (const char *port, const char *model, verbose_level_t verbose) {
     LOGI ("Повернення у початкову позицію");
-    return with_axidraw_device (port, model, verbose, "повернення у домашню позицію",
-        device_home_cb, NULL, false);
+    return with_axidraw_device (
+        port, model, verbose, "повернення у домашню позицію", device_home_cb, NULL, false);
 }
 
 /// Ручний зсув на dx/dy у мм (jog).
@@ -949,8 +974,7 @@ cmd_result_t cmd_device_jog (
     const char *port, const char *model, double dx_mm, double dy_mm, verbose_level_t verbose) {
     LOGI ("Ручний зсув: по іксу %.3f мм, по ігреку %.3f мм", dx_mm, dy_mm);
     struct jog_ctx ctx = { .dx_mm = dx_mm, .dy_mm = dy_mm };
-    return with_axidraw_device (
-        port, model, verbose, "ручний зсув", device_jog_cb, &ctx, false);
+    return with_axidraw_device (port, model, verbose, "ручний зсув", device_jog_cb, &ctx, false);
 }
 
 /// Показати версію контролера (device version).

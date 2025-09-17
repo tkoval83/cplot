@@ -121,6 +121,28 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen);
 void axidraw_device_disconnect (axidraw_device_t *dev);
 
 /**
+ * @brief Отримати взаємне виключення доступу до пристрою через lock-файл.
+ *
+ * @param out_fd Вихід: файловий дескриптор lock-файла.
+ * @return 0 при успіху; -1 якщо ресурс зайнятий або сталася помилка.
+ */
+int axidraw_device_lock_acquire (int *out_fd);
+
+/**
+ * @brief Зняти взаємне виключення, отримане через axidraw_device_lock_acquire().
+ *
+ * @param fd Файловий дескриптор lock-файла.
+ */
+void axidraw_device_lock_release (int fd);
+
+/**
+ * @brief Повернути шлях до lock-файла, який використовує менеджер AxiDraw.
+ *
+ * @return Вказівник на нуль-термінований рядок.
+ */
+const char *axidraw_device_lock_file (void);
+
+/**
  * @brief Перевірити стан з’єднання.
  *
  * @param dev Структура пристрою.

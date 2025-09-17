@@ -6,10 +6,15 @@
 #include "axidraw.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/file.h>
 #include <time.h>
+#include <unistd.h>
+#include <stdlib.h>
 
 #define AXIDRAW_DEFAULT_FIFO_LIMIT 3
 #define AXIDRAW_DEFAULT_MIN_INTERVAL_MS 5.0
@@ -51,6 +56,35 @@ static void axidraw_reset_runtime (axidraw_device_t *dev) {
 
 static void axidraw_sync_settings (axidraw_device_t *dev);
 static int axidraw_require_connection (axidraw_device_t *dev);
+static const char *axidraw_lock_path (void);
+
+/**
+ * @brief Побудувати шлях до lock-файла для взаємного виключення AxiDraw.
+ *
+ * Використовує TMPDIR, якщо змінна задана, інакше падає назад на /tmp. Значення
+ * кешується у статичному буфері, оскільки воно не змінюється протягом життя процесу.
+ *
+ * @return Нуль-термінований рядок із шляхом lock-файла.
+ */
+static const char *axidraw_lock_path (void) {
+    static char path_buf[PATH_MAX];
+    static bool initialized = false;
+    if (!initialized) {
+        const char *base = getenv ("TMPDIR");
+        if (!base || !*base)
+            base = "/tmp";
+        size_t len = strlen (base);
+        const char *suffix = "/cplot-axidraw.lock";
+        if (len + strlen (suffix) + 1 >= sizeof (path_buf))
+            snprintf (path_buf, sizeof (path_buf), "%s", "/tmp/cplot-axidraw.lock");
+        else
+            snprintf (
+                path_buf, sizeof (path_buf), "%s%s%s", base, (len && base[len - 1] == '/') ? "" : "/",
+                suffix);
+        initialized = true;
+    }
+    return path_buf;
+}
 
 /**
  * @brief Скинути структуру налаштувань до типового стану.
@@ -215,6 +249,55 @@ void axidraw_device_disconnect (axidraw_device_t *dev) {
     dev->connected = false;
     axidraw_reset_runtime (dev);
 }
+
+/**
+ * @brief Отримати взаємне виключення доступу до пристрою.
+ *
+ * Створює (за потреби) lock-файл і робить неблокуючий LOCK_EX. У разі успіху
+ * поверх файлу записується PID поточного процесу для діагностики.
+ *
+ * @param[out] out_fd Дескриптор lock-файла (для подальшого release).
+ * @return 0 — успіх, -1 — ресурс зайнято або сталася помилка I/O.
+ */
+int axidraw_device_lock_acquire (int *out_fd) {
+    if (!out_fd)
+        return -1;
+    const char *lock_path = axidraw_lock_path ();
+    int fd = open (lock_path, O_RDWR | O_CREAT, 0644);
+    if (fd < 0)
+        return -1;
+    if (flock (fd, LOCK_EX | LOCK_NB) != 0) {
+        close (fd);
+        return -1;
+    }
+    if (ftruncate (fd, 0) == 0) {
+        char buf[64];
+        int len = snprintf (buf, sizeof (buf), "pid=%ld\n", (long)getpid ());
+        if (len > 0)
+            write (fd, buf, (size_t)len);
+    }
+    *out_fd = fd;
+    return 0;
+}
+
+/**
+ * @brief Зняти взаємне виключення, отримане axidraw_device_lock_acquire().
+ *
+ * @param fd Дескриптор lock-файла.
+ */
+void axidraw_device_lock_release (int fd) {
+    if (fd < 0)
+        return;
+    flock (fd, LOCK_UN);
+    close (fd);
+}
+
+/**
+ * @brief Повернути шлях до lock-файла, з яким працює менеджер.
+ *
+ * @return Нуль-термінований рядок (статичний буфер).
+ */
+const char *axidraw_device_lock_file (void) { return axidraw_lock_path (); }
 
 /** Перевірити, чи пристрій у стані connected. */
 bool axidraw_device_is_connected (const axidraw_device_t *dev) { return dev && dev->connected; }
