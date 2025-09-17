@@ -1178,11 +1178,6 @@ cmd_result_t cmd_device_list (const char *model, verbose_level_t verbose) {
     }
 #endif
 
-    if (!ports) {
-        fprintf (stdout, "Не вдалося перерахувати порти (нестача пам’яті).\n");
-        return 1;
-    }
-
     if (count == 0) {
         fprintf (
             stdout, "Потенційних портів AxiDraw не знайдено. Підключіть пристрій і повторіть.\n");
