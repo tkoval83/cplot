@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "args.h"
 #include "cli.h"
 #include "help.h"
 #include "log.h"
@@ -17,12 +16,13 @@
 /**
  * Точка входу програми.
  *
- * Парсить аргументи командного рядка, обробляє швидкі прапорці help/version і
- * передає керування диспетчеру підкоманд.
+ * Підтримуються два режими: інтерактивний CLI (без аргументів) та MCP-сервер
+ * за прапорцем `--mcp`. Усі інші команди користувач вводить вже в інтерактивній
+ * оболонці.
  *
  * @param argc Кількість аргументів командного рядка.
  * @param argv Масив аргументів командного рядка.
- * @return Код завершення процесу: 0 при успіху або код помилки підкоманди.
+ * @return Код завершення процесу.
  */
 int main (int argc, char *argv[]) {
     axistate_clear ();
@@ -32,51 +32,52 @@ int main (int argc, char *argv[]) {
     } else {
         trace_write (LOG_INFO, "запуск програми argc=%d", argc);
     }
-    /* Спеціальний режим: якщо перший аргумент дорівнює "--mcp", запускаємо MCP‑сервер. */
-    if (argc > 1 && argv[1] && strcmp (argv[1], "--mcp") == 0) {
-        trace_write (LOG_INFO, "вмикаємо MCP-режим");
-        int mcp_rc = mcp_run ();
-        if (mcp_rc == 0)
-            trace_write (LOG_INFO, "MCP-режим завершено успішно");
-        else
-            trace_write (LOG_ERROR, "MCP-режим завершено з кодом %d", mcp_rc);
+
+    if (argc > 1) {
+        const char *arg = argv[1];
+        if (strcmp (arg, "--mcp") == 0) {
+            trace_write (LOG_INFO, "вмикаємо MCP-режим");
+            int mcp_rc = mcp_run ();
+            if (mcp_rc == 0)
+                trace_write (LOG_INFO, "MCP-режим завершено успішно");
+            else
+                trace_write (LOG_ERROR, "MCP-режим завершено з кодом %d", mcp_rc);
+            trace_disable ();
+            return mcp_rc;
+        }
+        if (strcmp (arg, "--help") == 0 || strcmp (arg, "-h") == 0) {
+            trace_write (LOG_INFO, "запитано довідку CLI (режим інтерактивний)");
+            help ();
+            trace_disable ();
+            return EXIT_SUCCESS;
+        }
+        if (strcmp (arg, "--version") == 0 || strcmp (arg, "-v") == 0) {
+            trace_write (LOG_INFO, "запитано версію CLI");
+            version ();
+            trace_disable ();
+            return EXIT_SUCCESS;
+        }
+
+        fprintf (stderr, "Невідомий аргумент: %s\n", arg);
+        fprintf (stderr, "CLI працює лише в інтерактивному режимі або через прапорець --mcp.\n");
+        usage ();
+        trace_write (LOG_ERROR, "завершення через невідомий аргумент");
         trace_disable ();
-        return mcp_rc;
+        return EXIT_FAILURE;
     }
 
-    /* Зчитати опції командного рядка */
-    options_t options;
-    options_parser (argc, argv, &options);
+    log_set_use_colors (true);
+    log_set_level (LOG_INFO);
 
-    /* Налаштувати логер за опціями */
-    log_set_use_colors (options.use_colors);
-    log_set_level (options.verbose ? LOG_DEBUG : LOG_INFO);
-
-    /* Швидка обробка help/version */
-    if (options.help) {
-        trace_write (LOG_INFO, "запитано довідку CLI");
-        help ();
-        trace_write (LOG_INFO, "вихід після показу довідки");
-        trace_disable ();
-        return EXIT_SUCCESS;
-    }
-    if (options.version) {
-        trace_write (LOG_INFO, "запитано версію CLI");
-        version ();
-        trace_write (LOG_INFO, "вихід після показу версії");
-        trace_disable ();
-        return EXIT_SUCCESS;
-    }
-
-    /* Виклик підкоманди */
-    int rc = cli_dispatch (&options);
+    trace_write (LOG_INFO, "старт інтерактивного CLI");
+    int rc = cli_run_interactive ();
     if (rc != 0) {
-        trace_write (LOG_ERROR, "програма завершена з кодом %d", rc);
+        trace_write (LOG_ERROR, "інтерактивний CLI завершився з кодом %d", rc);
         trace_disable ();
         return rc;
     }
 
-    trace_write (LOG_INFO, "програма завершена успішно");
+    trace_write (LOG_INFO, "інтерактивний CLI завершено успішно");
     trace_disable ();
     return EXIT_SUCCESS;
 }
