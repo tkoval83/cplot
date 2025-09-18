@@ -38,7 +38,8 @@ typedef struct {
     char servo_power[48];
     char servo_target[48];
     char servo_timeout[48];
-    char queue[48];
+    char exec_time[48];
+    char progress_pct[48];
     char updated[64];
     char phase[48];
     char action[48];
@@ -55,6 +56,19 @@ static bool g_context_ready = false;
 
 static hud_view_t g_last_view;
 static bool g_last_valid = false;
+static bool g_command_running = false;
+static struct timespec g_command_start;
+
+/**
+ * @brief Різниця між часовими мітками у секундах.
+ */
+static double timespec_diff_sec (const struct timespec *a, const struct timespec *b) {
+    if (!a || !b)
+        return 0.0;
+    double sec = (double)(a->tv_sec - b->tv_sec);
+    double nsec = (double)(a->tv_nsec - b->tv_nsec) / 1e9;
+    return sec + nsec;
+}
 
 /**
  * @brief Надрукувати горизонтальний розділяючий рядок HUD.
@@ -165,8 +179,8 @@ static void hud_render_view (const hud_view_t *view) {
     hud_separator ();
     hud_line (view->command_active, view->steps_x, view->pen);
     hud_line (view->motors, view->steps_y, view->servo_power);
-    hud_line (view->fifo_status, view->position, view->servo_target);
-    hud_line (view->queue, "", view->servo_timeout);
+    hud_line (view->exec_time, view->position, view->servo_target);
+    hud_line (view->progress_pct, view->fifo_status, view->servo_timeout);
     hud_separator ();
     hud_line (view->updated, view->phase, view->action);
     hud_line ("", view->rc, view->wait);
@@ -212,17 +226,11 @@ static void hud_build_view (hud_view_t *out, const axistate_t *state) {
         snprintf (out->baud, sizeof (out->baud), "Швидкість: %d", dev->baud);
         snprintf (out->min_interval, sizeof (out->min_interval), "Мін. інтервал: %.1f мс", dev->min_cmd_interval);
         snprintf (out->timeout, sizeof (out->timeout), "Тайм-аут: %d мс", dev->timeout_ms);
-        if (dev->max_fifo_commands == 0)
-            snprintf (out->queue, sizeof (out->queue), "Черга команд: %zu/inf", dev->pending_commands);
-        else
-            snprintf (out->queue, sizeof (out->queue), "Черга команд: %zu/%zu", dev->pending_commands,
-                dev->max_fifo_commands);
     } else {
         snprintf (out->fifo_limit, sizeof (out->fifo_limit), "Ліміт FIFO: --");
         snprintf (out->baud, sizeof (out->baud), "Швидкість: --");
         snprintf (out->min_interval, sizeof (out->min_interval), "Мін. інтервал: --");
         snprintf (out->timeout, sizeof (out->timeout), "Тайм-аут: --");
-        snprintf (out->queue, sizeof (out->queue), "Черга команд: --");
     }
 
     if (cfg)
@@ -240,6 +248,27 @@ static void hud_build_view (hud_view_t *out, const axistate_t *state) {
     } else {
         snprintf (out->speed, sizeof (out->speed), "Швидкість: --");
         snprintf (out->accel, sizeof (out->accel), "Прискорення: --");
+    }
+
+    if (dev) {
+        if (dev->max_fifo_commands > 0) {
+            double pct = 0.0;
+            if (dev->max_fifo_commands > 0)
+                pct = ((double)dev->pending_commands * 100.0) / (double)dev->max_fifo_commands;
+            if (pct < 0.0)
+                pct = 0.0;
+            snprintf (
+                out->progress_pct, sizeof (out->progress_pct), "FIFO заповнено: %zu/%zu (%.0f%%)",
+                dev->pending_commands,
+                dev->max_fifo_commands,
+                pct);
+        } else {
+            snprintf (
+                out->progress_pct, sizeof (out->progress_pct), "FIFO заповнено: %zu",
+                dev->pending_commands);
+        }
+    } else {
+        snprintf (out->progress_pct, sizeof (out->progress_pct), "FIFO заповнено: --");
     }
 
     char pen_state[16];
@@ -270,6 +299,24 @@ static void hud_build_view (hud_view_t *out, const axistate_t *state) {
     } else {
         snprintf (out->servo_timeout, sizeof (out->servo_timeout), "Тайм-аут серво: --");
     }
+
+    double elapsed_sec = -1.0;
+    if (have_state && snapshot_valid && snap->motion.command_active) {
+        if (!g_command_running) {
+            g_command_running = true;
+            g_command_start = state->ts;
+        }
+        elapsed_sec = timespec_diff_sec (&state->ts, &g_command_start);
+        if (elapsed_sec < 0.0)
+            elapsed_sec = 0.0;
+    } else {
+        g_command_running = false;
+    }
+
+    if (elapsed_sec >= 0.0)
+        snprintf (out->exec_time, sizeof (out->exec_time), "Час виконання: %.1f с", elapsed_sec);
+    else
+        snprintf (out->exec_time, sizeof (out->exec_time), "Час виконання: --");
 
     if (snapshot_valid) {
         char command[16];
