@@ -101,7 +101,7 @@ static bool stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *p
 
     double duration_s = phase->duration_s;
     if (!(duration_s > 0.0)) {
-        LOGE ("Stepper: некоректна тривалість фази руху");
+        LOGE ("Крокувач: некоректна тривалість фази руху");
         return false;
     }
 
@@ -141,7 +141,7 @@ static bool stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *p
     const char *mode = (send_command && ctx->cfg.dev != NULL) ? "відправка" : "імітація";
     trace_write (
         LOG_DEBUG,
-        "stepper.phase: блок #%lu фаза %zu/%zu режим=%s відстань=%.4f початок=%.3f кінець=%.3f крокиA=%d крокиB=%d rateA=%u accelA=%d rateB=%u accelB=%d інтервалів=%u тривалість=%.4f",
+        "крокувач.фаза: блок №%lu фаза %zu/%zu режим=%s відстань=%.4f початок=%.3f кінець=%.3f крокиA=%d крокиB=%d швидкістьA=%u прискоренняA=%d швидкістьB=%u прискоренняB=%d інтервалів=%u тривалість=%.4f",
         phase->block_seq,
         phase->phase_index + 1,
         phase->phase_count,
@@ -173,7 +173,7 @@ static bool stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *p
     if (rc != 0) {
         LOGE ("Не вдалося відправити рух до AxiDraw (код %d)", rc);
 #ifdef DEBUG
-        trace_write (LOG_ERROR, "stepper: помилка відправлення фази (код %d)", rc);
+        trace_write (LOG_ERROR, "крокувач: помилка відправлення фази (код %d)", rc);
 #endif
         return false;
     }
@@ -321,14 +321,14 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     uint32_t approx_duration_ms = (uint32_t)llround (total_duration_s * 1000.0);
 
     LOGD (
-        "Stepper: блок %lu зміщення=(%.3f,%.3f) довжина=%.3f перо=%s", block->seq,
+        "Крокувач: блок %lu зміщення=(%.3f,%.3f) довжина=%.3f перо=%s", block->seq,
         block->delta_mm[0], block->delta_mm[1], block->length_mm, block->pen_down ? "так" : "ні");
     LOGD (
-        "Stepper: кроки X=%d Y=%d A=%d B=%d, тривалість≈%u мс", steps_x, steps_y, steps_a_total,
+        "Крокувач: кроки X=%d Y=%d A=%d B=%d, тривалість≈%u мс", steps_x, steps_y, steps_a_total,
         steps_b_total, approx_duration_ms);
     trace_write (
         LOG_DEBUG,
-        "stepper: блок=%lu довжина=%.3f крейсер=%.3f фаз=%zu", block->seq,
+        "крокувач: блок=%lu довжина=%.3f крейсер=%.3f кількість_фаз=%zu", block->seq,
         block->length_mm,
         block->cruise_speed_mm_s,
         phase_count);
