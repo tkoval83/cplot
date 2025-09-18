@@ -35,6 +35,14 @@ static size_t g_tail;
 static size_t g_count;
 static double g_last_position[2];
 static unsigned long g_next_seq;
+/** @brief Ознака наявності відкладеного короткого сегмента. */
+static bool g_pending_short_active;
+/** @brief Відкладений сегмент, який чекає на об’єднання або виконання. */
+static planner_segment_t g_pending_short_segment;
+/** @brief Початкова точка для відкладеного сегмента. */
+static double g_pending_short_start[2];
+static bool planner_flush_pending_short (void);
+static void planner_store_node (const planner_node_t *node);
 
 /**
  * @brief Повернути попередній індекс у кільцевій черзі.
@@ -90,6 +98,76 @@ static double clamp_positive (double value, double fallback) {
 }
 
 /**
+ * @brief Примусово додати у чергу відкладений короткий сегмент.
+ *
+ * Коли min_segment_mm обмежує перший відрізок, сегмент відкладається
+ * до появи наступного. Ця функція вставляє його у чергу, обходячи
+ * поріг мінімальної довжини.
+ */
+static bool planner_flush_pending_short (void) {
+    if (!g_pending_short_active)
+        return true;
+
+    if (planner_is_full ())
+        return false;
+
+    planner_segment_t pending = g_pending_short_segment;
+    double pending_start[2] = {g_pending_short_start[0], g_pending_short_start[1]};
+    double delta[2] = {
+        pending.target_mm[0] - pending_start[0],
+        pending.target_mm[1] - pending_start[1]};
+    double length_mm = hypot (delta[0], delta[1]);
+
+    g_pending_short_active = false;
+
+    if (length_mm <= EPSILON_MM) {
+        g_last_position[0] = pending.target_mm[0];
+        g_last_position[1] = pending.target_mm[1];
+#ifdef DEBUG
+        trace_write (
+            LOG_DEBUG,
+            "планувальник: відкладений сегмент нульової довжини → позиція (%.3f, %.3f)",
+            pending.target_mm[0],
+            pending.target_mm[1]);
+#endif
+        return true;
+    }
+
+    planner_node_t node;
+    memset (&node, 0, sizeof (node));
+    node.target[0] = pending.target_mm[0];
+    node.target[1] = pending.target_mm[1];
+    node.delta[0] = delta[0];
+    node.delta[1] = delta[1];
+    node.length_mm = length_mm;
+    node.pen_down = pending.pen_down;
+
+    double inv_length = 1.0 / length_mm;
+    node.unit_vec[0] = delta[0] * inv_length;
+    node.unit_vec[1] = delta[1] * inv_length;
+
+    double nominal = clamp_positive (pending.feed_mm_s, g_limits.max_speed_mm_s);
+    if (nominal > g_limits.max_speed_mm_s)
+        nominal = g_limits.max_speed_mm_s;
+    node.nominal_speed = nominal;
+    node.entry_speed = 0.0;
+    node.exit_speed = 0.0;
+    node.seq = ++g_next_seq;
+
+    planner_store_node (&node);
+    g_last_position[0] = node.target[0];
+    g_last_position[1] = node.target[1];
+#ifdef DEBUG
+    trace_write (
+        LOG_DEBUG,
+        "планувальник: виконано відкладений сегмент №%lu довжина=%.6f мм",
+        node.seq,
+        node.length_mm);
+#endif
+    return true;
+}
+
+/**
  * @brief Обчислити максимально безпечну швидкість у точці стику сегментів.
  *
  * @param prev Попередній сегмент шляху.
@@ -99,11 +177,11 @@ static double clamp_positive (double value, double fallback) {
 static double compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
     if (!prev || !curr)
         return 0.0;
-    if (g_limits.cornering_distance_mm <= 0.0)
-        return 0.0;
     double dot = prev->unit_vec[0] * curr->unit_vec[0] + prev->unit_vec[1] * curr->unit_vec[1];
     if (!isfinite (dot))
         return 0.0;
+    if (g_limits.cornering_distance_mm <= 0.0)
+        return (dot > 0.999999) ? clamp_positive (g_limits.max_speed_mm_s, 0.0) : 0.0;
     if (dot > 0.999999)
         return clamp_positive (g_limits.max_speed_mm_s, 0.0);
     if (dot < -0.999999)
@@ -187,6 +265,7 @@ void planner_reset (void) {
     g_last_position[0] = 0.0;
     g_last_position[1] = 0.0;
     g_next_seq = 0;
+    g_pending_short_active = false;
     trace_write (LOG_DEBUG, "планувальник: скидання черги");
 }
 
@@ -203,6 +282,7 @@ void planner_sync_position (const double position_mm[2]) {
         "планувальник: синхронізація позиції → (%.3f, %.3f)", position_mm[0], position_mm[1]);
     g_last_position[0] = position_mm[0];
     g_last_position[1] = position_mm[1];
+    g_pending_short_active = false;
     if (g_count == 0)
         return;
     planner_node_t *last = planner_last_node_mut ();
@@ -232,6 +312,8 @@ void planner_sync_position (const double position_mm[2]) {
 bool planner_enqueue (const planner_segment_t *segment) {
     if (!segment)
         return false;
+    if (!planner_flush_pending_short ())
+        return false;
     if (planner_is_full ()) {
         LOGW ("Черга планувальника переповнена");
         return false;
@@ -257,6 +339,20 @@ bool planner_enqueue (const planner_segment_t *segment) {
         g_last_position[1] = segment->target_mm[1];
 #ifdef DEBUG
         trace_write (LOG_DEBUG, "планувальник: ігноровано нульовий сегмент");
+#endif
+        return true;
+    }
+
+    if (g_count == 0 && g_limits.min_segment_mm > 0.0 && length_mm < g_limits.min_segment_mm) {
+        g_pending_short_active = true;
+        g_pending_short_segment = *segment;
+        g_pending_short_start[0] = start[0];
+        g_pending_short_start[1] = start[1];
+#ifdef DEBUG
+        trace_write (
+            LOG_DEBUG,
+            "планувальник: відкладено короткий початковий сегмент (%.6f мм) для подальшого виконання",
+            length_mm);
 #endif
         return true;
     }
@@ -412,6 +508,8 @@ bool planner_enqueue (const planner_segment_t *segment) {
  * @return true, якщо у буфері є хоча б один сегмент; інакше false.
  */
 bool planner_has_blocks (void) {
+    if (!planner_flush_pending_short ())
+        return (g_count > 0) || g_pending_short_active;
     return g_count > 0;
 }
 
@@ -502,7 +600,11 @@ static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) 
  * @return true, якщо блок отримано; false, якщо черга порожня або out == NULL.
  */
 bool planner_pop (plan_block_t *out) {
-    if (!out || g_count == 0)
+    if (!out)
+        return false;
+    if (!planner_flush_pending_short ())
+        return false;
+    if (g_count == 0)
         return false;
 
     planner_node_t node;
