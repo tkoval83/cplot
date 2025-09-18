@@ -25,6 +25,12 @@
 #include "log.h"
 #include "trace.h"
 
+#ifdef DEBUG
+#define AXIDRAW_LOG(MSG) "axidraw: " MSG
+#else
+#define AXIDRAW_LOG(MSG) MSG
+#endif
+
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 0
 #endif
@@ -151,8 +157,8 @@ void axidraw_device_init (axidraw_device_t *dev) {
     dev->max_fifo_commands = dev->settings.fifo_limit;
     axidraw_reset_runtime (dev);
     LOGD (
-        "axidraw: init (baud=%d timeout=%d min_interval=%.1f)", dev->baud, dev->timeout_ms,
-        dev->min_cmd_interval);
+        AXIDRAW_LOG("Ініціалізація (baud=%d timeout=%d min_interval=%.1f)"), dev->baud,
+        dev->timeout_ms, dev->min_cmd_interval);
 }
 
 /** Налаштувати шлях, швидкість та інтервали перед підключенням. */
@@ -169,9 +175,9 @@ void axidraw_device_config (
     dev->baud = baud > 0 ? baud : 9600;
     dev->timeout_ms = timeout_ms > 0 ? timeout_ms : 5000;
     dev->min_cmd_interval = min_cmd_interval_ms >= 0.0 ? min_cmd_interval_ms : 0.0;
-    LOGI (
-        "axidraw: config port=%s baud=%d timeout=%d min_interval=%.1f", dev->port_path, dev->baud,
-        dev->timeout_ms, dev->min_cmd_interval);
+    LOGD (
+        AXIDRAW_LOG("Конфігурація port=%s baud=%d timeout=%d min_interval=%.1f"), dev->port_path,
+        dev->baud, dev->timeout_ms, dev->min_cmd_interval);
     trace_write (
         LOG_INFO,
         "axidraw config: port=%s baud=%d timeout=%d min_interval=%.1f",
@@ -196,12 +202,12 @@ static int axidraw_guess_port (axidraw_device_t *dev, char *buf, size_t len) {
     if (serial_guess_axidraw_port (buf, len) == 0) {
         strncpy (dev->port_path, buf, sizeof (dev->port_path) - 1);
         dev->port_path[sizeof (dev->port_path) - 1] = '\0';
-        LOGI ("axidraw: guessed port %s", dev->port_path);
+        LOGI (AXIDRAW_LOG("Автоматично знайдено порт %s"), dev->port_path);
         trace_write (LOG_INFO, "axidraw: автоматично знайдено порт %s", dev->port_path);
         return 0;
     }
 #endif
-    LOGW ("axidraw: не вдалося автоматично знайти порт");
+    LOGW (AXIDRAW_LOG("Не вдалося автоматично знайти порт"));
     trace_write (LOG_WARN, "axidraw: автоматичний пошук порту не дав результату");
     return -1;
 }
@@ -216,8 +222,9 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     char guess_buf[256] = { 0 };
     if (dev->port_path[0] == '\0') {
         if (axidraw_guess_port (dev, guess_buf, sizeof (guess_buf)) != 0) {
-            LOGE ("Не вказано порт AxiDraw");
-            trace_write (LOG_ERROR, "axidraw: порт не вказано");
+            if (errbuf && errlen > 0)
+                snprintf (errbuf, errlen, "%s", AXIDRAW_ERR_PORT_NOT_SPECIFIED);
+            trace_write (LOG_WARN, "axidraw: порт не вказано, автопошук не знайшов пристрій");
             return -1;
         }
     }
@@ -237,7 +244,7 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     serial_flush_input (sp);
     if (serial_probe_ebb (sp, NULL, 0) != 0) {
         if (!errbuf)
-            LOGE ("axidraw: пристрій не відповідає на команду V");
+            LOGE (AXIDRAW_LOG("Пристрій не відповідає на команду V"));
         serial_close (sp);
         trace_write (LOG_ERROR, "axidraw: пристрій не відповідає на команду V");
         return -1;
@@ -246,7 +253,7 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
     dev->connected = true;
     axidraw_reset_runtime (dev);
     axidraw_sync_settings (dev);
-    LOGI ("axidraw: підключено через %s", dev->port_path);
+    LOGI (AXIDRAW_LOG("Підключено через %s"), dev->port_path);
     trace_write (LOG_INFO, "axidraw: підключено %s @%d бод", dev->port_path, dev->baud);
     return 0;
 }
@@ -258,7 +265,7 @@ void axidraw_device_disconnect (axidraw_device_t *dev) {
     if (dev->port) {
         serial_close (dev->port);
         dev->port = NULL;
-        LOGI ("axidraw: відключено від %s", dev->port_path);
+        LOGI (AXIDRAW_LOG("Відключено від %s"), dev->port_path);
         trace_write (LOG_INFO, "axidraw: відключено %s", dev->port_path);
     }
     dev->connected = false;
@@ -346,7 +353,7 @@ void axidraw_set_rate_limit (axidraw_device_t *dev, double min_interval_ms) {
         return;
     dev->min_cmd_interval = min_interval_ms >= 0.0 ? min_interval_ms : 0.0;
     dev->settings.min_cmd_interval_ms = dev->min_cmd_interval;
-    LOGI ("axidraw: мін. інтервал між командами %.2f мс", dev->min_cmd_interval);
+    LOGD (AXIDRAW_LOG("Мінімальний інтервал між командами %.2f мс"), dev->min_cmd_interval);
     trace_write (LOG_INFO, "axidraw rate limit: %.2f мс", dev->min_cmd_interval);
 }
 
@@ -362,10 +369,10 @@ void axidraw_set_fifo_limit (axidraw_device_t *dev, size_t max_fifo_commands) {
     dev->max_fifo_commands = max_fifo_commands;
     dev->settings.fifo_limit = max_fifo_commands;
     if (max_fifo_commands == 0) {
-        LOGI ("axidraw: ліміт FIFO команд вимкнено");
+        LOGD (AXIDRAW_LOG("Ліміт FIFO команд вимкнено"));
         trace_write (LOG_INFO, "axidraw fifo: ліміт вимкнено");
     } else {
-        LOGI ("axidraw: ліміт FIFO команд %zu", dev->max_fifo_commands);
+        LOGD (AXIDRAW_LOG("Ліміт FIFO команд %zu"), dev->max_fifo_commands);
         trace_write (LOG_INFO, "axidraw fifo: ліміт %zu", dev->max_fifo_commands);
     }
 }
@@ -413,7 +420,7 @@ static int axidraw_speed_to_rate (int speed_percent) {
  */
 static int axidraw_require_connection (axidraw_device_t *dev) {
     if (!dev || !dev->connected || !dev->port) {
-        LOGE ("axidraw: пристрій не підключено");
+        LOGE (AXIDRAW_LOG("Пристрій не підключено"));
         trace_write (LOG_ERROR, "axidraw: пристрій не підключено");
         return -1;
     }
@@ -504,7 +511,7 @@ static int axidraw_wait_queue_slot (axidraw_device_t *dev) {
         }
         double waited = timespec_diff_ms (&now, &start);
         if ((int)waited >= dev->timeout_ms) {
-            LOGE ("axidraw: перевищено тайм-аут очікування FIFO");
+            LOGE (AXIDRAW_LOG("Перевищено тайм-аут очікування FIFO"));
             trace_write (LOG_ERROR, "axidraw fifo: тайм-аут очікування (>%d мс)", dev->timeout_ms);
             return -1;
         }
@@ -549,7 +556,7 @@ static int axidraw_wait_interval (axidraw_device_t *dev) {
         struct timespec ts
             = { .tv_sec = ms_whole / 1000, .tv_nsec = (ms_whole % 1000) * 1000000L + ns_part };
         if (!logged) {
-            LOGD ("axidraw: затримка %.2f мс перед наступною командою", remaining);
+            LOGD (AXIDRAW_LOG("Затримка %.2f мс перед наступною командою"), remaining);
             logged = true;
             trace_write (LOG_DEBUG, "axidraw rate: очікування %.2f мс", remaining);
         }
@@ -606,17 +613,18 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
 
     /* Завжди гарантуємо, що використовується сервопривід */
     if (ebb_configure_mode (dev->port, 1, 1, dev->timeout_ms) != 0) {
-        LOGW ("axidraw: не вдалося активувати сервопривід (SC,1,1)");
+        LOGW (AXIDRAW_LOG("Не вдалося активувати сервопривід (SC,1,1)"));
         trace_write (LOG_WARN, "axidraw settings: SC,1,1 не виконано");
     }
 
     if (cfg->pen_up_pos >= 0) {
         int up = axidraw_percent_to_servo (cfg->pen_up_pos);
         if (ebb_configure_mode (dev->port, 4, up, dev->timeout_ms) != 0) {
-            LOGW ("axidraw: не вдалося налаштувати позицію пера вгору (SC,4,%d)", up);
+            LOGW (AXIDRAW_LOG("Не вдалося налаштувати позицію пера вгору (SC,4,%d)"), up);
             trace_write (LOG_WARN, "axidraw settings: SC,4,%d відхилено", up);
         } else {
-            LOGD ("axidraw: позиція пера вгору %d%% → %d", cfg->pen_up_pos, up);
+            LOGD (
+                AXIDRAW_LOG("Позиція пера вгору %d%% → %d"), cfg->pen_up_pos, up);
             trace_write (
                 LOG_DEBUG,
                 "axidraw settings: SC,4,%d (%.0f%%)",
@@ -628,10 +636,11 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
     if (cfg->pen_down_pos >= 0) {
         int down = axidraw_percent_to_servo (cfg->pen_down_pos);
         if (ebb_configure_mode (dev->port, 5, down, dev->timeout_ms) != 0) {
-            LOGW ("axidraw: не вдалося налаштувати позицію пера вниз (SC,5,%d)", down);
+            LOGW (AXIDRAW_LOG("Не вдалося налаштувати позицію пера вниз (SC,5,%d)"), down);
             trace_write (LOG_WARN, "axidraw settings: SC,5,%d відхилено", down);
         } else {
-            LOGD ("axidraw: позиція пера вниз %d%% → %d", cfg->pen_down_pos, down);
+            LOGD (
+                AXIDRAW_LOG("Позиція пера вниз %d%% → %d"), cfg->pen_down_pos, down);
             trace_write (
                 LOG_DEBUG,
                 "axidraw settings: SC,5,%d (%.0f%%)",
@@ -643,7 +652,9 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
     if (cfg->pen_up_speed >= 0) {
         int up_speed = axidraw_speed_to_rate (cfg->pen_up_speed);
         if (ebb_configure_mode (dev->port, 11, up_speed, dev->timeout_ms) != 0) {
-            LOGW ("axidraw: не вдалося налаштувати швидкість підйому пера (SC,11,%d)", up_speed);
+            LOGW (
+                AXIDRAW_LOG("Не вдалося налаштувати швидкість підйому пера (SC,11,%d)"),
+                up_speed);
             trace_write (LOG_WARN, "axidraw settings: SC,11,%d відхилено", up_speed);
         } else {
             trace_write (LOG_DEBUG, "axidraw settings: SC,11,%d", up_speed);
@@ -653,7 +664,9 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
     if (cfg->pen_down_speed >= 0) {
         int down_speed = axidraw_speed_to_rate (cfg->pen_down_speed);
         if (ebb_configure_mode (dev->port, 12, down_speed, dev->timeout_ms) != 0) {
-            LOGW ("axidraw: не вдалося налаштувати швидкість опускання пера (SC,12,%d)", down_speed);
+            LOGW (
+                AXIDRAW_LOG("Не вдалося налаштувати швидкість опускання пера (SC,12,%d)"),
+                down_speed);
             trace_write (LOG_WARN, "axidraw settings: SC,12,%d відхилено", down_speed);
         } else {
             trace_write (LOG_DEBUG, "axidraw settings: SC,12,%d", down_speed);
@@ -665,7 +678,8 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
         if (timeout_ms > UINT32_MAX)
             timeout_ms = UINT32_MAX;
         if (ebb_set_servo_power_timeout (dev->port, (uint32_t)timeout_ms, 1, dev->timeout_ms) != 0) {
-            LOGW ("axidraw: не вдалося налаштувати тайм-аут сервоприводу (SR,%llu)",
+            LOGW (
+                AXIDRAW_LOG("Не вдалося налаштувати тайм-аут сервоприводу (SR,%llu)"),
                 (unsigned long long)timeout_ms);
             trace_write (
                 LOG_WARN,
@@ -692,7 +706,8 @@ static int axidraw_exec_pen (axidraw_device_t *dev, bool pen_up) {
     int delay_ms = pen_up ? dev->settings.pen_up_delay_ms : dev->settings.pen_down_delay_ms;
     if (delay_ms < 0)
         delay_ms = 0;
-    LOGD ("axidraw: перо %s (затримка %d мс)", pen_up ? "вгору" : "вниз", delay_ms);
+    LOGD (
+        AXIDRAW_LOG("Перо %s (затримка %d мс)"), pen_up ? "вгору" : "вниз", delay_ms);
     trace_write (
         LOG_DEBUG,
         "axidraw pen: %s delay=%d", pen_up ? "up" : "down", delay_ms);
@@ -701,7 +716,7 @@ static int axidraw_exec_pen (axidraw_device_t *dev, bool pen_up) {
         axidraw_mark_dispatched (dev);
         trace_write (LOG_DEBUG, "axidraw pen: команда успішна");
     } else {
-        LOGE ("axidraw: команда пера повернула помилку (%d)", rc);
+        LOGE (AXIDRAW_LOG("Команда пера повернула помилку (%d)"), rc);
         trace_write (LOG_ERROR, "axidraw pen: помилка %d", rc);
     }
     return rc;
@@ -736,7 +751,7 @@ static int axidraw_exec_sm (
         return -1;
     if (axidraw_wait_slot (dev) != 0)
         return -1;
-    LOGD ("axidraw: рух duration=%u a=%d b=%d", duration, a, b);
+    LOGD (AXIDRAW_LOG("Рух duration=%u a=%d b=%d"), duration, a, b);
     trace_write (
         LOG_DEBUG,
         "axidraw SM: duration=%u a=%d b=%d", duration, a, b);
@@ -745,7 +760,7 @@ static int axidraw_exec_sm (
         axidraw_mark_dispatched (dev);
         trace_write (LOG_DEBUG, "axidraw SM: команда успішна");
     } else {
-        LOGE ("axidraw: команда руху повернула помилку (%d)", rc);
+        LOGE (AXIDRAW_LOG("Команда руху повернула помилку (%d)"), rc);
         trace_write (LOG_ERROR, "axidraw SM: помилка %d", rc);
     }
     return rc;
@@ -772,7 +787,7 @@ int axidraw_move_corexy (
         axidraw_mark_dispatched (dev);
         trace_write (LOG_DEBUG, "axidraw XM: команда успішна");
     } else {
-        LOGE ("axidraw: команда XM повернула помилку (%d)", rc);
+        LOGE (AXIDRAW_LOG("Команда XM повернула помилку (%d)"), rc);
         trace_write (LOG_ERROR, "axidraw XM: помилка %d", rc);
     }
     return rc;
@@ -792,7 +807,8 @@ int axidraw_move_lowlevel (
         return -1;
     if (axidraw_wait_slot (dev) != 0)
         return -1;
-    LOGD ("axidraw: LM rate1=%u steps1=%d rate2=%u steps2=%d", rate1, steps1, rate2, steps2);
+    LOGD (
+        AXIDRAW_LOG("LM rate1=%u steps1=%d rate2=%u steps2=%d"), rate1, steps1, rate2, steps2);
     trace_write (
         LOG_DEBUG,
         "axidraw LM: rate1=%u steps1=%d accel1=%d rate2=%u steps2=%d accel2=%d flags=%d",
@@ -809,7 +825,7 @@ int axidraw_move_lowlevel (
         axidraw_mark_dispatched (dev);
         trace_write (LOG_DEBUG, "axidraw LM: команда успішна");
     } else {
-        LOGE ("axidraw: команда LM повернула помилку (%d)", rc);
+        LOGE (AXIDRAW_LOG("Команда LM повернула помилку (%d)"), rc);
         trace_write (LOG_ERROR, "axidraw LM: помилка %d", rc);
     }
     return rc;
@@ -828,7 +844,7 @@ int axidraw_move_lowlevel_time (
         return -1;
     if (axidraw_wait_slot (dev) != 0)
         return -1;
-    LOGD ("axidraw: LT intervals=%u rate1=%d rate2=%d", intervals, rate1, rate2);
+    LOGD (AXIDRAW_LOG("LT intervals=%u rate1=%d rate2=%d"), intervals, rate1, rate2);
     trace_write (
         LOG_DEBUG,
         "axidraw LT: intervals=%u rate1=%d accel1=%d rate2=%d accel2=%d flags=%d",
@@ -844,7 +860,7 @@ int axidraw_move_lowlevel_time (
         axidraw_mark_dispatched (dev);
         trace_write (LOG_DEBUG, "axidraw LT: команда успішна");
     } else {
-        LOGE ("axidraw: команда LT повернула помилку (%d)", rc);
+        LOGE (AXIDRAW_LOG("Команда LT повернула помилку (%d)"), rc);
         trace_write (LOG_ERROR, "axidraw LT: помилка %d", rc);
     }
     return rc;
@@ -870,7 +886,7 @@ int axidraw_home (
         axidraw_mark_dispatched (dev);
         trace_write (LOG_DEBUG, "axidraw HM: команда успішна");
     } else {
-        LOGE ("axidraw: команда HM повернула помилку (%d)", rc);
+        LOGE (AXIDRAW_LOG("Команда HM повернула помилку (%d)"), rc);
         trace_write (LOG_ERROR, "axidraw HM: помилка %d", rc);
     }
     return rc;
@@ -882,7 +898,7 @@ int axidraw_status (axidraw_device_t *dev, ebb_status_snapshot_t *snapshot) {
         return -1;
     int rc = ebb_collect_status (dev->port, snapshot, dev->timeout_ms);
     if (rc != 0) {
-        LOGE ("axidraw: не вдалося зібрати статус (код %d)", rc);
+        LOGE (AXIDRAW_LOG("Не вдалося зібрати статус (код %d)"), rc);
         trace_write (LOG_ERROR, "axidraw статус: помилка %d", rc);
     } else {
         LOGD (

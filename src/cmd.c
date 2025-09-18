@@ -634,6 +634,16 @@ static void shell_print_help (void) {
 }
 
 /**
+ * @brief Коротка підказка щодо використання команди connect.
+ */
+static void shell_print_connect_usage (void) {
+    fprintf (
+        stdout,
+        "Формат: connect:/шлях/до/tty або connect:auto.\n"
+        "Також можна вказати порт як окремий аргумент: \"connect /dev/tty.usb*\".\n");
+}
+
+/**
  * @brief Запустити інтерактивну оболонку керування AxiDraw.
  *
  * @param port     Бажаний серійний порт або NULL для автопошуку.
@@ -682,7 +692,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             &dev, (port && *port) ? port : NULL, 9600, 5000, settings.min_cmd_interval_ms);
         if (!port || !*port)
             dev.port_path[0] = '\0';
-        char errbuf[256];
+        char errbuf[256] = { 0 };
         if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) == 0) {
             connected = true;
             LOGI ("Підключено до AxiDraw через %s", dev.port_path);
@@ -690,7 +700,12 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         } else {
             connected = false;
             dev.port_path[0] = '\0';
-            LOGW ("Автопідключення не вдалося: %s", errbuf);
+            if (strcmp (errbuf, AXIDRAW_ERR_PORT_NOT_SPECIFIED) == 0)
+                LOGW ("Автопідключення не вдалося (порт не знайдено)");
+            else {
+                const char *err_text = errbuf[0] ? errbuf : "невідома помилка";
+                LOGW ("Автопідключення не вдалося: %s", err_text);
+            }
             hud_render (NULL, true);
         }
     }
@@ -797,7 +812,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
                 axidraw_device_config (&dev, NULL, 9600, 5000, settings.min_cmd_interval_ms);
                 dev.port_path[0] = '\0';
             }
-            char errbuf[256];
+            char errbuf[256] = { 0 };
             if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) == 0) {
                 connected = true;
                 LOGI ("Підключено через %s", dev.port_path);
@@ -805,7 +820,14 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             } else {
                 connected = false;
                 dev.port_path[0] = '\0';
-                LOGE ("Не вдалося підключитися: %s", errbuf);
+                if (strcmp (errbuf, AXIDRAW_ERR_PORT_NOT_SPECIFIED) == 0) {
+                    LOGE ("%s", AXIDRAW_ERR_PORT_NOT_SPECIFIED);
+                    shell_print_connect_usage ();
+                } else if (errbuf[0]) {
+                    LOGE ("Не вдалося підключитися: %s", errbuf);
+                } else {
+                    LOGE ("Не вдалося підключитися");
+                }
                 axistate_update ("connect_fail", "connect", -1, 0, NULL);
             }
             continue;

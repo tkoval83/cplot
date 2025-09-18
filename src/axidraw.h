@@ -15,6 +15,9 @@
 
 #define AXIDRAW_STEPS_PER_MM 80.0
 
+/** Загальне повідомлення про відсутність порту пристрою. */
+#define AXIDRAW_ERR_PORT_NOT_SPECIFIED "Не вказано порт AxiDraw"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
