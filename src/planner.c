@@ -303,8 +303,14 @@ bool planner_enqueue (const planner_segment_t *segment) {
                             clamped_junction = updated_junction;
                         if (clamped_junction < 0.0)
                             clamped_junction = 0.0;
-                        prev->exit_speed = fmin (prev->nominal_speed, clamped_junction);
-                        last_mut->entry_speed = prev->exit_speed;
+                        if (clamped_junction < prev->exit_speed)
+                            prev->exit_speed = clamped_junction;
+                        if (prev->exit_speed > prev->nominal_speed)
+                            prev->exit_speed = prev->nominal_speed;
+                        if (prev->exit_speed < 0.0)
+                            prev->exit_speed = 0.0;
+                        if (last_mut->entry_speed > prev->exit_speed)
+                            last_mut->entry_speed = prev->exit_speed;
                     }
                     merged = true;
                     trace_write (
