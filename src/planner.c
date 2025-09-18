@@ -313,10 +313,21 @@ bool planner_enqueue (const planner_segment_t *segment) {
     return true;
 }
 
+/**
+ * @brief Перевірити, чи є готові до видачі блоки у черзі планувальника.
+ *
+ * @return true, якщо у буфері є хоча б один сегмент; інакше false.
+ */
 bool planner_has_blocks (void) {
     return g_count > 0;
 }
 
+/**
+ * @brief Розкласти сегмент на трапецієподібний профіль розгону/гальмування.
+ *
+ * @param node Внутрішній вузол з параметрами сегмента.
+ * @param out  Підготовлений блок, який доповнюється параметрами профілю.
+ */
 static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) {
     const double length = node->length_mm;
     const double v0 = node->entry_speed;
@@ -355,6 +366,12 @@ static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) 
     out->accel_mm_s2 = accel;
 }
 
+/**
+ * @brief Взяти наступний підготовлений блок із черги та згенерувати профіль руху.
+ *
+ * @param out Вихідна структура (не NULL), у яку буде записано результат.
+ * @return true, якщо блок отримано; false, якщо черга порожня або out == NULL.
+ */
 bool planner_pop (plan_block_t *out) {
     if (!out || g_count == 0)
         return false;
