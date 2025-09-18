@@ -207,8 +207,25 @@ void planner_sync_position (const double position_mm[2]) {
         return;
     planner_node_t *last = planner_last_node_mut ();
     if (last) {
+        double start_x = last->target[0] - last->delta[0];
+        double start_y = last->target[1] - last->delta[1];
         last->target[0] = position_mm[0];
         last->target[1] = position_mm[1];
+        last->delta[0] = last->target[0] - start_x;
+        last->delta[1] = last->target[1] - start_y;
+        last->length_mm = hypot (last->delta[0], last->delta[1]);
+        if (last->length_mm > EPSILON_MM) {
+            double inv_len = 1.0 / last->length_mm;
+            last->unit_vec[0] = last->delta[0] * inv_len;
+            last->unit_vec[1] = last->delta[1] * inv_len;
+        } else {
+            last->unit_vec[0] = 0.0;
+            last->unit_vec[1] = 0.0;
+        }
+        if (last->entry_speed > last->nominal_speed)
+            last->entry_speed = last->nominal_speed;
+        if (last->exit_speed > last->nominal_speed)
+            last->exit_speed = last->nominal_speed;
     }
 }
 
@@ -235,53 +252,72 @@ bool planner_enqueue (const planner_segment_t *segment) {
     delta[1] = segment->target_mm[1] - start[1];
     double length_mm = hypot (delta[0], delta[1]);
 
-    if (length_mm < g_limits.min_segment_mm) {
+    if (length_mm <= EPSILON_MM) {
+        g_last_position[0] = segment->target_mm[0];
+        g_last_position[1] = segment->target_mm[1];
+#ifdef DEBUG
+        trace_write (LOG_DEBUG, "планувальник: ігноровано нульовий сегмент");
+#endif
+        return true;
+    }
+
+    bool merged = false;
+    if (length_mm < g_limits.min_segment_mm && g_count > 0) {
         planner_node_t *last_mut = planner_last_node_mut ();
-        if (last_mut) {
+        if (last_mut && last_mut->length_mm > EPSILON_MM) {
             double start_x = last_mut->target[0] - last_mut->delta[0];
             double start_y = last_mut->target[1] - last_mut->delta[1];
-            last_mut->target[0] = segment->target_mm[0];
-            last_mut->target[1] = segment->target_mm[1];
-            last_mut->delta[0] = last_mut->target[0] - start_x;
-            last_mut->delta[1] = last_mut->target[1] - start_y;
-            last_mut->length_mm = hypot (last_mut->delta[0], last_mut->delta[1]);
-            if (last_mut->length_mm > EPSILON_MM) {
-                double inv_len = 1.0 / last_mut->length_mm;
-                last_mut->unit_vec[0] = last_mut->delta[0] * inv_len;
-                last_mut->unit_vec[1] = last_mut->delta[1] * inv_len;
-            } else {
-                last_mut->unit_vec[0] = 0.0;
-                last_mut->unit_vec[1] = 0.0;
+            double new_delta_x = segment->target_mm[0] - start_x;
+            double new_delta_y = segment->target_mm[1] - start_y;
+            double new_length = hypot (new_delta_x, new_delta_y);
+            if (new_length > EPSILON_MM) {
+                double inv_new_len = 1.0 / new_length;
+                double new_unit_x = new_delta_x * inv_new_len;
+                double new_unit_y = new_delta_y * inv_new_len;
+                double dot = last_mut->unit_vec[0] * new_unit_x + last_mut->unit_vec[1] * new_unit_y;
+                if (dot > 1.0)
+                    dot = 1.0;
+                if (dot >= 0.999) {
+                    last_mut->target[0] = segment->target_mm[0];
+                    last_mut->target[1] = segment->target_mm[1];
+                    last_mut->delta[0] = new_delta_x;
+                    last_mut->delta[1] = new_delta_y;
+                    last_mut->length_mm = new_length;
+                    last_mut->unit_vec[0] = new_unit_x;
+                    last_mut->unit_vec[1] = new_unit_y;
+                    double new_nominal = clamp_positive (segment->feed_mm_s, g_limits.max_speed_mm_s);
+                    if (new_nominal > g_limits.max_speed_mm_s)
+                        new_nominal = g_limits.max_speed_mm_s;
+                    if (last_mut->nominal_speed <= 0.0 || new_nominal < last_mut->nominal_speed)
+                        last_mut->nominal_speed = new_nominal;
+                    last_mut->pen_down = segment->pen_down;
+                    if (last_mut->entry_speed > last_mut->nominal_speed)
+                        last_mut->entry_speed = last_mut->nominal_speed;
+                    if (last_mut->exit_speed > last_mut->nominal_speed)
+                        last_mut->exit_speed = last_mut->nominal_speed;
+                    merged = true;
+                    trace_write (
+                        LOG_DEBUG,
+                        "планувальник: злиття короткого сегмента у блок №%lu → старт=(%.3f, %.3f) ціль=(%.3f, %.3f) довжина=%.6f мм",
+                        last_mut->seq,
+                        start_x,
+                        start_y,
+                        last_mut->target[0],
+                        last_mut->target[1],
+                        last_mut->length_mm);
+                }
             }
-            double new_nominal = clamp_positive (segment->feed_mm_s, g_limits.max_speed_mm_s);
-            if (new_nominal > g_limits.max_speed_mm_s)
-                new_nominal = g_limits.max_speed_mm_s;
-            if (last_mut->nominal_speed <= 0.0 || new_nominal < last_mut->nominal_speed)
-                last_mut->nominal_speed = new_nominal;
-            last_mut->pen_down = segment->pen_down;
-            if (last_mut->entry_speed > last_mut->nominal_speed)
-                last_mut->entry_speed = last_mut->nominal_speed;
-            if (last_mut->exit_speed > last_mut->nominal_speed)
-                last_mut->exit_speed = last_mut->nominal_speed;
-            trace_write (
-                LOG_DEBUG,
-                "планувальник: злиття короткого сегмента у блок №%lu → старт=(%.3f, %.3f) ціль=(%.3f, %.3f) довжина=%.6f мм",
-                last_mut->seq,
-                start_x,
-                start_y,
-                last_mut->target[0],
-                last_mut->target[1],
-                last_mut->length_mm);
         }
+    }
+
+    if (merged) {
         g_last_position[0] = segment->target_mm[0];
         g_last_position[1] = segment->target_mm[1];
 #ifdef DEBUG
         trace_write (
             LOG_DEBUG,
-            "планувальник: злиття короткого сегмента (%.6f мм) → позиція (%.3f, %.3f)",
-            length_mm,
-            segment->target_mm[0],
-            segment->target_mm[1]);
+            "планувальник: короткий сегмент додано до попереднього блока (%.6f мм)",
+            length_mm);
 #endif
         return true;
     }
@@ -365,10 +401,33 @@ bool planner_has_blocks (void) {
  */
 static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) {
     const double length = node->length_mm;
-    const double v0 = node->entry_speed;
-    const double v1 = node->exit_speed;
+    double v0 = node->entry_speed;
+    double v1 = node->exit_speed;
+    if (!(v0 > 0.0))
+        v0 = 0.0;
+    if (!(v1 > 0.0))
+        v1 = 0.0;
+    if (v0 > g_limits.max_speed_mm_s)
+        v0 = g_limits.max_speed_mm_s;
+    if (v1 > g_limits.max_speed_mm_s)
+        v1 = g_limits.max_speed_mm_s;
+    if (!(length > 0.0)) {
+        out->accel_distance_mm = 0.0;
+        out->decel_distance_mm = 0.0;
+        out->cruise_distance_mm = 0.0;
+        out->cruise_speed_mm_s = fmax (fmax (v0, v1), 0.0);
+        double accel_default = g_limits.max_accel_mm_s2;
+        if (!(accel_default > 0.0))
+            accel_default = 1000.0;
+        out->accel_mm_s2 = accel_default;
+        if (out->start_speed_mm_s > out->cruise_speed_mm_s)
+            out->start_speed_mm_s = out->cruise_speed_mm_s;
+        if (out->end_speed_mm_s > out->cruise_speed_mm_s)
+            out->end_speed_mm_s = out->cruise_speed_mm_s;
+        return;
+    }
     double vmax = node->nominal_speed;
-    if (!(vmax > 0.0))
+    if (!(vmax > 0.0) || vmax > g_limits.max_speed_mm_s)
         vmax = g_limits.max_speed_mm_s;
     double accel = g_limits.max_accel_mm_s2;
     if (!(accel > 0.0))
@@ -378,19 +437,27 @@ static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) 
     double decel_dist = fmax (0.0, (vmax * vmax - v1 * v1) / (2.0 * accel));
     double cruise_speed = vmax;
 
-    if (accel_dist + decel_dist > length) {
-        double numerator = 2.0 * accel * length + v0 * v0 + v1 * v1;
-        double v_cap = sqrt (fmax (numerator / 2.0, 0.0));
-        if (v_cap < fmax (v0, v1))
-            v_cap = fmax (v0, v1);
-        if (v_cap < 0.0)
-            v_cap = 0.0;
-        cruise_speed = fmin (v_cap, vmax);
-        accel_dist = fmax (0.0, (cruise_speed * cruise_speed - v0 * v0) / (2.0 * accel));
-        decel_dist = fmax (0.0, (cruise_speed * cruise_speed - v1 * v1) / (2.0 * accel));
+    double sum_dist = accel_dist + decel_dist;
+    if (sum_dist > length) {
+        double numerator = fmax (0.0, 2.0 * accel * length + v0 * v0 + v1 * v1);
+        double v_peak = sqrt (numerator / 2.0);
+        if (v_peak < fmax (v0, v1))
+            v_peak = fmax (v0, v1);
+        if (v_peak > vmax)
+            v_peak = vmax;
+        cruise_speed = v_peak;
+        accel_dist = fmax (0.0, (v_peak * v_peak - v0 * v0) / (2.0 * accel));
+        decel_dist = fmax (0.0, (v_peak * v_peak - v1 * v1) / (2.0 * accel));
+        sum_dist = accel_dist + decel_dist;
+        if (sum_dist > length && sum_dist > 0.0) {
+            double scale = length / sum_dist;
+            accel_dist *= scale;
+            decel_dist *= scale;
+            sum_dist = accel_dist + decel_dist;
+        }
     }
 
-    double cruise_dist = length - accel_dist - decel_dist;
+    double cruise_dist = length - sum_dist;
     if (cruise_dist < 0.0)
         cruise_dist = 0.0;
 
@@ -399,6 +466,11 @@ static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) 
     out->cruise_distance_mm = cruise_dist;
     out->cruise_speed_mm_s = cruise_speed;
     out->accel_mm_s2 = accel;
+
+    if (out->start_speed_mm_s > cruise_speed)
+        out->start_speed_mm_s = cruise_speed;
+    if (out->end_speed_mm_s > cruise_speed)
+        out->end_speed_mm_s = cruise_speed;
 }
 
 /**
