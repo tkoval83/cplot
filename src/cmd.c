@@ -1040,17 +1040,36 @@ cmd_result_t cmd_print_execute (
         margin_right_mm, margin_bottom_mm, margin_left_mm, orientation, dry_run ? "так" : "ні",
         verbose);
 
-    double effective_w = paper_w_mm;
-    double effective_h = paper_h_mm;
-    if (orientation == ORIENT_LANDSCAPE) {
-        effective_w = paper_h_mm;
-        effective_h = paper_w_mm;
+    config_t cfg;
+    if (config_factory_defaults (&cfg, CONFIG_DEFAULT_MODEL) != 0) {
+        LOGE ("Не вдалося отримати конфігурацію за замовчуванням");
+        return 1;
     }
 
-    double x0 = margin_left_mm;
-    double y0 = margin_top_mm;
-    double x1 = effective_w - margin_right_mm;
-    double y1 = effective_h - margin_bottom_mm;
+    double effective_w = paper_w_mm > 0.0 ? paper_w_mm : cfg.paper_w_mm;
+    double effective_h = paper_h_mm > 0.0 ? paper_h_mm : cfg.paper_h_mm;
+    double top_margin = margin_top_mm >= 0.0 ? margin_top_mm : cfg.margin_top_mm;
+    double right_margin = margin_right_mm >= 0.0 ? margin_right_mm : cfg.margin_right_mm;
+    double bottom_margin = margin_bottom_mm >= 0.0 ? margin_bottom_mm : cfg.margin_bottom_mm;
+    double left_margin = margin_left_mm >= 0.0 ? margin_left_mm : cfg.margin_left_mm;
+    orientation_t orient = (orientation > 0) ? (orientation_t)orientation : cfg.orientation;
+
+    if (!(effective_w > 0.0) || !(effective_h > 0.0)) {
+        LOGE ("Не задано розміри паперу");
+        return 2;
+    }
+
+    double canvas_w = effective_w;
+    double canvas_h = effective_h;
+    if (orient == ORIENT_LANDSCAPE) {
+        canvas_w = effective_h;
+        canvas_h = effective_w;
+    }
+
+    double x0 = left_margin;
+    double y0 = top_margin;
+    double x1 = canvas_w - right_margin;
+    double y1 = canvas_h - bottom_margin;
 
     if (!(x1 > x0) || !(y1 > y0)) {
         LOGE ("Некоректні поля — робоча область відсутня");
@@ -1058,13 +1077,13 @@ cmd_result_t cmd_print_execute (
     }
 
     canvas_options_t canvas_opts = {
-        .paper_w_mm = paper_w_mm,
-        .paper_h_mm = paper_h_mm,
-        .margin_top_mm = margin_top_mm,
-        .margin_right_mm = margin_right_mm,
-        .margin_bottom_mm = margin_bottom_mm,
-        .margin_left_mm = margin_left_mm,
-        .orientation = (orientation_t)orientation,
+        .paper_w_mm = effective_w,
+        .paper_h_mm = effective_h,
+        .margin_top_mm = top_margin,
+        .margin_right_mm = right_margin,
+        .margin_bottom_mm = bottom_margin,
+        .margin_left_mm = left_margin,
+        .orientation = orient,
         .font_family = font_family,
     };
 

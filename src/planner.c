@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "log.h"
+#include "trace.h"
 
 #define PLANNER_QUEUE_SIZE 32
 #define EPSILON_MM 1e-6
@@ -147,21 +148,26 @@ static void planner_pop_tail (planner_node_t *out) {
 /**
  * @brief Ініціалізувати планувальник і застосувати обмеження.
  *
- * @param limits Параметри обмежень (може бути NULL для типових).
+ * @param limits Параметри обмежень (не NULL).
+ * @return true, якщо ліміти валідні; false, якщо відсутні або некоректні.
  */
-void planner_init (const planner_limits_t *limits) {
-    memset (&g_limits, 0, sizeof (g_limits));
-    if (limits)
-        g_limits = *limits;
-    if (!(g_limits.max_speed_mm_s > 0.0))
-        g_limits.max_speed_mm_s = 40.0;
-    if (!(g_limits.max_accel_mm_s2 > 0.0))
-        g_limits.max_accel_mm_s2 = 1000.0;
-    if (!(g_limits.cornering_distance_mm >= 0.0))
-        g_limits.cornering_distance_mm = 0.0;
-    if (!(g_limits.min_segment_mm >= 0.0))
-        g_limits.min_segment_mm = 0.0;
+bool planner_init (const planner_limits_t *limits) {
+    if (!limits) {
+        LOGE ("planner: не передано обмеження");
+        return false;
+    }
+    if (!(limits->max_speed_mm_s > 0.0) || !(limits->max_accel_mm_s2 > 0.0)) {
+        LOGE ("planner: швидкість та прискорення повинні бути додатними");
+        return false;
+    }
+    if (!(limits->cornering_distance_mm >= 0.0) || !(limits->min_segment_mm >= 0.0)) {
+        LOGE ("planner: кути та мінімальна довжина не можуть бути від’ємними");
+        return false;
+    }
+
+    g_limits = *limits;
     planner_reset ();
+    return true;
 }
 
 /** @brief Очистити чергу планувальника та скинути позицію. */
@@ -223,6 +229,14 @@ bool planner_enqueue (const planner_segment_t *segment) {
         }
         g_last_position[0] = segment->target_mm[0];
         g_last_position[1] = segment->target_mm[1];
+#ifdef DEBUG
+        trace_write (
+            LOG_DEBUG,
+            "planner: злиття короткого сегмента (%.6f мм) → позиція (%.3f, %.3f)",
+            length_mm,
+            segment->target_mm[0],
+            segment->target_mm[1]);
+#endif
         return true;
     }
 
@@ -262,6 +276,17 @@ bool planner_enqueue (const planner_segment_t *segment) {
     planner_store_node (&node);
     g_last_position[0] = node.target[0];
     g_last_position[1] = node.target[1];
+#ifdef DEBUG
+    trace_write (
+        LOG_DEBUG,
+        "planner: enqueue len=%.3f entry=%.3f nominal=%.3f pen=%d target=(%.3f,%.3f)",
+        node.length_mm,
+        node.entry_speed,
+        node.nominal_speed,
+        node.pen_down,
+        node.target[0],
+        node.target[1]);
+#endif
     return true;
 }
 
@@ -332,6 +357,16 @@ bool planner_pop (plan_block_t *out) {
         g_last_position[0] = node.target[0];
         g_last_position[1] = node.target[1];
     }
+#ifdef DEBUG
+    trace_write (
+        LOG_DEBUG,
+        "planner: pop len=%.3f start=%.3f end=%.3f cruise=%.3f pen=%d",
+        out->length_mm,
+        out->start_speed_mm_s,
+        out->end_speed_mm_s,
+        out->cruise_speed_mm_s,
+        out->pen_down);
+#endif
 
     return true;
 }

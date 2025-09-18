@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "log.h"
+#include "trace.h"
 
 #define MIN_DURATION_MS 1u
 #define MAX_DURATION_MS 16777215u
@@ -63,10 +64,10 @@ static uint32_t estimate_duration_ms (const plan_block_t *block) {
     if (!(speed > 0.0))
         speed = block->nominal_speed_mm_s;
     if (!(speed > 0.0))
-        speed = 10.0; /* запасне значення */
+        return 0;
     double time_s = block->length_mm / speed;
     if (!(time_s > 0.0))
-        time_s = MIN_DURATION_MS / 1000.0;
+        return 0;
     uint32_t duration = (uint32_t)llround (time_s * 1000.0);
     if (duration < MIN_DURATION_MS)
         duration = MIN_DURATION_MS;
@@ -93,6 +94,10 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     int32_t steps_a = steps_x + steps_y;
     int32_t steps_b = steps_y - steps_x;
     uint32_t duration_ms = estimate_duration_ms (block);
+    if (duration_ms == 0) {
+        LOGE ("Stepper: неможливо оцінити тривалість руху");
+        return false;
+    }
 
     LOGD (
         "Stepper: блок %lu delta=(%.3f,%.3f) len=%.3f pen=%s", ctx->emitted_blocks + 1,
@@ -100,6 +105,14 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     LOGD (
         "Stepper: steps X=%d Y=%d A=%d B=%d, duration=%u ms", steps_x, steps_y, steps_a, steps_b,
         duration_ms);
+#ifdef DEBUG
+    trace_write (
+        LOG_DEBUG,
+        "stepper: block=%lu length=%.3f cruise=%.3f duration=%u", ctx->emitted_blocks + 1,
+        block->length_mm,
+        block->cruise_speed_mm_s,
+        duration_ms);
+#endif
 
     if (dry_run || ctx->cfg.dev == NULL) {
         ++ctx->emitted_blocks;
@@ -109,6 +122,9 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     int rc = axidraw_move_corexy (ctx->cfg.dev, duration_ms, steps_a, steps_b);
     if (rc != 0) {
         LOGE ("Не вдалося відправити рух до AxiDraw (код %d)", rc);
+#ifdef DEBUG
+        trace_write (LOG_ERROR, "stepper: помилка відправлення блока (код %d)", rc);
+#endif
         return false;
     }
 

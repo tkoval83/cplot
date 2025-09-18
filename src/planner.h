@@ -52,7 +52,7 @@ typedef struct {
 /**
  * Ініціалізувати планувальник із заданими обмеженнями.
  */
-void planner_init (const planner_limits_t *limits);
+bool planner_init (const planner_limits_t *limits);
 
 /**
  * Скинути чергу планувальника (повністю очистити).
