@@ -2,6 +2,7 @@
  * @file main.c
  * @brief Точка входу та високорівневий диспетч CLI.
  */
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,8 @@
  * @return Код завершення процесу.
  */
 int main (int argc, char *argv[]) {
+    if (!setlocale (LC_ALL, ""))
+        LOGW ("Не вдалося налаштувати локаль за замовчуванням");
     axistate_clear ();
 
     if (trace_enable (NULL) != 0) {

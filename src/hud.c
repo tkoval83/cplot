@@ -6,8 +6,11 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <wchar.h>
 
 #define HUD_COL_WIDTH 30
 
@@ -53,11 +56,89 @@ static const axidraw_settings_t *g_settings = NULL;
 static const config_t *g_config = NULL;
 static char g_model[32];
 static bool g_context_ready = false;
+static bool g_stdout_is_tty = false;
 
 static hud_view_t g_last_view;
 static bool g_last_valid = false;
 static bool g_command_running = false;
 static struct timespec g_command_start;
+
+/**
+ * @brief Очистити поточний рядок термінала перед виведенням HUD.
+ */
+static void hud_clear_line (void) {
+    if (!g_stdout_is_tty)
+        return;
+    fputs ("\x1b[1G\x1b[2K", stdout); /* у початок рядка та очистити його */
+}
+
+/**
+ * @brief Скопіювати текст однієї колонки із урахуванням багатобайтних символів.
+ *
+ * Забезпечує, що результат містить лише цілісні UTF-8 символи та займає не
+ * більше HUD_COL_WIDTH моноширинних позицій.
+ *
+ * @param dst    Буфер призначення (не NULL).
+ * @param dst_sz Розмір буфера у байтах.
+ * @param src    Вхідний текст (може бути NULL → порожньо).
+ * @return Кількість зайнятих позицій у колонці.
+ */
+static int hud_copy_column_text (char *dst, size_t dst_sz, const char *src) {
+    if (!dst || dst_sz == 0)
+        return 0;
+
+    const char *input = (src && *src) ? src : "";
+    mbstate_t st;
+    memset (&st, 0, sizeof (st));
+    char *out = dst;
+    size_t remaining = dst_sz - 1;
+    int used_cols = 0;
+
+    while (*input && remaining > 0) {
+        wchar_t wc;
+        size_t consumed = mbrtowc (&wc, input, MB_CUR_MAX, &st);
+        if (consumed == (size_t)-2 || consumed == (size_t)-1) {
+            /* Некоректна послідовність: трактуємо байт як окремий символ. */
+            memset (&st, 0, sizeof (st));
+            wc = (unsigned char)*input;
+            consumed = 1;
+        } else if (consumed == 0) {
+            break;
+        }
+
+        int width = wcwidth (wc);
+        if (width < 0)
+            width = 1;
+        if (used_cols + width > HUD_COL_WIDTH)
+            break;
+        if (consumed > remaining)
+            break;
+
+        memcpy (out, input, consumed);
+        out += consumed;
+        remaining -= consumed;
+        used_cols += width;
+        input += consumed;
+    }
+
+    *out = '\0';
+    return used_cols;
+}
+
+/**
+ * @brief Вивести текст колонки з вирівнюванням ліворуч та доповненням пробілами.
+ *
+ * @param text Рядок, що буде надрукований (може бути NULL).
+ */
+static void hud_print_column (const char *text) {
+    char buffer[HUD_COL_WIDTH * 4 + 1];
+    int used = hud_copy_column_text (buffer, sizeof (buffer), text);
+    fputc (' ', stdout);
+    fputs (buffer, stdout);
+    for (int i = used; i < HUD_COL_WIDTH; ++i)
+        fputc (' ', stdout);
+    fputc (' ', stdout);
+}
 
 /**
  * @brief Різниця між часовими мітками у секундах.
@@ -71,15 +152,64 @@ static double timespec_diff_sec (const struct timespec *a, const struct timespec
 }
 
 /**
- * @brief Надрукувати горизонтальний розділяючий рядок HUD.
+ * @brief Символи рамки для відображення HUD у UTF-8.
  */
-static void hud_separator (void) {
-    fputc ('+', stdout);
+#define HUD_VERT "│"
+#define HUD_HORIZ "─"
+#define HUD_TOP_LEFT "┌"
+#define HUD_TOP_MID "┬"
+#define HUD_TOP_RIGHT "┐"
+#define HUD_MID_LEFT "├"
+#define HUD_MID_MID "┼"
+#define HUD_MID_RIGHT "┤"
+#define HUD_BOTTOM_LEFT "└"
+#define HUD_BOTTOM_MID "┴"
+#define HUD_BOTTOM_RIGHT "┘"
+
+typedef enum {
+    HUD_BORDER_TOP,
+    HUD_BORDER_MID,
+    HUD_BORDER_BOTTOM,
+} hud_border_t;
+
+/**
+ * @brief Надрукувати горизонтальний розділювач HUD із заданими кутами.
+ *
+ * @param type Тип рамки (верхня, проміжна або нижня).
+ */
+static void hud_border (hud_border_t type) {
+    hud_clear_line ();
+    const char *left = NULL;
+    const char *mid = NULL;
+    const char *right = NULL;
+
+    switch (type) {
+    case HUD_BORDER_TOP:
+        left = HUD_TOP_LEFT;
+        mid = HUD_TOP_MID;
+        right = HUD_TOP_RIGHT;
+        break;
+    case HUD_BORDER_MID:
+        left = HUD_MID_LEFT;
+        mid = HUD_MID_MID;
+        right = HUD_MID_RIGHT;
+        break;
+    case HUD_BORDER_BOTTOM:
+    default:
+        left = HUD_BOTTOM_LEFT;
+        mid = HUD_BOTTOM_MID;
+        right = HUD_BOTTOM_RIGHT;
+        break;
+    }
+
+    fputs (left, stdout);
     for (int col = 0; col < 3; ++col) {
         for (int i = 0; i < HUD_COL_WIDTH + 2; ++i)
-            fputc ('-', stdout);
-        fputc ('+', stdout);
+            fputs (HUD_HORIZ, stdout);
+        if (col < 2)
+            fputs (mid, stdout);
     }
+    fputs (right, stdout);
     fputc ('\n', stdout);
 }
 
@@ -91,17 +221,15 @@ static void hud_separator (void) {
  * @param c Текст для третьої колонки.
  */
 static void hud_line (const char *a, const char *b, const char *c) {
-    printf (
-        "| %-*.*s | %-*.*s | %-*.*s |\n",
-        HUD_COL_WIDTH,
-        HUD_COL_WIDTH,
-        a ? a : "",
-        HUD_COL_WIDTH,
-        HUD_COL_WIDTH,
-        b ? b : "",
-        HUD_COL_WIDTH,
-        HUD_COL_WIDTH,
-        c ? c : "");
+    hud_clear_line ();
+    fputs (HUD_VERT, stdout);
+    hud_print_column (a);
+    fputs (HUD_VERT, stdout);
+    hud_print_column (b);
+    fputs (HUD_VERT, stdout);
+    hud_print_column (c);
+    fputs (HUD_VERT, stdout);
+    fputc ('\n', stdout);
 }
 
 /**
@@ -166,26 +294,25 @@ static const char *safe_str (const char *s) { return (s && *s) ? s : "--"; }
  * @param view Структура з підготовленими текстовими рядками.
  */
 static void hud_render_view (const hud_view_t *view) {
-    hud_separator ();
+    hud_border (HUD_BORDER_TOP);
     hud_line ("ПРИСТРІЙ", "З’ЄДНАННЯ", "КОНФІГУРАЦІЯ");
-    hud_separator ();
+    hud_border (HUD_BORDER_MID);
     hud_line (view->model, view->status, view->orientation);
     hud_line (view->firmware, view->port, view->paper);
     hud_line (view->fifo_limit, view->baud, view->margins);
     hud_line (view->min_interval, view->timeout, view->speed);
     hud_line ("", "", view->accel);
-    hud_separator ();
+    hud_border (HUD_BORDER_MID);
     hud_line ("РУХ", "ПОЗИЦІЯ", "ПЕРО / СЕРВО");
-    hud_separator ();
+    hud_border (HUD_BORDER_MID);
     hud_line (view->command_active, view->steps_x, view->pen);
     hud_line (view->motors, view->steps_y, view->servo_power);
     hud_line (view->exec_time, view->position, view->servo_target);
     hud_line (view->progress_pct, view->fifo_status, view->servo_timeout);
-    hud_separator ();
+    hud_border (HUD_BORDER_MID);
     hud_line (view->updated, view->phase, view->action);
     hud_line ("", view->rc, view->wait);
-    hud_separator ();
-    fflush (stdout);
+    hud_border (HUD_BORDER_BOTTOM);
 }
 
 /**
@@ -399,6 +526,7 @@ void hud_set_sources (
         snprintf (g_model, sizeof (g_model), "--");
     }
     g_context_ready = true;
+    g_stdout_is_tty = isatty (fileno (stdout));
 }
 
 /** @copydoc hud_render */
@@ -420,7 +548,18 @@ bool hud_render (const axistate_t *state_in, bool force) {
 
     bool changed = force || !g_last_valid || memcmp (&current, &g_last_view, sizeof (current)) != 0;
     if (changed) {
+        bool restore_cursor = g_stdout_is_tty && g_last_valid;
+        if (g_stdout_is_tty) {
+            if (restore_cursor)
+                fputs ("\x1b[s", stdout); /* зберегти позицію курсора */
+            fputs ("\x1b[H", stdout); /* перейти у верхній лівий кут */
+        }
+
         hud_render_view (&current);
+
+        if (g_stdout_is_tty && restore_cursor)
+            fputs ("\x1b[u", stdout); /* повернутися до попередньої позиції */
+        fflush (stdout);
         g_last_view = current;
         g_last_valid = true;
         return true;
