@@ -224,8 +224,31 @@ bool planner_enqueue (const planner_segment_t *segment) {
     if (length_mm < g_limits.min_segment_mm) {
         planner_node_t *last_mut = planner_last_node_mut ();
         if (last_mut) {
+            double start_x = last_mut->target[0] - last_mut->delta[0];
+            double start_y = last_mut->target[1] - last_mut->delta[1];
             last_mut->target[0] = segment->target_mm[0];
             last_mut->target[1] = segment->target_mm[1];
+            last_mut->delta[0] = last_mut->target[0] - start_x;
+            last_mut->delta[1] = last_mut->target[1] - start_y;
+            last_mut->length_mm = hypot (last_mut->delta[0], last_mut->delta[1]);
+            if (last_mut->length_mm > EPSILON_MM) {
+                double inv_len = 1.0 / last_mut->length_mm;
+                last_mut->unit_vec[0] = last_mut->delta[0] * inv_len;
+                last_mut->unit_vec[1] = last_mut->delta[1] * inv_len;
+            } else {
+                last_mut->unit_vec[0] = 0.0;
+                last_mut->unit_vec[1] = 0.0;
+            }
+            double new_nominal = clamp_positive (segment->feed_mm_s, g_limits.max_speed_mm_s);
+            if (new_nominal > g_limits.max_speed_mm_s)
+                new_nominal = g_limits.max_speed_mm_s;
+            if (last_mut->nominal_speed <= 0.0 || new_nominal < last_mut->nominal_speed)
+                last_mut->nominal_speed = new_nominal;
+            last_mut->pen_down = segment->pen_down;
+            if (last_mut->entry_speed > last_mut->nominal_speed)
+                last_mut->entry_speed = last_mut->nominal_speed;
+            if (last_mut->exit_speed > last_mut->nominal_speed)
+                last_mut->exit_speed = last_mut->nominal_speed;
         }
         g_last_position[0] = segment->target_mm[0];
         g_last_position[1] = segment->target_mm[1];
