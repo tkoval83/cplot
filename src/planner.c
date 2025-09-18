@@ -1,21 +1,22 @@
 /**
  * @file planner.c
- * @brief Спрощений планувальник траєкторії з урахуванням кута повороту.
+ * @brief Побудова профілю руху для повної траєкторії без черги.
  */
 
 #include "planner.h"
 
 #include <math.h>
-#include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "log.h"
 #include "trace.h"
 
-#define PLANNER_QUEUE_SIZE 32
 #define EPSILON_MM 1e-6
 
-/** @brief Внутрішній вузол черги планувальника. */
+/**
+ * @brief Внутрішній представник сегмента після попередньої обробки.
+ */
 typedef struct {
     double target[2];
     double delta[2];
@@ -29,67 +30,13 @@ typedef struct {
 } planner_node_t;
 
 static planner_limits_t g_limits;
-static planner_node_t g_nodes[PLANNER_QUEUE_SIZE];
-static size_t g_head;
-static size_t g_tail;
-static size_t g_count;
-static double g_last_position[2];
-static unsigned long g_next_seq;
-/** @brief Ознака наявності відкладеного короткого сегмента. */
-static bool g_pending_short_active;
-/** @brief Відкладений сегмент, який чекає на об’єднання або виконання. */
-static planner_segment_t g_pending_short_segment;
-/** @brief Початкова точка для відкладеного сегмента. */
-static double g_pending_short_start[2];
-static bool planner_flush_pending_short (void);
-static void planner_store_node (const planner_node_t *node);
-
-/**
- * @brief Повернути попередній індекс у кільцевій черзі.
- *
- * @param idx Поточний індекс у масиві вузлів.
- * @return Індекс попереднього елемента.
- */
-static size_t planner_prev_index (size_t idx) {
-    return (idx == 0) ? (PLANNER_QUEUE_SIZE - 1) : (idx - 1);
-}
-
-/**
- * @brief Повернути наступний індекс у кільцевій черзі.
- *
- * @param idx Поточний індекс у масиві вузлів.
- * @return Наступний індекс із урахуванням циклічності.
- */
-static size_t planner_next_index (size_t idx) {
-    return (idx + 1) % PLANNER_QUEUE_SIZE;
-}
-
-/** @brief Перевірити, чи заповнений буфер вузлів. */
-static bool planner_is_full (void) {
-    return g_count == PLANNER_QUEUE_SIZE;
-}
-
-/** @brief Отримати останній доданий вузол (тільки читання). */
-static const planner_node_t *planner_last_node (void) {
-    if (g_count == 0)
-        return NULL;
-    size_t idx = planner_prev_index (g_head);
-    return &g_nodes[idx];
-}
-
-/** @brief Отримати останній вузол із можливістю модифікації. */
-static planner_node_t *planner_last_node_mut (void) {
-    if (g_count == 0)
-        return NULL;
-    size_t idx = planner_prev_index (g_head);
-    return &g_nodes[idx];
-}
 
 /**
  * @brief Повернути додатне значення або запасний варіант.
  *
- * @param value Значення для перевірки.
- * @param fallback Значення, що повертається при некоректності.
+ * @param value Перевірюване значення.
+ * @param fallback Запасний результат, якщо value не є коректним додатним числом.
+ * @return Нормалізоване додатне значення.
  */
 static double clamp_positive (double value, double fallback) {
     if (!(value > 0.0) || isinf (value) || isnan (value))
@@ -98,81 +45,11 @@ static double clamp_positive (double value, double fallback) {
 }
 
 /**
- * @brief Примусово додати у чергу відкладений короткий сегмент.
+ * @brief Обчислити максимально дозволену швидкість у точці стику сегментів.
  *
- * Коли min_segment_mm обмежує перший відрізок, сегмент відкладається
- * до появи наступного. Ця функція вставляє його у чергу, обходячи
- * поріг мінімальної довжини.
- */
-static bool planner_flush_pending_short (void) {
-    if (!g_pending_short_active)
-        return true;
-
-    if (planner_is_full ())
-        return false;
-
-    planner_segment_t pending = g_pending_short_segment;
-    double pending_start[2] = {g_pending_short_start[0], g_pending_short_start[1]};
-    double delta[2] = {
-        pending.target_mm[0] - pending_start[0],
-        pending.target_mm[1] - pending_start[1]};
-    double length_mm = hypot (delta[0], delta[1]);
-
-    g_pending_short_active = false;
-
-    if (length_mm <= EPSILON_MM) {
-        g_last_position[0] = pending.target_mm[0];
-        g_last_position[1] = pending.target_mm[1];
-#ifdef DEBUG
-        trace_write (
-            LOG_DEBUG,
-            "планувальник: відкладений сегмент нульової довжини → позиція (%.3f, %.3f)",
-            pending.target_mm[0],
-            pending.target_mm[1]);
-#endif
-        return true;
-    }
-
-    planner_node_t node;
-    memset (&node, 0, sizeof (node));
-    node.target[0] = pending.target_mm[0];
-    node.target[1] = pending.target_mm[1];
-    node.delta[0] = delta[0];
-    node.delta[1] = delta[1];
-    node.length_mm = length_mm;
-    node.pen_down = pending.pen_down;
-
-    double inv_length = 1.0 / length_mm;
-    node.unit_vec[0] = delta[0] * inv_length;
-    node.unit_vec[1] = delta[1] * inv_length;
-
-    double nominal = clamp_positive (pending.feed_mm_s, g_limits.max_speed_mm_s);
-    if (nominal > g_limits.max_speed_mm_s)
-        nominal = g_limits.max_speed_mm_s;
-    node.nominal_speed = nominal;
-    node.entry_speed = 0.0;
-    node.exit_speed = 0.0;
-    node.seq = ++g_next_seq;
-
-    planner_store_node (&node);
-    g_last_position[0] = node.target[0];
-    g_last_position[1] = node.target[1];
-#ifdef DEBUG
-    trace_write (
-        LOG_DEBUG,
-        "планувальник: виконано відкладений сегмент №%lu довжина=%.6f мм",
-        node.seq,
-        node.length_mm);
-#endif
-    return true;
-}
-
-/**
- * @brief Обчислити максимально безпечну швидкість у точці стику сегментів.
- *
- * @param prev Попередній сегмент шляху.
- * @param curr Поточний сегмент шляху.
- * @return Відкоригована швидкість у мм/с.
+ * @param prev Попередній вузол траєкторії.
+ * @param curr Поточний вузол траєкторії.
+ * @return Обмеження швидкості на стику у мм/с.
  */
 static double compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
     if (!prev || !curr)
@@ -202,324 +79,12 @@ static double compute_junction_speed (const planner_node_t *prev, const planner_
 }
 
 /**
- * @brief Додати вузол до буфера та оновити індекс head.
- *
- * @param node Вузол для збереження.
- */
-static void planner_store_node (const planner_node_t *node) {
-    g_nodes[g_head] = *node;
-    g_head = planner_next_index (g_head);
-    ++g_count;
-}
-
-/**
- * @brief Зняти вузол з хвоста буфера.
- *
- * @param out Структура для вихідних даних.
- */
-static void planner_pop_tail (planner_node_t *out) {
-    if (g_count == 0)
-        return;
-    *out = g_nodes[g_tail];
-    g_tail = planner_next_index (g_tail);
-    --g_count;
-}
-
-/**
- * @brief Ініціалізувати планувальник і застосувати обмеження.
- *
- * @param limits Параметри обмежень (не NULL).
- * @return true, якщо ліміти валідні; false, якщо відсутні або некоректні.
- */
-bool planner_init (const planner_limits_t *limits) {
-    if (!limits) {
-        LOGE ("планувальник: не передано обмеження");
-        return false;
-    }
-    if (!(limits->max_speed_mm_s > 0.0) || !(limits->max_accel_mm_s2 > 0.0)) {
-        LOGE ("планувальник: швидкість та прискорення повинні бути додатними");
-        return false;
-    }
-    if (!(limits->cornering_distance_mm >= 0.0) || !(limits->min_segment_mm >= 0.0)) {
-        LOGE ("планувальник: кути та мінімальна довжина не можуть бути від’ємними");
-        return false;
-    }
-
-    g_limits = *limits;
-    planner_reset ();
-    trace_write (
-        LOG_DEBUG,
-        "планувальник: ініціалізація max_speed=%.3f мм/с max_accel=%.3f мм/с² corner=%.3f мм min_segment=%.3f мм",
-        g_limits.max_speed_mm_s,
-        g_limits.max_accel_mm_s2,
-        g_limits.cornering_distance_mm,
-        g_limits.min_segment_mm);
-    return true;
-}
-
-/** @brief Очистити чергу планувальника та скинути позицію. */
-void planner_reset (void) {
-    g_head = 0;
-    g_tail = 0;
-    g_count = 0;
-    g_last_position[0] = 0.0;
-    g_last_position[1] = 0.0;
-    g_next_seq = 0;
-    g_pending_short_active = false;
-    trace_write (LOG_DEBUG, "планувальник: скидання черги");
-}
-
-/**
- * @brief Синхронізувати внутрішню позицію з зовнішнім станом.
- *
- * @param position_mm Координати X/Y у мм.
- */
-void planner_sync_position (const double position_mm[2]) {
-    if (!position_mm)
-        return;
-    trace_write (
-        LOG_DEBUG,
-        "планувальник: синхронізація позиції → (%.3f, %.3f)", position_mm[0], position_mm[1]);
-    g_last_position[0] = position_mm[0];
-    g_last_position[1] = position_mm[1];
-    g_pending_short_active = false;
-    if (g_count == 0)
-        return;
-    planner_node_t *last = planner_last_node_mut ();
-    if (last) {
-        double start_x = last->target[0] - last->delta[0];
-        double start_y = last->target[1] - last->delta[1];
-        last->target[0] = position_mm[0];
-        last->target[1] = position_mm[1];
-        last->delta[0] = last->target[0] - start_x;
-        last->delta[1] = last->target[1] - start_y;
-        last->length_mm = hypot (last->delta[0], last->delta[1]);
-        if (last->length_mm > EPSILON_MM) {
-            double inv_len = 1.0 / last->length_mm;
-            last->unit_vec[0] = last->delta[0] * inv_len;
-            last->unit_vec[1] = last->delta[1] * inv_len;
-        } else {
-            last->unit_vec[0] = 0.0;
-            last->unit_vec[1] = 0.0;
-        }
-        if (last->entry_speed > last->nominal_speed)
-            last->entry_speed = last->nominal_speed;
-        if (last->exit_speed > last->nominal_speed)
-            last->exit_speed = last->nominal_speed;
-    }
-}
-
-bool planner_enqueue (const planner_segment_t *segment) {
-    if (!segment)
-        return false;
-    if (!planner_flush_pending_short ())
-        return false;
-    if (planner_is_full ()) {
-        LOGW ("Черга планувальника переповнена");
-        return false;
-    }
-
-    double start[2];
-    if (g_count == 0) {
-        start[0] = g_last_position[0];
-        start[1] = g_last_position[1];
-    } else {
-        const planner_node_t *last = planner_last_node ();
-        start[0] = last->target[0];
-        start[1] = last->target[1];
-    }
-
-    double delta[2];
-    delta[0] = segment->target_mm[0] - start[0];
-    delta[1] = segment->target_mm[1] - start[1];
-    double length_mm = hypot (delta[0], delta[1]);
-
-    if (length_mm <= EPSILON_MM) {
-        g_last_position[0] = segment->target_mm[0];
-        g_last_position[1] = segment->target_mm[1];
-#ifdef DEBUG
-        trace_write (LOG_DEBUG, "планувальник: ігноровано нульовий сегмент");
-#endif
-        return true;
-    }
-
-    if (g_count == 0 && g_limits.min_segment_mm > 0.0 && length_mm < g_limits.min_segment_mm) {
-        g_pending_short_active = true;
-        g_pending_short_segment = *segment;
-        g_pending_short_start[0] = start[0];
-        g_pending_short_start[1] = start[1];
-#ifdef DEBUG
-        trace_write (
-            LOG_DEBUG,
-            "планувальник: відкладено короткий початковий сегмент (%.6f мм) для подальшого виконання",
-            length_mm);
-#endif
-        return true;
-    }
-
-    bool merged = false;
-    if (length_mm < g_limits.min_segment_mm && g_count > 0) {
-        planner_node_t *last_mut = planner_last_node_mut ();
-        if (last_mut && last_mut->length_mm > EPSILON_MM) {
-            double start_x = last_mut->target[0] - last_mut->delta[0];
-            double start_y = last_mut->target[1] - last_mut->delta[1];
-            double new_delta_x = segment->target_mm[0] - start_x;
-            double new_delta_y = segment->target_mm[1] - start_y;
-            double new_length = hypot (new_delta_x, new_delta_y);
-            if (new_length > EPSILON_MM) {
-                double inv_new_len = 1.0 / new_length;
-                double new_unit_x = new_delta_x * inv_new_len;
-                double new_unit_y = new_delta_y * inv_new_len;
-                double dot = last_mut->unit_vec[0] * new_unit_x + last_mut->unit_vec[1] * new_unit_y;
-                if (dot > 1.0)
-                    dot = 1.0;
-                if (dot >= 0.999 && last_mut->pen_down == segment->pen_down) {
-                    last_mut->target[0] = segment->target_mm[0];
-                    last_mut->target[1] = segment->target_mm[1];
-                    last_mut->delta[0] = new_delta_x;
-                    last_mut->delta[1] = new_delta_y;
-                    last_mut->length_mm = new_length;
-                    last_mut->unit_vec[0] = new_unit_x;
-                    last_mut->unit_vec[1] = new_unit_y;
-                    double new_nominal = clamp_positive (segment->feed_mm_s, g_limits.max_speed_mm_s);
-                    if (new_nominal > g_limits.max_speed_mm_s)
-                        new_nominal = g_limits.max_speed_mm_s;
-                    if (last_mut->nominal_speed <= 0.0 || new_nominal < last_mut->nominal_speed)
-                        last_mut->nominal_speed = new_nominal;
-                    if (last_mut->entry_speed > last_mut->nominal_speed)
-                        last_mut->entry_speed = last_mut->nominal_speed;
-                    if (last_mut->exit_speed > last_mut->nominal_speed)
-                        last_mut->exit_speed = last_mut->nominal_speed;
-                    if (g_count > 1) {
-                        size_t prev_idx = planner_prev_index (planner_prev_index (g_head));
-                        planner_node_t *prev = &g_nodes[prev_idx];
-                        double updated_junction = compute_junction_speed (prev, last_mut);
-                        double clamped_junction = fmin (last_mut->nominal_speed, prev->nominal_speed);
-                        if (updated_junction < clamped_junction)
-                            clamped_junction = updated_junction;
-                        if (clamped_junction < 0.0)
-                            clamped_junction = 0.0;
-                        if (clamped_junction < prev->exit_speed)
-                            prev->exit_speed = clamped_junction;
-                        if (prev->exit_speed > prev->nominal_speed)
-                            prev->exit_speed = prev->nominal_speed;
-                        if (prev->exit_speed < 0.0)
-                            prev->exit_speed = 0.0;
-                        if (last_mut->entry_speed > prev->exit_speed)
-                            last_mut->entry_speed = prev->exit_speed;
-                    }
-                    merged = true;
-                    trace_write (
-                        LOG_DEBUG,
-                        "планувальник: злиття короткого сегмента у блок №%lu → старт=(%.3f, %.3f) ціль=(%.3f, %.3f) довжина=%.6f мм",
-                        last_mut->seq,
-                        start_x,
-                        start_y,
-                        last_mut->target[0],
-                        last_mut->target[1],
-                        last_mut->length_mm);
-                } else if (dot >= 0.999) {
-                    trace_write (
-                        LOG_DEBUG,
-                        "планувальник: пропущено злиття короткого сегмента через стан пера (блок №%lu)",
-                        last_mut ? last_mut->seq : 0ul);
-                }
-            }
-        }
-    }
-
-    if (merged) {
-        g_last_position[0] = segment->target_mm[0];
-        g_last_position[1] = segment->target_mm[1];
-#ifdef DEBUG
-        trace_write (
-            LOG_DEBUG,
-            "планувальник: короткий сегмент додано до попереднього блока (%.6f мм)",
-            length_mm);
-#endif
-        return true;
-    }
-
-    planner_node_t node;
-    memset (&node, 0, sizeof (node));
-    node.target[0] = segment->target_mm[0];
-    node.target[1] = segment->target_mm[1];
-    node.delta[0] = delta[0];
-    node.delta[1] = delta[1];
-    node.length_mm = length_mm;
-    node.pen_down = segment->pen_down;
-
-    double inv_length = 1.0 / length_mm;
-    node.unit_vec[0] = delta[0] * inv_length;
-    node.unit_vec[1] = delta[1] * inv_length;
-
-    double nominal = segment->feed_mm_s;
-    nominal = clamp_positive (nominal, g_limits.max_speed_mm_s);
-    if (nominal > g_limits.max_speed_mm_s)
-        nominal = g_limits.max_speed_mm_s;
-    node.nominal_speed = nominal;
-    node.entry_speed = 0.0;
-    node.exit_speed = 0.0;
-    node.seq = ++g_next_seq;
-
-    if (g_count == 0) {
-        node.entry_speed = 0.0;
-    } else {
-        planner_node_t *prev = planner_last_node_mut ();
-        double junction = compute_junction_speed (prev, &node);
-        double clamped = fmin (junction, fmin (prev->nominal_speed, node.nominal_speed));
-        if (clamped < 0.0)
-            clamped = 0.0;
-        prev->exit_speed = fmin (prev->nominal_speed, clamped);
-        node.entry_speed = prev->exit_speed;
-        trace_write (
-            LOG_DEBUG,
-            "планувальник: перехід між блоками №%lu → №%lu: гранична=%.3f швидк_вход=%.3f швидк_вих(попер)=%.3f",
-            prev->seq,
-            node.seq,
-            junction,
-            node.entry_speed,
-            prev->exit_speed);
-    }
-
-    planner_store_node (&node);
-    g_last_position[0] = node.target[0];
-    g_last_position[1] = node.target[1];
-#ifdef DEBUG
-    trace_write (
-        LOG_DEBUG,
-        "планувальник: постановка блока №%lu старт=(%.3f,%.3f) ціль=(%.3f,%.3f) довжина=%.3f швидк_вход=%.3f номінал=%.3f перо=%d",
-        node.seq,
-        start[0],
-        start[1],
-        node.target[0],
-        node.target[1],
-        node.length_mm,
-        node.entry_speed,
-        node.nominal_speed,
-        node.pen_down);
-#endif
-    return true;
-}
-
-/**
- * @brief Перевірити, чи є готові до видачі блоки у черзі планувальника.
- *
- * @return true, якщо у буфері є хоча б один сегмент; інакше false.
- */
-bool planner_has_blocks (void) {
-    if (!planner_flush_pending_short ())
-        return (g_count > 0) || g_pending_short_active;
-    return g_count > 0;
-}
-
-/**
  * @brief Розкласти сегмент на трапецієподібний профіль розгону/гальмування.
  *
- * @param node Внутрішній вузол з параметрами сегмента.
- * @param out  Підготовлений блок, який доповнюється параметрами профілю.
+ * @param node Внутрішній вузол із параметрами сегмента.
+ * @param out  Вихідний блок, що буде доповнений розрахованими ділянками.
  */
-static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) {
+static void compute_trapezoid_profile (const planner_node_t *node, plan_block_t *out) {
     const double length = node->length_mm;
     double v0 = node->entry_speed;
     double v1 = node->exit_speed;
@@ -546,6 +111,7 @@ static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) 
             out->end_speed_mm_s = out->cruise_speed_mm_s;
         return;
     }
+
     double vmax = node->nominal_speed;
     if (!(vmax > 0.0) || vmax > g_limits.max_speed_mm_s)
         vmax = g_limits.max_speed_mm_s;
@@ -594,56 +160,258 @@ static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) 
 }
 
 /**
- * @brief Взяти наступний підготовлений блок із черги та згенерувати профіль руху.
+ * @brief Додати новий вузол у масив.
  *
- * @param out Вихідна структура (не NULL), у яку буде записано результат.
- * @return true, якщо блок отримано; false, якщо черга порожня або out == NULL.
+ * @param nodes      Масив вузлів для заповнення.
+ * @param node_count Поточна кількість вузлів (модифікується функцією).
+ * @param node       Новий вузол для додавання.
  */
-bool planner_pop (plan_block_t *out) {
-    if (!out)
+static void store_node (planner_node_t *nodes, size_t *node_count, planner_node_t node) {
+    nodes[*node_count] = node;
+    ++(*node_count);
+}
+
+/**
+ * @brief Побудувати повний план руху для переданого шляху.
+ *
+ * @param limits            Обмеження на рух (не NULL).
+ * @param start_position_mm Початкова позиція X/Y у мм (NULL → {0,0}).
+ * @param segments          Масив сегментів траєкторії (не NULL).
+ * @param segment_count     Кількість сегментів у масиві.
+ * @param out_blocks        Вихід: масив блоків (виділяється функцією, caller звільняє через
+ * free()).
+ * @param out_count         Вихід: кількість блоків у масиві out_blocks.
+ *
+ * @return true при успіху; false у разі некоректних параметрів або помилки пам’яті.
+ */
+bool planner_plan (
+    const planner_limits_t *limits,
+    const double start_position_mm[2],
+    const planner_segment_t *segments,
+    size_t segment_count,
+    plan_block_t **out_blocks,
+    size_t *out_count) {
+    if (out_blocks)
+        *out_blocks = NULL;
+    if (out_count)
+        *out_count = 0;
+
+    if (!limits || !segments || !out_blocks || !out_count) {
+        LOGE ("планувальник: некоректні параметри виклику");
         return false;
-    if (!planner_flush_pending_short ())
-        return false;
-    if (g_count == 0)
-        return false;
-
-    planner_node_t node;
-    planner_pop_tail (&node);
-
-    memset (out, 0, sizeof (*out));
-    out->seq = node.seq;
-    out->delta_mm[0] = node.delta[0];
-    out->delta_mm[1] = node.delta[1];
-    out->length_mm = node.length_mm;
-    out->unit_vec[0] = node.unit_vec[0];
-    out->unit_vec[1] = node.unit_vec[1];
-    out->start_speed_mm_s = node.entry_speed;
-    out->end_speed_mm_s = node.exit_speed;
-    out->nominal_speed_mm_s = node.nominal_speed;
-    out->pen_down = node.pen_down;
-
-    compute_trapezoid_profile (&node, out);
-
-    // Після вилучення потрібно оновити останню позицію, якщо черга спорожніла.
-    if (g_count == 0) {
-        g_last_position[0] = node.target[0];
-        g_last_position[1] = node.target[1];
     }
-#ifdef DEBUG
-    trace_write (
-        LOG_DEBUG,
-        "планувальник: видача блока №%lu довжина=%.3f початок=%.3f кінець=%.3f крейсер=%.3f прискорення=%.3f ділянки[a/c/d]=(%.3f/%.3f/%.3f) перо=%d",
-        out->seq,
-        out->length_mm,
-        out->start_speed_mm_s,
-        out->end_speed_mm_s,
-        out->cruise_speed_mm_s,
-        out->accel_mm_s2,
-        out->accel_distance_mm,
-        out->cruise_distance_mm,
-        out->decel_distance_mm,
-        out->pen_down);
-#endif
+    if (!(limits->max_speed_mm_s > 0.0) || !(limits->max_accel_mm_s2 > 0.0)) {
+        LOGE ("планувальник: швидкість та прискорення повинні бути додатними");
+        return false;
+    }
+    if (!(limits->cornering_distance_mm >= 0.0) || !(limits->min_segment_mm >= 0.0)) {
+        LOGE ("планувальник: кути та мінімальна довжина не можуть бути від’ємними");
+        return false;
+    }
 
+    if (segment_count == 0) {
+        return true;
+    }
+
+    planner_node_t *nodes = calloc (segment_count, sizeof (*nodes));
+    if (!nodes) {
+        LOGE ("планувальник: неможливо виділити пам’ять під вузли");
+        return false;
+    }
+
+    g_limits = *limits;
+
+    double current_pos[2] = { 0.0, 0.0 };
+    if (start_position_mm) {
+        current_pos[0] = start_position_mm[0];
+        current_pos[1] = start_position_mm[1];
+    }
+
+    bool pending_short = false;
+    planner_segment_t pending_segment;
+    double pending_start[2] = { 0.0, 0.0 };
+
+    size_t node_count = 0;
+    unsigned long next_seq = 0;
+
+    size_t seg_index = 0;
+    while (seg_index < segment_count || pending_short) {
+        planner_segment_t segment;
+        double start_point[2];
+        bool was_pending = false;
+
+        if (pending_short) {
+            segment = pending_segment;
+            start_point[0] = pending_start[0];
+            start_point[1] = pending_start[1];
+            pending_short = false;
+            was_pending = true;
+        } else {
+            segment = segments[seg_index++];
+            start_point[0] = current_pos[0];
+            start_point[1] = current_pos[1];
+        }
+
+        double delta[2];
+        delta[0] = segment.target_mm[0] - start_point[0];
+        delta[1] = segment.target_mm[1] - start_point[1];
+        double length_mm = hypot (delta[0], delta[1]);
+
+        if (length_mm <= EPSILON_MM) {
+            current_pos[0] = segment.target_mm[0];
+            current_pos[1] = segment.target_mm[1];
+            continue;
+        }
+
+        if (!was_pending && node_count == 0 && g_limits.min_segment_mm > 0.0
+            && length_mm < g_limits.min_segment_mm) {
+            pending_short = true;
+            pending_segment = segment;
+            pending_start[0] = start_point[0];
+            pending_start[1] = start_point[1];
+            current_pos[0] = segment.target_mm[0];
+            current_pos[1] = segment.target_mm[1];
+            continue;
+        }
+
+        bool merged = false;
+        if (length_mm < g_limits.min_segment_mm && node_count > 0) {
+            planner_node_t *last_node = &nodes[node_count - 1];
+            double start_x = last_node->target[0] - last_node->delta[0];
+            double start_y = last_node->target[1] - last_node->delta[1];
+            double new_delta_x = segment.target_mm[0] - start_x;
+            double new_delta_y = segment.target_mm[1] - start_y;
+            double new_length = hypot (new_delta_x, new_delta_y);
+            if (new_length > EPSILON_MM && last_node->pen_down == segment.pen_down) {
+                double inv_new_len = 1.0 / new_length;
+                double new_unit_x = new_delta_x * inv_new_len;
+                double new_unit_y = new_delta_y * inv_new_len;
+                double dot
+                    = last_node->unit_vec[0] * new_unit_x + last_node->unit_vec[1] * new_unit_y;
+                if (dot > 1.0)
+                    dot = 1.0;
+                if (dot >= 0.999) {
+                    last_node->target[0] = segment.target_mm[0];
+                    last_node->target[1] = segment.target_mm[1];
+                    last_node->delta[0] = new_delta_x;
+                    last_node->delta[1] = new_delta_y;
+                    last_node->length_mm = new_length;
+                    last_node->unit_vec[0] = new_unit_x;
+                    last_node->unit_vec[1] = new_unit_y;
+                    double new_nominal
+                        = clamp_positive (segment.feed_mm_s, g_limits.max_speed_mm_s);
+                    if (new_nominal > g_limits.max_speed_mm_s)
+                        new_nominal = g_limits.max_speed_mm_s;
+                    if (last_node->nominal_speed <= 0.0 || new_nominal < last_node->nominal_speed)
+                        last_node->nominal_speed = new_nominal;
+                    if (last_node->entry_speed > last_node->nominal_speed)
+                        last_node->entry_speed = last_node->nominal_speed;
+                    if (last_node->exit_speed > last_node->nominal_speed)
+                        last_node->exit_speed = last_node->nominal_speed;
+                    if (node_count > 1) {
+                        planner_node_t *prev_prev = &nodes[node_count - 2];
+                        double junction = compute_junction_speed (prev_prev, last_node);
+                        double clamped = fmin (last_node->nominal_speed, prev_prev->nominal_speed);
+                        if (junction < clamped)
+                            clamped = junction;
+                        if (clamped < 0.0)
+                            clamped = 0.0;
+                        if (clamped < prev_prev->exit_speed)
+                            prev_prev->exit_speed = clamped;
+                        if (prev_prev->exit_speed > prev_prev->nominal_speed)
+                            prev_prev->exit_speed = prev_prev->nominal_speed;
+                        if (prev_prev->exit_speed < 0.0)
+                            prev_prev->exit_speed = 0.0;
+                        if (last_node->entry_speed > prev_prev->exit_speed)
+                            last_node->entry_speed = prev_prev->exit_speed;
+                    }
+                    merged = true;
+                }
+            }
+        }
+
+        if (merged) {
+            current_pos[0] = segment.target_mm[0];
+            current_pos[1] = segment.target_mm[1];
+            continue;
+        }
+
+        planner_node_t node;
+        memset (&node, 0, sizeof (node));
+        node.target[0] = segment.target_mm[0];
+        node.target[1] = segment.target_mm[1];
+        node.delta[0] = delta[0];
+        node.delta[1] = delta[1];
+        node.length_mm = length_mm;
+        node.pen_down = segment.pen_down;
+
+        double inv_length = 1.0 / length_mm;
+        node.unit_vec[0] = delta[0] * inv_length;
+        node.unit_vec[1] = delta[1] * inv_length;
+
+        double nominal = clamp_positive (segment.feed_mm_s, g_limits.max_speed_mm_s);
+        if (nominal > g_limits.max_speed_mm_s)
+            nominal = g_limits.max_speed_mm_s;
+        node.nominal_speed = nominal;
+        node.seq = ++next_seq;
+        node.entry_speed = 0.0;
+        node.exit_speed = 0.0;
+
+        if (node_count > 0) {
+            planner_node_t *prev = &nodes[node_count - 1];
+            double junction = compute_junction_speed (prev, &node);
+            double clamped = fmin (junction, fmin (prev->nominal_speed, node.nominal_speed));
+            if (clamped < 0.0)
+                clamped = 0.0;
+            prev->exit_speed = fmin (prev->nominal_speed, clamped);
+            if (prev->exit_speed < 0.0)
+                prev->exit_speed = 0.0;
+            node.entry_speed = prev->exit_speed;
+        }
+
+        store_node (nodes, &node_count, node);
+
+        current_pos[0] = segment.target_mm[0];
+        current_pos[1] = segment.target_mm[1];
+    }
+
+    plan_block_t *blocks = calloc (node_count, sizeof (*blocks));
+    if (!blocks) {
+        free (nodes);
+        LOGE ("планувальник: неможливо виділити пам’ять під блоки");
+        return false;
+    }
+
+    for (size_t i = 0; i < node_count; ++i) {
+        const planner_node_t *node = &nodes[i];
+        plan_block_t *block = &blocks[i];
+        block->seq = node->seq;
+        block->delta_mm[0] = node->delta[0];
+        block->delta_mm[1] = node->delta[1];
+        block->length_mm = node->length_mm;
+        block->unit_vec[0] = node->unit_vec[0];
+        block->unit_vec[1] = node->unit_vec[1];
+        block->start_speed_mm_s = node->entry_speed;
+        block->end_speed_mm_s = node->exit_speed;
+        block->nominal_speed_mm_s = node->nominal_speed;
+        block->pen_down = node->pen_down;
+
+        compute_trapezoid_profile (node, block);
+
+#ifdef DEBUG
+        trace_write (
+            LOG_DEBUG,
+            "планувальник: блок №%lu довжина=%.3f старт=%.3f кінець=%.3f крейсер=%.3f "
+            "a/c/d=%.3f/%.3f/%.3f перо=%d",
+            block->seq, block->length_mm, block->start_speed_mm_s, block->end_speed_mm_s,
+            block->cruise_speed_mm_s, block->accel_distance_mm, block->cruise_distance_mm,
+            block->decel_distance_mm, block->pen_down);
+#endif
+    }
+
+    free (nodes);
+
+    *out_blocks = blocks;
+    *out_count = node_count;
     return true;
 }
