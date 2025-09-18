@@ -11,6 +11,9 @@
 
 #define HUD_COL_WIDTH 30
 
+/**
+ * @brief Кешоване представлення значень HUD для порівняння між рендерами.
+ */
 typedef struct {
     char model[48];
     char status[48];
@@ -53,6 +56,9 @@ static bool g_context_ready = false;
 static hud_view_t g_last_view;
 static bool g_last_valid = false;
 
+/**
+ * @brief Надрукувати горизонтальний розділяючий рядок HUD.
+ */
 static void hud_separator (void) {
     fputc ('+', stdout);
     for (int col = 0; col < 3; ++col) {
@@ -63,6 +69,13 @@ static void hud_separator (void) {
     fputc ('\n', stdout);
 }
 
+/**
+ * @brief Вивести один рядок HUD з трьома колонками фіксованої ширини.
+ *
+ * @param a Текст для першої колонки.
+ * @param b Текст для другої колонки.
+ * @param c Текст для третьої колонки.
+ */
 static void hud_line (const char *a, const char *b, const char *c) {
     printf (
         "| %-*.*s | %-*.*s | %-*.*s |\n",
@@ -77,6 +90,16 @@ static void hud_line (const char *a, const char *b, const char *c) {
         c ? c : "");
 }
 
+/**
+ * @brief Сформатувати булеве значення у вигляді тексту з урахуванням відсутніх даних.
+ *
+ * @param buf        Буфер призначення.
+ * @param n          Розмір буфера у байтах.
+ * @param valid      Ознака, що значення відоме.
+ * @param value      Булеве значення.
+ * @param true_word  Рядок для true (може бути NULL → "так").
+ * @param false_word Рядок для false (може бути NULL → "ні").
+ */
 static void format_bool (char *buf, size_t n, bool valid, bool value, const char *true_word,
     const char *false_word) {
     const char *true_s = true_word ? true_word : "так";
@@ -84,6 +107,9 @@ static void format_bool (char *buf, size_t n, bool valid, bool value, const char
     snprintf (buf, n, "%s", valid ? (value ? true_s : false_s) : "--");
 }
 
+/**
+ * @brief Сформатувати ціле значення або резервний маркер "--".
+ */
 static void format_int (char *buf, size_t n, bool valid, long long value) {
     if (!valid)
         snprintf (buf, n, "--");
@@ -91,6 +117,9 @@ static void format_int (char *buf, size_t n, bool valid, long long value) {
         snprintf (buf, n, "%lld", value);
 }
 
+/**
+ * @brief Сформатувати число з плаваючою крапкою або резервний маркер.
+ */
 static void format_double (char *buf, size_t n, bool valid, double value, int decimals) {
     if (!valid || !isfinite (value))
         snprintf (buf, n, "--");
@@ -112,8 +141,16 @@ static void format_double (char *buf, size_t n, bool valid, double value, int de
     }
 }
 
+/**
+ * @brief Повернути рядок або "--", якщо значення порожнє.
+ */
 static const char *safe_str (const char *s) { return (s && *s) ? s : "--"; }
 
+/**
+ * @brief Відобразити попередньо побудовану таблицю HUD.
+ *
+ * @param view Структура з підготовленими текстовими рядками.
+ */
 static void hud_render_view (const hud_view_t *view) {
     hud_separator ();
     hud_line ("ПРИСТРІЙ", "З’ЄДНАННЯ", "КОНФІГУРАЦІЯ");
@@ -137,6 +174,12 @@ static void hud_render_view (const hud_view_t *view) {
     fflush (stdout);
 }
 
+/**
+ * @brief Побудувати текстове представлення HUD на основі поточного стану.
+ *
+ * @param out   Вихідна структура для заповнення.
+ * @param state Поточний стан; може бути NULL для "невідомо".
+ */
 static void hud_build_view (hud_view_t *out, const axistate_t *state) {
     memset (out, 0, sizeof (*out));
     bool have_state = state && state->valid;
@@ -290,8 +333,10 @@ static void hud_build_view (hud_view_t *out, const axistate_t *state) {
     out->snapshot_valid = snapshot_valid;
 }
 
+/** @copydoc hud_reset */
 void hud_reset (void) { g_last_valid = false; }
 
+/** @copydoc hud_set_sources */
 void hud_set_sources (
     const axidraw_device_t *device,
     const axidraw_settings_t *settings,
@@ -309,6 +354,7 @@ void hud_set_sources (
     g_context_ready = true;
 }
 
+/** @copydoc hud_render */
 bool hud_render (const axistate_t *state_in, bool force) {
     if (!g_context_ready)
         return false;

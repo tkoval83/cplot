@@ -514,8 +514,12 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
     return 0;
 }
 
-#define HUD_COL_WIDTH 30
-
+/**
+ * @brief Періодично оновлювати HUD стану пристрою.
+ *
+ * @param interval Інтервал між оновленнями в секундах; значення ≤0 замінюється на 1.0.
+ * @param max_iter Кількість оновлень; від’ємне значення означає безкінечний режим.
+ */
 static void shell_watch (double interval, int max_iter) {
     if (interval <= 0.0)
         interval = 1.0;
