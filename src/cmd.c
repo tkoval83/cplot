@@ -94,6 +94,13 @@ static void warn_device_busy (void) {
     LOGW ("AxiDraw вже використовується (%s)", holder);
 }
 
+/**
+ * @brief Додатково залогувати знімок стану при збиранні з DEBUG.
+ *
+ * @param phase         Етап виконання (before/after/... ).
+ * @param have_snapshot Чи успішно отримано дані статусу.
+ * @param snap          Знімок статусу або NULL.
+ */
 #ifdef DEBUG
 static void debug_log_snapshot (
     const char *phase, bool have_snapshot, const ebb_status_snapshot_t *snap) {
@@ -115,6 +122,15 @@ static void debug_log_snapshot (
 }
 #endif
 
+/**
+ * @brief Оновити глобальний axistate та HUD після команди до пристрою.
+ *
+ * @param dev       Пристрій (може бути NULL).
+ * @param phase     Позначка етапу для axistate.
+ * @param action    Опис дії.
+ * @param command_rc Код повернення основної команди.
+ * @param wait_rc    Код повернення очікування FIFO.
+ */
 static void update_state_from_device (
     axidraw_device_t *dev,
     const char *phase,
@@ -129,6 +145,13 @@ static void update_state_from_device (
     axistate_update (phase, action, command_rc, wait_rc, ok ? &snap : NULL);
 }
 
+/**
+ * @brief Спробувати розпарсити рядок як число з плаваючою крапкою.
+ *
+ * @param s         Рядок (NULL → помилка).
+ * @param out_value Вихідний параметр.
+ * @return true, якщо парсинг успішний.
+ */
 static bool parse_double_str (const char *s, double *out_value) {
     if (!s || !*s || !out_value)
         return false;
@@ -520,6 +543,14 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
  * @param interval Інтервал між оновленнями в секундах; значення ≤0 замінюється на 1.0.
  * @param max_iter Кількість оновлень; від’ємне значення означає безкінечний режим.
  */
+/**
+ * @brief Зчитати поточну позицію осей з axistate/пристрою.
+ *
+ * @param dev   Пристрій (використовується для оновлення стану).
+ * @param x_mm  Вихід: координата X у міліметрах (може бути NULL).
+ * @param y_mm  Вихід: координата Y у міліметрах (може бути NULL).
+ * @return true, якщо позицію успішно отримано.
+ */
 static bool shell_get_position (axidraw_device_t *dev, double *x_mm, double *y_mm) {
     update_state_from_device (dev, "query", "query", 0, 0);
     axistate_t state;
@@ -532,6 +563,16 @@ static bool shell_get_position (axidraw_device_t *dev, double *x_mm, double *y_m
     return true;
 }
 
+/**
+ * @brief Виконати відносне переміщення у режимі shell.
+ *
+ * @param dev   Пристрій (не NULL).
+ * @param dx_mm Зміщення по X у мм.
+ * @param dy_mm Зміщення по Y у мм.
+ * @param phase Назва фази для axistate.
+ * @param action Назва дії для axistate.
+ * @return Код повернення device_jog_cb().
+ */
 static int shell_move_relative (
     axidraw_device_t *dev, double dx_mm, double dy_mm, const char *phase, const char *action) {
     struct jog_ctx ctx = { .dx_mm = dx_mm, .dy_mm = dy_mm };
@@ -540,6 +581,9 @@ static int shell_move_relative (
     return rc;
 }
 
+/**
+ * @brief Вивести довідку інтерактивної оболонки.
+ */
 static void shell_print_help (void) {
     fprintf (stdout, "Доступні команди:\n");
     fprintf (stdout, "  help                 — показати це повідомлення\n");
@@ -561,6 +605,14 @@ static void shell_print_help (void) {
     fprintf (stdout, "  reboot               — перезавантажити контролер EBB\n");
 }
 
+/**
+ * @brief Запустити інтерактивну оболонку керування AxiDraw.
+ *
+ * @param port     Бажаний серійний порт або NULL для автопошуку.
+ * @param model    Модель пристрою або NULL для типової.
+ * @param verbose  Рівень деталізації логів.
+ * @return 0 у разі успіху; ненульовий код — помилка.
+ */
 cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_level_t verbose) {
     int lock_fd = -1;
     if (axidraw_device_lock_acquire (&lock_fd) != 0) {

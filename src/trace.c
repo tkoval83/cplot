@@ -13,22 +13,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
-#include <ctype.h>
-
-#ifdef _WIN32
-#include <direct.h>
-#include <io.h>
-#define TRACE_PATH_SEP '\\'
-#define trace_mkdir(path) _mkdir (path)
-#define trace_unlink(path) _unlink (path)
-#define trace_getcwd _getcwd
-#else
 #include <unistd.h>
+
 #define TRACE_PATH_SEP '/'
 #define trace_mkdir(path) mkdir ((path), 0755)
 #define trace_unlink(path) unlink (path)
 #define trace_getcwd getcwd
-#endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -40,11 +30,7 @@
 static int trace_file_exists (const char *path) {
     if (!path || !*path)
         return 0;
-#ifdef _WIN32
-    return _access (path, 0) == 0;
-#else
     return access (path, F_OK) == 0;
-#endif
 }
 
 static void trace_trim_trailing_sep (char *path) {
@@ -52,13 +38,6 @@ static void trace_trim_trailing_sep (char *path) {
         return;
     size_t len = strlen (path);
     while (len > 0 && path[len - 1] == TRACE_PATH_SEP) {
-#ifdef _WIN32
-        if (len == 3 && isalpha ((unsigned char)path[0]) && path[1] == ':'
-            && (path[2] == '\\' || path[2] == '/'))
-            break;
-        if (len == 2 && isalpha ((unsigned char)path[0]) && path[1] == ':')
-            break;
-#endif
         if (len == 1)
             break;
         path[--len] = '\0';
@@ -66,47 +45,16 @@ static void trace_trim_trailing_sep (char *path) {
 }
 
 static bool trace_path_is_root (const char *path) {
-#ifdef _WIN32
-    if (!path || !*path)
-        return false;
-    size_t len = strlen (path);
-    if (len == 1 && (path[0] == '\\' || path[0] == '/'))
-        return true;
-    if (len == 2 && isalpha ((unsigned char)path[0]) && path[1] == ':')
-        return true;
-    if (len == 3 && isalpha ((unsigned char)path[0]) && path[1] == ':'
-        && (path[2] == '\\' || path[2] == '/'))
-        return true;
-    return false;
-#else
     return path && strcmp (path, "/") == 0;
-#endif
 }
 
 static bool trace_up_one (char *path) {
     if (!path || !*path)
         return false;
     trace_trim_trailing_sep (path);
-#ifdef _WIN32
-    if (trace_path_is_root (path))
-        return false;
-#endif
     char *sep = strrchr (path, TRACE_PATH_SEP);
-#ifdef _WIN32
-    if (!sep) {
-        size_t len = strlen (path);
-        if (len == 2 && isalpha ((unsigned char)path[0]) && path[1] == ':')
-            return false;
-        return false;
-    }
-    if (sep == path + 2 && isalpha ((unsigned char)path[0]) && path[1] == ':') {
-        sep[1] = '\0';
-        return true;
-    }
-#else
     if (!sep)
         return false;
-#endif
     if (sep == path) {
         sep[1] = '\0';
         return true;
@@ -328,13 +276,8 @@ static void format_timestamp (char *buf, size_t buflen) {
     if (!buf || buflen == 0)
         return;
     time_t now = time (NULL);
-#ifdef _WIN32
-    struct tm lt = { 0 };
-    localtime_s (&lt, &now);
-#else
     struct tm lt = { 0 };
     localtime_r (&now, &lt);
-#endif
     if (strftime (buf, buflen, "%Y-%m-%d %H:%M:%S", &lt) == 0)
         snprintf (buf, buflen, "0000-00-00 00:00:00");
 }

@@ -13,11 +13,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#ifdef _WIN32
-#define PATH_SEP '\\'
-#else
 #define PATH_SEP '/'
-#endif
 
 #define CONFIG_VERSION 1
 
