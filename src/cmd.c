@@ -8,6 +8,7 @@
 #include "help.h"
 #include "log.h"
 #include "axistate.h"
+#include "hud.h"
 #include "trace.h"
 #include <ctype.h>
 #include <errno.h>
@@ -515,383 +516,7 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
 
 #define HUD_COL_WIDTH 30
 
-static void hud_separator (void) {
-    fputc ('+', stdout);
-    for (int col = 0; col < 3; ++col) {
-        for (int i = 0; i < HUD_COL_WIDTH + 2; ++i)
-            fputc ('-', stdout);
-        fputc ('+', stdout);
-    }
-    fputc ('\n', stdout);
-}
-
-static void hud_line (const char *a, const char *b, const char *c) {
-    printf (
-        "| %-*.*s | %-*.*s | %-*.*s |\n",
-        HUD_COL_WIDTH,
-        HUD_COL_WIDTH,
-        a ? a : "",
-        HUD_COL_WIDTH,
-        HUD_COL_WIDTH,
-        b ? b : "",
-        HUD_COL_WIDTH,
-        HUD_COL_WIDTH,
-        c ? c : "");
-}
-
-static void hud_format_bool (char *buf, size_t n, bool valid, bool value, const char *true_word,
-    const char *false_word) {
-    const char *true_s = true_word ? true_word : "так";
-    const char *false_s = false_word ? false_word : "ні";
-    snprintf (buf, n, "%s", valid ? (value ? true_s : false_s) : "--");
-}
-
-static void hud_format_int (char *buf, size_t n, bool valid, long long value) {
-    if (!valid)
-        snprintf (buf, n, "--");
-    else
-        snprintf (buf, n, "%lld", value);
-}
-
-static void hud_format_double (char *buf, size_t n, bool valid, double value, int decimals) {
-    if (!valid || !isfinite (value))
-        snprintf (buf, n, "--");
-    else {
-        if (decimals <= 0)
-            snprintf (buf, n, "%.0f", value);
-        else if (decimals == 1)
-            snprintf (buf, n, "%.1f", value);
-        else if (decimals == 2)
-            snprintf (buf, n, "%.2f", value);
-        else
-            snprintf (buf, n, "%.3f", value);
-    }
-}
-
-static const char *hud_safe_str (const char *s) { return (s && *s) ? s : "--"; }
-
-static bool shell_print_state_once (
-    const axidraw_device_t *dev,
-    const axidraw_settings_t *settings,
-    const config_t *cfg,
-    const char *model) {
-    axistate_t state;
-    bool have_state = axistate_get (&state) && state.valid;
-    bool snapshot_valid = have_state && state.snapshot_valid;
-    const ebb_status_snapshot_t *snap = snapshot_valid ? &state.snapshot : NULL;
-    bool connected = dev && axidraw_device_is_connected (dev);
-
-    char timebuf[64];
-    struct tm tm_buf;
-    if (have_state) {
-        time_t sec = state.ts.tv_sec;
-        if (localtime_r (&sec, &tm_buf))
-            strftime (timebuf, sizeof (timebuf), "%Y-%m-%d %H:%M:%S", &tm_buf);
-        else
-            snprintf (timebuf, sizeof (timebuf), "%lld", (long long)sec);
-    } else {
-        snprintf (timebuf, sizeof (timebuf), "--");
-    }
-    long millis = have_state ? (state.ts.tv_nsec / 1000000L) : 0;
-    if (!have_state || millis < 0)
-        millis = 0;
-
-    char firmware_buf[64];
-    snprintf (firmware_buf, sizeof (firmware_buf), "%s",
-        (snapshot_valid && snap->firmware[0]) ? snap->firmware : "--");
-
-    char servo_power_buf[16];
-    hud_format_bool (servo_power_buf, sizeof (servo_power_buf), snapshot_valid, snap && snap->servo_power,
-        "так", "ні");
-
-    char pen_state_buf[16];
-    hud_format_bool (
-        pen_state_buf, sizeof (pen_state_buf), snapshot_valid, snap && snap->pen_up, "вгору", "вниз");
-
-    char command_active_buf[16];
-    hud_format_bool (
-        command_active_buf, sizeof (command_active_buf), snapshot_valid, snap && snap->motion.command_active,
-        "так", "ні");
-
-    char motor_buf[32];
-    if (snapshot_valid) {
-        snprintf (
-            motor_buf,
-            sizeof (motor_buf),
-            "X:%s Y:%s",
-            snap->motion.motor1_active ? "так" : "ні",
-            snap->motion.motor2_active ? "так" : "ні");
-    } else {
-        snprintf (motor_buf, sizeof (motor_buf), "--");
-    }
-
-    char fifo_state_buf[32];
-    if (snapshot_valid)
-        snprintf (
-            fifo_state_buf,
-            sizeof (fifo_state_buf),
-            "FIFO: %s",
-            snap->motion.fifo_pending ? "зайнято" : "порожнє");
-    else
-        snprintf (fifo_state_buf, sizeof (fifo_state_buf), "FIFO: --");
-
-    char steps_x_buf[32];
-    hud_format_int (steps_x_buf, sizeof (steps_x_buf), snapshot_valid, snap ? snap->steps_axis1 : 0);
-
-    char steps_y_buf[32];
-    hud_format_int (steps_y_buf, sizeof (steps_y_buf), snapshot_valid, snap ? snap->steps_axis2 : 0);
-
-    char pos_buf[64];
-    if (snapshot_valid) {
-        char pos_x_mm_buf[32];
-        char pos_y_mm_buf[32];
-        hud_format_double (
-            pos_x_mm_buf,
-            sizeof (pos_x_mm_buf),
-            true,
-            snap->steps_axis1 / AXIDRAW_STEPS_PER_MM,
-            3);
-        hud_format_double (
-            pos_y_mm_buf,
-            sizeof (pos_y_mm_buf),
-            true,
-            snap->steps_axis2 / AXIDRAW_STEPS_PER_MM,
-            3);
-        snprintf (pos_buf, sizeof (pos_buf), "X:%s Y:%s", pos_x_mm_buf, pos_y_mm_buf);
-    } else {
-        snprintf (pos_buf, sizeof (pos_buf), "X:-- Y:--");
-    }
-
-    char port_buf[64];
-    if (dev && dev->port_path[0])
-        snprintf (port_buf, sizeof (port_buf), "%s", dev->port_path);
-    else
-        snprintf (port_buf, sizeof (port_buf), "--");
-
-    char status_buf[32];
-    snprintf (status_buf, sizeof (status_buf), "%s", connected ? "підключено" : "немає з’єднання");
-
-    char baud_buf[32];
-    hud_format_int (baud_buf, sizeof (baud_buf), dev != NULL, dev ? dev->baud : 0);
-
-    char timeout_buf[32];
-    if (dev)
-        snprintf (timeout_buf, sizeof (timeout_buf), "%d мс", dev->timeout_ms);
-    else
-        snprintf (timeout_buf, sizeof (timeout_buf), "--");
-
-    char min_interval_buf[32];
-    hud_format_double (
-        min_interval_buf, sizeof (min_interval_buf), dev != NULL, dev ? dev->min_cmd_interval : 0.0, 1);
-
-    char fifo_limit_buf[32];
-    if (dev) {
-        if (dev->max_fifo_commands == 0)
-            snprintf (fifo_limit_buf, sizeof (fifo_limit_buf), "без обмеж.");
-        else
-            snprintf (fifo_limit_buf, sizeof (fifo_limit_buf), "%zu", dev->max_fifo_commands);
-    } else {
-        snprintf (fifo_limit_buf, sizeof (fifo_limit_buf), "--");
-    }
-
-    char queue_buf[32];
-    if (dev) {
-        if (dev->max_fifo_commands == 0)
-            snprintf (queue_buf, sizeof (queue_buf), "%zu/inf", dev->pending_commands);
-        else
-            snprintf (queue_buf, sizeof (queue_buf), "%zu/%zu", dev->pending_commands,
-                dev->max_fifo_commands);
-    } else {
-        snprintf (queue_buf, sizeof (queue_buf), "--");
-    }
-
-    char servo_target_buf[32];
-    if (settings && snapshot_valid) {
-        int target = snap->pen_up ? settings->pen_up_pos : settings->pen_down_pos;
-        if (target >= 0)
-            snprintf (servo_target_buf, sizeof (servo_target_buf), "%d%%", target);
-        else
-            snprintf (servo_target_buf, sizeof (servo_target_buf), "--");
-    } else {
-        snprintf (servo_target_buf, sizeof (servo_target_buf), "--");
-    }
-
-    char servo_timeout_buf[32];
-    if (settings) {
-        if (settings->servo_timeout_s < 0)
-            snprintf (servo_timeout_buf, sizeof (servo_timeout_buf), "вимкнено");
-        else
-            snprintf (servo_timeout_buf, sizeof (servo_timeout_buf), "%d с", settings->servo_timeout_s);
-    } else {
-        snprintf (servo_timeout_buf, sizeof (servo_timeout_buf), "--");
-    }
-
-    char speed_buf[32];
-    if (settings)
-        snprintf (speed_buf, sizeof (speed_buf), "%.1f мм/с", settings->speed_mm_s);
-    else
-        snprintf (speed_buf, sizeof (speed_buf), "--");
-
-    char accel_buf[32];
-    if (settings)
-        snprintf (accel_buf, sizeof (accel_buf), "%.1f мм/с²", settings->accel_mm_s2);
-    else
-        snprintf (accel_buf, sizeof (accel_buf), "--");
-
-    char orientation_buf[32];
-    if (cfg)
-        snprintf (
-            orientation_buf,
-            sizeof (orientation_buf),
-            "%s",
-            (cfg->orientation == ORIENT_LANDSCAPE) ? "альбом" : "портрет");
-    else
-        snprintf (orientation_buf, sizeof (orientation_buf), "--");
-
-    char paper_buf[32];
-    if (cfg)
-        snprintf (paper_buf, sizeof (paper_buf), "%.1f × %.1f", cfg->paper_w_mm, cfg->paper_h_mm);
-    else
-        snprintf (paper_buf, sizeof (paper_buf), "--");
-
-    char margins_buf[48];
-    if (cfg)
-        snprintf (
-            margins_buf,
-            sizeof (margins_buf),
-            "%.1f/%.1f/%.1f/%.1f",
-            cfg->margin_top_mm,
-            cfg->margin_right_mm,
-            cfg->margin_bottom_mm,
-            cfg->margin_left_mm);
-    else
-        snprintf (margins_buf, sizeof (margins_buf), "--");
-
-    char model_buf[32];
-    snprintf (model_buf, sizeof (model_buf), "Модель: %s", hud_safe_str (model));
-
-    char firmware_line[48];
-    snprintf (firmware_line, sizeof (firmware_line), "Прошивка: %s", firmware_buf);
-
-    char fifo_limit_line[48];
-    snprintf (fifo_limit_line, sizeof (fifo_limit_line), "Ліміт FIFO: %s", fifo_limit_buf);
-
-    char min_interval_line[48];
-    snprintf (min_interval_line, sizeof (min_interval_line), "Мін. інтервал: %s мс", min_interval_buf);
-
-    char status_line[48];
-    snprintf (status_line, sizeof (status_line), "Статус: %s", status_buf);
-
-    char port_line[48];
-    snprintf (port_line, sizeof (port_line), "Порт: %s", port_buf);
-
-    char baud_line[48];
-    snprintf (baud_line, sizeof (baud_line), "Швидкість: %s", baud_buf);
-
-    char timeout_line[48];
-    snprintf (timeout_line, sizeof (timeout_line), "Тайм-аут: %s", timeout_buf);
-
-    char orientation_line[48];
-    snprintf (orientation_line, sizeof (orientation_line), "Орієнтація: %s", orientation_buf);
-
-    char paper_line[48];
-    snprintf (paper_line, sizeof (paper_line), "Папір (мм): %s", paper_buf);
-
-    char margins_line[64];
-    snprintf (margins_line, sizeof (margins_line), "Поля (мм): %s", margins_buf);
-
-    char speed_line[48];
-    snprintf (speed_line, sizeof (speed_line), "Швидкість: %s", speed_buf);
-
-    char accel_line[48];
-    snprintf (accel_line, sizeof (accel_line), "Прискорення: %s", accel_buf);
-
-    char command_line[48];
-    snprintf (command_line, sizeof (command_line), "Команда активна: %s", command_active_buf);
-
-    char motors_line[48];
-    snprintf (motors_line, sizeof (motors_line), "Мотори: %s", motor_buf);
-
-    char fifo_line[48];
-    snprintf (fifo_line, sizeof (fifo_line), "%s", fifo_state_buf);
-
-    char steps_x_line[48];
-    snprintf (steps_x_line, sizeof (steps_x_line), "Кроки X: %s", steps_x_buf);
-
-    char steps_y_line[48];
-    snprintf (steps_y_line, sizeof (steps_y_line), "Кроки Y: %s", steps_y_buf);
-
-    char pen_line[48];
-    snprintf (pen_line, sizeof (pen_line), "Перо: %s", pen_state_buf);
-
-    char servo_power_line[48];
-    snprintf (servo_power_line, sizeof (servo_power_line), "Сервопривід: %s", servo_power_buf);
-
-    char servo_target_line[48];
-    snprintf (servo_target_line, sizeof (servo_target_line), "Ціль серво: %s", servo_target_buf);
-
-    char servo_timeout_line[48];
-    snprintf (servo_timeout_line, sizeof (servo_timeout_line), "Тайм-аут серво: %s", servo_timeout_buf);
-
-    char queue_line[48];
-    snprintf (queue_line, sizeof (queue_line), "Черга команд: %s", queue_buf);
-
-    char position_line[64];
-    snprintf (position_line, sizeof (position_line), "Позиція (мм): %s", pos_buf);
-
-    char updated_line[64];
-    snprintf (updated_line, sizeof (updated_line), "Оновлено: %s.%03ld", timebuf, millis);
-
-    char phase_line[48];
-    snprintf (
-        phase_line,
-        sizeof (phase_line),
-        "Фаза: %s",
-        (have_state && state.phase[0]) ? state.phase : "--");
-
-    char action_line[48];
-    snprintf (
-        action_line,
-        sizeof (action_line),
-        "Дія: %s",
-        (have_state && state.action[0]) ? state.action : "--");
-
-    char rc_line[32];
-    snprintf (rc_line, sizeof (rc_line), "RC: %d", have_state ? state.command_rc : 0);
-
-    char wait_line[32];
-    snprintf (wait_line, sizeof (wait_line), "Очікування: %d", have_state ? state.wait_rc : 0);
-
-    hud_separator ();
-    hud_line ("ПРИСТРІЙ", "З’ЄДНАННЯ", "КОНФІГУРАЦІЯ");
-    hud_separator ();
-    hud_line (model_buf, status_line, orientation_line);
-    hud_line (firmware_line, port_line, paper_line);
-    hud_line (fifo_limit_line, baud_line, margins_line);
-    hud_line (min_interval_line, timeout_line, speed_line);
-    hud_line ("", "", accel_line);
-    hud_separator ();
-    hud_line ("РУХ", "ПОЗИЦІЯ", "ПЕРО / СЕРВО");
-    hud_separator ();
-    hud_line (command_line, steps_x_line, pen_line);
-    hud_line (motors_line, steps_y_line, servo_power_line);
-    hud_line (fifo_line, position_line, servo_target_line);
-    hud_line (queue_line, "", servo_timeout_line);
-    hud_separator ();
-    hud_line (updated_line, phase_line, action_line);
-    hud_line ("", rc_line, wait_line);
-    hud_separator ();
-    fflush (stdout);
-    return snapshot_valid;
-}
-
-static void shell_watch (
-    const axidraw_device_t *dev,
-    const axidraw_settings_t *settings,
-    const config_t *cfg,
-    const char *model,
-    double interval,
-    int max_iter) {
+static void shell_watch (double interval, int max_iter) {
     if (interval <= 0.0)
         interval = 1.0;
     struct timespec sleep_ts;
@@ -902,7 +527,8 @@ static void shell_watch (
     if (max_iter < 0)
         fprintf (stdout, "Натисніть Ctrl+C для зупинки watch\n");
     for (int i = 0; max_iter < 0 || i < max_iter; ++i) {
-        shell_print_state_once (dev, settings, cfg, model);
+        if (!hud_render (NULL, false))
+            fprintf (stdout, "HUD недоступний (немає контексту)\n");
         if (max_iter >= 0 && i + 1 >= max_iter)
             break;
         nanosleep (&sleep_ts, NULL);
@@ -962,8 +588,6 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         return 1;
     }
 
-    axistate_enable_auto_print (true);
-
     axidraw_device_t dev;
     axidraw_device_init (&dev);
     bool connected = false;
@@ -988,6 +612,11 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         LOGE ("Не вдалося завантажити налаштування для моделі %s", current_model);
     }
 
+    hud_set_sources (&dev, settings_loaded ? &settings : NULL, &hud_cfg, current_model);
+    hud_reset ();
+    hud_render (NULL, true);
+    axistate_enable_auto_print (true);
+
     if (settings_loaded) {
         axidraw_device_config (
             &dev, (port && *port) ? port : NULL, 9600, 5000, settings.min_cmd_interval_ms);
@@ -997,10 +626,12 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         if (axidraw_device_connect (&dev, errbuf, sizeof (errbuf)) == 0) {
             connected = true;
             LOGI ("Підключено до AxiDraw через %s", dev.port_path);
+            hud_render (NULL, true);
         } else {
             connected = false;
             dev.port_path[0] = '\0';
             LOGW ("Автопідключення не вдалося: %s", errbuf);
+            hud_render (NULL, true);
         }
     }
 
@@ -1063,6 +694,8 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
                     settings_loaded = true;
                     axidraw_apply_settings (&dev, &settings);
                     config_factory_defaults (&hud_cfg, current_model);
+                    hud_set_sources (&dev, &settings, &hud_cfg, current_model);
+                    hud_render (NULL, true);
                     if (connected)
                         LOGI ("Налаштування моделі застосовані до активного з’єднання");
                 }
@@ -1074,11 +707,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             continue;
         }
         if (strcasecmp (cmd, "state") == 0 || strcasecmp (cmd, "stats") == 0) {
-            shell_print_state_once (
-                &dev,
-                settings_loaded ? &settings : NULL,
-                &hud_cfg,
-                current_model);
+            hud_render (NULL, true);
             continue;
         }
         if (strcasecmp (cmd, "watch") == 0) {
@@ -1102,13 +731,8 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
                 else
                     max_iter = (int)cnt;
             }
-            shell_watch (
-                &dev,
-                settings_loaded ? &settings : NULL,
-                &hud_cfg,
-                current_model,
-                interval,
-                max_iter);
+            hud_render (NULL, true);
+            shell_watch (interval, max_iter);
             continue;
         }
         if (strcasecmp (cmd, "connect") == 0) {
@@ -1345,6 +969,7 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             LOGW ("Не вдалося підтвердити завершення команд перед відключенням");
         axidraw_device_disconnect (&dev);
         axistate_update ("disconnect", "disconnect", 0, 0, NULL);
+        hud_render (NULL, true);
     }
     axidraw_device_lock_release (lock_fd);
     axistate_enable_auto_print (false);

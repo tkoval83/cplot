@@ -5,12 +5,15 @@
 #include <time.h>
 
 #include "axidraw.h"
+#include "hud.h"
 
 static axistate_t g_state;
 static bool g_auto_print = false;
 
 static void axistate_auto_print (const axistate_t *state) {
     if (!g_auto_print || !state)
+        return;
+    if (hud_render (state, false))
         return;
     if (!state->valid) {
         fprintf (stdout, "\rстан: недоступний                                ");
