@@ -43,10 +43,11 @@ void options (void) {
     size_t nopt = 0;
     const cli_option_desc_t *opts = argdefs_options (&nopt);
 
-    const char *groups[] = { "global", "layout", "device", "config" };
-    const char *titles[] = { "  Глобальні:", "  Розкладка (print/preview):", "  підкоманда device:",
-                             "  підкоманда config:" };
-    for (size_t g = 0; g < 4; ++g) {
+    const char *groups[] = { "global", "input", "layout", "device", "config" };
+    const char *titles[]
+        = { "  Глобальні:", "  Джерело даних (print):", "  Розкладка (print/preview):",
+            "  підкоманда device:", "  підкоманда config:" };
+    for (size_t g = 0; g < 5; ++g) {
         fprintf (stdout, "%s\n", titles[g]);
         for (size_t i = 0; i < nopt; ++i) {
             if (opts[i].group && strcmp (opts[i].group, groups[g]) == 0) {

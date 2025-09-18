@@ -109,6 +109,32 @@ static int mkdir_p (const char *path) {
 }
 
 /**
+ * Переконатися, що існує батьківський каталог для вказаного шляху файлу.
+ *
+ * @param path Повний шлях до файлу (не NULL).
+ * @return 0, якщо каталог існує або створений; -1 при помилці.
+ */
+static int ensure_parent_dir (const char *path) {
+    if (!path || !*path)
+        return -1;
+    char dir[512];
+    strncpy (dir, path, sizeof (dir) - 1);
+    dir[sizeof (dir) - 1] = '\0';
+    char *last_sep = strrchr (dir, PATH_SEP);
+    if (!last_sep)
+        return 0;
+    *last_sep = '\0';
+    if (dir[0] == '\0')
+        return 0;
+    if (mkdir_p (dir) != 0) {
+        LOGE ("не вдалося створити каталог: %s", dir);
+        trace_write (LOG_ERROR, "config: не вдалося створити каталог %s", dir);
+        return -1;
+    }
+    return 0;
+}
+
+/**
  * Заповнити структуру конфігурації типовими (заводськими) значеннями.
  *
  * @param c Вказівник на конфігурацію для ініціалізації (безпечно передавати NULL — нічого не
@@ -140,12 +166,8 @@ int config_factory_defaults (config_t *c, const char *device_model) {
     c->accel_mm_s2 = profile->accel_mm_s2;
     trace_write (
         LOG_DEBUG,
-        "config: заводські параметри для моделі %s (paper=%.1fx%.1f speed=%.1f accel=%.1f)",
-        model,
-        c->paper_w_mm,
-        c->paper_h_mm,
-        c->speed_mm_s,
-        c->accel_mm_s2);
+        "config: заводські параметри для моделі %s (paper=%.1fx%.1f speed=%.1f accel=%.1f)", model,
+        c->paper_w_mm, c->paper_h_mm, c->speed_mm_s, c->accel_mm_s2);
     return 0;
 }
 
@@ -473,19 +495,8 @@ int config_save (const config_t *cfg) {
     if (config_get_path (path, sizeof (path)) != 0)
         return -2;
 
-    /* Ensure parent directory exists */
-    char dir[512];
-    strncpy (dir, path, sizeof (dir) - 1);
-    dir[sizeof (dir) - 1] = '\0';
-    char *last_sep = strrchr (dir, PATH_SEP);
-    if (last_sep) {
-        *last_sep = '\0';
-    if (mkdir_p (dir) != 0) {
-        LOGE ("не вдалося створити каталог: %s", dir);
-        trace_write (LOG_ERROR, "config: не вдалося створити каталог %s", dir);
+    if (ensure_parent_dir (path) != 0)
         return -7;
-    }
-    }
 
     /* Write to temp then rename */
     char tmp[576];

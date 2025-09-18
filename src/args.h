@@ -108,7 +108,8 @@ typedef enum arg_code {
     ARG_RESET = 17,
     ARG_SET = 18,
     ARG_DEVICE_MODEL = 19,
-    ARG_PREVIEW = 20
+    ARG_PREVIEW = 20,
+    ARG_TEXT = 21
 } arg_code_t;
 
 /** Опис однієї опції CLI. */
@@ -166,7 +167,7 @@ struct options {
     bool version;                   /**< запитано --version */
     bool use_colors;                /**< вимкнути через --no-colors */
     cmd_t cmd;                      /**< розібрана підкоманда (або CMD_NONE) */
-    char file_name[FILE_NAME_SIZE]; /**< шлях до вхідного файлу або "-" для stdin */
+    char file_name[FILE_NAME_SIZE]; /**< шлях до вхідного файлу; порожньо = не задано */
 
     // Прапорці розкладки
     orientation_t orientation; /**< орієнтація сторінки (типово портрет) */
@@ -184,6 +185,8 @@ struct options {
     bool verbose;
     // Типографіка
     char font_family[128]; /**< напр., "Serif Bold" або id "hershey_serif_bold" */
+    // Джерело вхідних даних для друку
+    char input_text[512]; /**< текст, переданий напряму через --text */
     // Вибір моделі пристрою (напр., "minikit2"). Порожньо = значення за замовчуванням.
     char device_model[32];
 

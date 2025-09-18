@@ -198,6 +198,7 @@ static void set_default_options (options_t *options) {
     options->dry_run = false;
     options->verbose = false;
     options->font_family[0] = '\0';
+    options->input_text[0] = '\0';
     options->device_model[0] = '\0';
     options->device_action = device_action_make_none ();
     options->device_port[0] = '\0';
@@ -233,6 +234,7 @@ static const struct option k_long_options[] = {
     { "reset", no_argument, 0, ARG_RESET },
     { "set", required_argument, 0, ARG_SET },
     { "device", required_argument, 0, ARG_DEVICE_MODEL },
+    { "text", required_argument, 0, ARG_TEXT },
     { 0, 0, 0, 0 },
 };
 
@@ -259,6 +261,8 @@ static const cli_option_desc_t k_option_descs[] = {
     { "preview", no_argument, ARG_PREVIEW, '\0', NULL, "layout",
       "Не надсилати на пристрій; вивести прев’ю у stdout" },
     { "png", no_argument, ARG_PNG, '\0', NULL, "layout", "При --preview вивести PNG замість SVG" },
+    { "text", required_argument, ARG_TEXT, '\0', "STRING", "input",
+      "Передати текст напряму (без читання зі stdin)" },
 
     { "list", no_argument, ARG_LIST, '\0', NULL, "device", "Перелічити доступні порти" },
     { "port", required_argument, ARG_PORT, '\0', "PATH", "device", "Вказати шлях до порту" },
@@ -368,10 +372,179 @@ void switch_options (int arg, options_t *options) {
 }
 
 /**
- * Встановити ім'я вхідного файлу з позиційного аргументу або позначити stdin.
+ * Розібрати аргумент "--margins" та оновити поля у options.
+ *
+ * @param value   Рядок аргументу (T[,R,B,L] у мм).
+ * @param options Структура опцій для оновлення (не NULL).
+ */
+static void parse_margins_argument (const char *value, options_t *options) {
+    if (!value || !options)
+        return;
+    double t = 0.0, r = 0.0, b = 0.0, l = 0.0;
+    char buf[256];
+    strncpy (buf, value, sizeof (buf) - 1);
+    buf[sizeof (buf) - 1] = '\0';
+
+    char *saveptr = NULL;
+    char *token = strtok_r (buf, ",", &saveptr);
+    int parts = 0;
+    while (token && parts < 4) {
+        char *end = NULL;
+        double v = strtod (token, &end);
+        if (end == token)
+            break;
+        if (parts == 0)
+            t = v;
+        else if (parts == 1)
+            r = v;
+        else if (parts == 2)
+            b = v;
+        else
+            l = v;
+        ++parts;
+        token = strtok_r (NULL, ",", &saveptr);
+    }
+    if (parts == 1) {
+        r = b = l = t;
+    }
+    options->margin_top_mm = t;
+    options->margin_right_mm = r;
+    options->margin_bottom_mm = b;
+    options->margin_left_mm = l;
+}
+
+/**
+ * Обробити опції, що належать до розкладки сторінки.
+ */
+static bool handle_layout_option (int arg, const char *value, options_t *options) {
+    switch (arg) {
+    case ARG_PORTRAIT:
+        options->orientation = ORIENT_PORTRAIT;
+        LOGD ("орієнтація: portrait");
+        return true;
+    case ARG_LANDSCAPE:
+        options->orientation = ORIENT_LANDSCAPE;
+        LOGD ("орієнтація: landscape");
+        return true;
+    case ARG_MARGINS:
+        parse_margins_argument (value, options);
+        return true;
+    case ARG_PAPER_W:
+        options->paper_w_mm = value ? atof (value) : 0.0;
+        LOGD ("paper_w=%.3f мм", options->paper_w_mm);
+        return true;
+    case ARG_PAPER_H:
+        options->paper_h_mm = value ? atof (value) : 0.0;
+        LOGD ("paper_h=%.3f мм", options->paper_h_mm);
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * Обробити опції, що впливають на поведінку друку/прев’ю.
+ */
+static bool handle_output_option (int arg, options_t *options) {
+    switch (arg) {
+    case ARG_PNG:
+        options->preview_png = true;
+        LOGD ("режим прев’ю: PNG");
+        return true;
+    case ARG_PREVIEW:
+        options->preview = true;
+        LOGD ("увімкнено прев’ю (SVG за замовчуванням)");
+        return true;
+    case ARG_DRY_RUN:
+        options->dry_run = true;
+        LOGD ("сухий запуск: без надсилання на пристрій");
+        return true;
+    case ARG_VERBOSE:
+        options->verbose = true;
+        LOGD ("детальний вивід (--verbose)");
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * Обробити опції, що задають джерело даних для друку.
+ */
+static bool handle_input_option (int arg, const char *value, options_t *options) {
+    if (arg != ARG_TEXT)
+        return false;
+    copy_string (options->input_text, sizeof (options->input_text), value);
+    LOGD ("рядок для друку: довжина=%zu байт", strlen (options->input_text));
+    return true;
+}
+
+/**
+ * Обробити опції, що стосуються типографіки.
+ */
+static bool handle_typography_option (int arg, const char *value, options_t *options) {
+    if (arg != ARG_FAMILY)
+        return false;
+    copy_string (options->font_family, sizeof (options->font_family), value);
+    LOGD ("font family: %s", options->font_family);
+    return true;
+}
+
+/**
+ * Обробити опції для підкоманди device.
+ */
+static bool handle_device_option (int arg, const char *value, options_t *options) {
+    switch (arg) {
+    case ARG_LIST:
+        options->device_action = device_action_make_simple (DEVICE_ACTION_LIST);
+        LOGD ("device: --list");
+        return true;
+    case ARG_PORT:
+        copy_string (options->device_port, sizeof (options->device_port), value);
+        return true;
+    case ARG_DX:
+        options->jog_dx_mm = value ? atof (value) : 0.0;
+        return true;
+    case ARG_DY:
+        options->jog_dy_mm = value ? atof (value) : 0.0;
+        return true;
+    case ARG_DEVICE_MODEL:
+        copy_string (options->device_model, sizeof (options->device_model), value);
+        LOGD ("device model: %s", options->device_model);
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * Обробити опції для підкоманди config.
+ */
+static bool handle_config_option (int arg, const char *value, options_t *options) {
+    switch (arg) {
+    case ARG_SHOW:
+        options->config_action = CFG_SHOW;
+        LOGD ("config: --show");
+        return true;
+    case ARG_RESET:
+        options->config_action = CFG_RESET;
+        LOGD ("config: --reset");
+        return true;
+    case ARG_SET:
+        options->config_action = CFG_SET;
+        copy_string (options->config_set_pairs, sizeof (options->config_set_pairs), value);
+        LOGD ("config: --set %s", options->config_set_pairs);
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * Встановити ім'я вхідного файлу з позиційного аргументу.
  *
  * Якщо після обробки опцій у argv лишився ще один позиційний аргумент, він
- * вважається шляхом до вхідного файлу. Інакше використовується "-" (stdin).
+ * вважається шляхом до вхідного файлу. Інакше поле file_name залишиться порожнім.
  *
  * @param argc    Кількість аргументів командного рядка.
  * @param argv    Масив аргументів командного рядка.
@@ -383,9 +556,8 @@ void get_file_name (int argc, char *argv[], options_t *options) {
         copy_string (options->file_name, sizeof (options->file_name), argv[optind++]);
         LOGD ("вхідний файл: %s", options->file_name);
     } else {
-        // Інакше вважати stdin вхідним файлом
-        copy_string (options->file_name, sizeof (options->file_name), "-");
-        LOGD ("вхідний файл: stdin (-)");
+        options->file_name[0] = '\0';
+        LOGD ("вхідний файл не задано");
     }
 }
 
@@ -434,117 +606,25 @@ void options_parser (int argc, char *argv[], options_t *options) {
         if (arg == -1)
             break;
 
-        // Знайти відповідний випадок аргументу
         if (arg == 0) {
-            // --no-colors (довга опція) потрапляє сюди, коли val==0
             options->use_colors = false;
             continue;
         }
 
-        switch (arg) {
-        case ARG_PORTRAIT:
-            options->orientation = ORIENT_PORTRAIT;
-            LOGD ("орієнтація: portrait");
-            break;
-        case ARG_LANDSCAPE:
-            options->orientation = ORIENT_LANDSCAPE;
-            LOGD ("орієнтація: landscape");
-            break;
-        case ARG_MARGINS: {
-            // розібрати T,R,B,L:mm або просто число = всі сторони у мм
-            double t = 0, r = 0, b = 0, l = 0;
-            char *s = optarg;
-            char *end = NULL;
-            int parts = 0;
-            char buf[256];
-            strncpy (buf, s, sizeof (buf) - 1);
-            buf[sizeof (buf) - 1] = '\0';
-            char *token = strtok (buf, ",");
-            while (token && parts < 4) {
-                double v = strtod (token, &end);
-                if (end == token)
-                    break;
-                if (parts == 0)
-                    t = v;
-                else if (parts == 1)
-                    r = v;
-                else if (parts == 2)
-                    b = v;
-                else
-                    l = v;
-                parts++;
-                token = strtok (NULL, ",");
-            }
-            if (parts == 1) {
-                r = b = l = t;
-            }
-            options->margin_top_mm = t;
-            options->margin_right_mm = r;
-            options->margin_bottom_mm = b;
-            options->margin_left_mm = l;
-            break;
-        }
-        case ARG_PAPER_W:
-            options->paper_w_mm = atof (optarg);
-            LOGD ("paper_w=%.3f мм", options->paper_w_mm);
-            break;
-        case ARG_PAPER_H:
-            options->paper_h_mm = atof (optarg);
-            LOGD ("paper_h=%.3f мм", options->paper_h_mm);
-            break;
-        case ARG_PNG:
-            options->preview_png = true;
-            LOGD ("режим прев’ю: PNG");
-            break;
-        case ARG_PREVIEW:
-            options->preview = true;
-            LOGD ("увімкнено прев’ю (SVG за замовчуванням)");
-            break;
-        case ARG_DRY_RUN:
-            options->dry_run = true;
-            LOGD ("сухий запуск: без надсилання на пристрій");
-            break;
-        case ARG_VERBOSE:
-            options->verbose = true;
-            LOGD ("детальний вивід (--verbose)");
-            break;
-        case ARG_LIST:
-            options->device_action = device_action_make_simple (DEVICE_ACTION_LIST);
-            LOGD ("device: --list");
-            break;
-        case ARG_PORT:
-            copy_string (options->device_port, sizeof (options->device_port), optarg);
-            break;
-        case ARG_DX:
-            options->jog_dx_mm = atof (optarg);
-            break;
-        case ARG_DY:
-            options->jog_dy_mm = atof (optarg);
-            break;
-        case ARG_FAMILY:
-            copy_string (options->font_family, sizeof (options->font_family), optarg);
-            LOGD ("font family: %s", options->font_family);
-            break;
-        case ARG_SHOW:
-            options->config_action = CFG_SHOW;
-            LOGD ("config: --show");
-            break;
-        case ARG_RESET:
-            options->config_action = CFG_RESET;
-            LOGD ("config: --reset");
-            break;
-        case ARG_SET:
-            options->config_action = CFG_SET;
-            copy_string (options->config_set_pairs, sizeof (options->config_set_pairs), optarg);
-            LOGD ("config: --set %s", options->config_set_pairs);
-            break;
-        case ARG_DEVICE_MODEL:
-            copy_string (options->device_model, sizeof (options->device_model), optarg);
-            LOGD ("device model: %s", options->device_model);
-            break;
-        default:
-            switch_options (arg, options);
-        }
+        if (handle_layout_option (arg, optarg, options))
+            continue;
+        if (handle_output_option (arg, options))
+            continue;
+        if (handle_input_option (arg, optarg, options))
+            continue;
+        if (handle_typography_option (arg, optarg, options))
+            continue;
+        if (handle_device_option (arg, optarg, options))
+            continue;
+        if (handle_config_option (arg, optarg, options))
+            continue;
+
+        switch_options (arg, options);
     }
 
     /* Handle device positional action (e.g., up, down, jog). On some libc
@@ -569,8 +649,8 @@ void options_parser (int argc, char *argv[], options_t *options) {
         }
     }
 
-    // Отримати ім'я файлу або використати stdin; тільки для команд, що беруть файл
-    if (options->cmd == CMD_PRINT || options->cmd == CMD_NONE) {
+    // Отримати шлях до файлу; тільки для команд, що очікують файл
+    if (options->cmd == CMD_PRINT) {
         get_file_name (argc, argv, options);
     }
 }

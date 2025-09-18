@@ -15,10 +15,12 @@ CLI для друку на AxiDraw
 
 Поширені приклади
 - Попередній перегляд Markdown у SVG (stdout) з використанням моделі пристрою AxiDraw MiniKit 2:
-  - `printf 'Hello\n' | CPLOT_ALLOW_STDIN_BLOCK=1 ./bin/cplot print --preview --device minikit2 --paper-w 160 --paper-h 101 --margins 10`
+  - `./bin/cplot print --preview --device minikit2 --paper-w 160 --paper-h 101 --margins 10 note.md`
 - Тестовий друк (dry‑run) з файлу з обраним пристроєм:
   - `./bin/cplot print --device minikit2 --paper-w 160 --paper-h 101 --margins 10 --dry-run note.md`
-  - Примітка: для друку надавайте перевагу файловому вводу; конвеєр підготовки друку читає вхід двічі.
+- Пряме передавання тексту (без створення файлу) за допомогою нового прапорця `--text`:
+  - `./bin/cplot print --preview --text "Hello, world!" --paper-w 160 --paper-h 101 --margins 10`
+  - Примітка: stdin більше не використовується; CLI приймає дані лише з файлів або через `--text`.
 
 Редактор і інструменти
  - Конфігурація проєкту Zed у `.zed/`:
