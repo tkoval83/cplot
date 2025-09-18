@@ -420,11 +420,11 @@ static bool handle_layout_option (int arg, const char *value, options_t *options
     switch (arg) {
     case ARG_PORTRAIT:
         options->orientation = ORIENT_PORTRAIT;
-        LOGD ("орієнтація: portrait");
+        LOGD ("орієнтація: портретна");
         return true;
     case ARG_LANDSCAPE:
         options->orientation = ORIENT_LANDSCAPE;
-        LOGD ("орієнтація: landscape");
+        LOGD ("орієнтація: альбомна");
         return true;
     case ARG_MARGINS:
         parse_margins_argument (value, options);
@@ -486,7 +486,7 @@ static bool handle_typography_option (int arg, const char *value, options_t *opt
     if (arg != ARG_FAMILY)
         return false;
     copy_string (options->font_family, sizeof (options->font_family), value);
-    LOGD ("font family: %s", options->font_family);
+    LOGD ("родина шрифтів: %s", options->font_family);
     return true;
 }
 
@@ -497,7 +497,7 @@ static bool handle_device_option (int arg, const char *value, options_t *options
     switch (arg) {
     case ARG_LIST:
         options->device_action = device_action_make_simple (DEVICE_ACTION_LIST);
-        LOGD ("device: --list");
+        LOGD ("пристрій: опція --list");
         return true;
     case ARG_PORT:
         copy_string (options->device_port, sizeof (options->device_port), value);
@@ -510,7 +510,7 @@ static bool handle_device_option (int arg, const char *value, options_t *options
         return true;
     case ARG_DEVICE_MODEL:
         copy_string (options->device_model, sizeof (options->device_model), value);
-        LOGD ("device model: %s", options->device_model);
+        LOGD ("модель пристрою: %s", options->device_model);
         return true;
     default:
         return false;
@@ -524,16 +524,16 @@ static bool handle_config_option (int arg, const char *value, options_t *options
     switch (arg) {
     case ARG_SHOW:
         options->config_action = CFG_SHOW;
-        LOGD ("config: --show");
+        LOGD ("конфігурація: опція --show");
         return true;
     case ARG_RESET:
         options->config_action = CFG_RESET;
-        LOGD ("config: --reset");
+        LOGD ("конфігурація: опція --reset");
         return true;
     case ARG_SET:
         options->config_action = CFG_SET;
         copy_string (options->config_set_pairs, sizeof (options->config_set_pairs), value);
-        LOGD ("config: --set %s", options->config_set_pairs);
+        LOGD ("конфігурація: опція --set %s", options->config_set_pairs);
         return true;
     default:
         return false;
@@ -636,7 +636,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
         if (parsed.action_set) {
             options->device_action = parsed.action;
             LOGD (
-                "device action: kind=%d pen=%d motor=%d", (int)options->device_action.kind,
+                "дія пристрою: тип=%d pen=%d мотор=%d", (int)options->device_action.kind,
                 (int)options->device_action.pen, (int)options->device_action.motor);
         }
         if (parsed.dx_set) {

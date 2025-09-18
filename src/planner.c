@@ -155,15 +155,15 @@ static void planner_pop_tail (planner_node_t *out) {
  */
 bool planner_init (const planner_limits_t *limits) {
     if (!limits) {
-        LOGE ("planner: не передано обмеження");
+        LOGE ("планувальник: не передано обмеження");
         return false;
     }
     if (!(limits->max_speed_mm_s > 0.0) || !(limits->max_accel_mm_s2 > 0.0)) {
-        LOGE ("planner: швидкість та прискорення повинні бути додатними");
+        LOGE ("планувальник: швидкість та прискорення повинні бути додатними");
         return false;
     }
     if (!(limits->cornering_distance_mm >= 0.0) || !(limits->min_segment_mm >= 0.0)) {
-        LOGE ("planner: кути та мінімальна довжина не можуть бути від’ємними");
+        LOGE ("планувальник: кути та мінімальна довжина не можуть бути від’ємними");
         return false;
     }
 
@@ -171,7 +171,7 @@ bool planner_init (const planner_limits_t *limits) {
     planner_reset ();
     trace_write (
         LOG_DEBUG,
-        "planner: ініціалізація max_speed=%.3f мм/с max_accel=%.3f мм/с² corner=%.3f мм min_segment=%.3f мм",
+        "планувальник: ініціалізація max_speed=%.3f мм/с max_accel=%.3f мм/с² corner=%.3f мм min_segment=%.3f мм",
         g_limits.max_speed_mm_s,
         g_limits.max_accel_mm_s2,
         g_limits.cornering_distance_mm,
@@ -187,7 +187,7 @@ void planner_reset (void) {
     g_last_position[0] = 0.0;
     g_last_position[1] = 0.0;
     g_next_seq = 0;
-    trace_write (LOG_DEBUG, "planner: скидання черги");
+    trace_write (LOG_DEBUG, "планувальник: скидання черги");
 }
 
 /**
@@ -200,7 +200,7 @@ void planner_sync_position (const double position_mm[2]) {
         return;
     trace_write (
         LOG_DEBUG,
-        "planner: синхронізація позиції → (%.3f, %.3f)", position_mm[0], position_mm[1]);
+        "планувальник: синхронізація позиції → (%.3f, %.3f)", position_mm[0], position_mm[1]);
     g_last_position[0] = position_mm[0];
     g_last_position[1] = position_mm[1];
     if (g_count == 0)
@@ -265,7 +265,7 @@ bool planner_enqueue (const planner_segment_t *segment) {
                 last_mut->exit_speed = last_mut->nominal_speed;
             trace_write (
                 LOG_DEBUG,
-                "planner: злиття короткого сегмента у блок #%lu → старт=(%.3f, %.3f) ціль=(%.3f, %.3f) довжина=%.6f мм",
+                "планувальник: злиття короткого сегмента у блок №%lu → старт=(%.3f, %.3f) ціль=(%.3f, %.3f) довжина=%.6f мм",
                 last_mut->seq,
                 start_x,
                 start_y,
@@ -278,7 +278,7 @@ bool planner_enqueue (const planner_segment_t *segment) {
 #ifdef DEBUG
         trace_write (
             LOG_DEBUG,
-            "planner: злиття короткого сегмента (%.6f мм) → позиція (%.3f, %.3f)",
+            "планувальник: злиття короткого сегмента (%.6f мм) → позиція (%.3f, %.3f)",
             length_mm,
             segment->target_mm[0],
             segment->target_mm[1]);
@@ -320,7 +320,7 @@ bool planner_enqueue (const planner_segment_t *segment) {
         node.entry_speed = prev->exit_speed;
         trace_write (
             LOG_DEBUG,
-            "planner: переход між блоками #%lu → #%lu: junction=%.3f entry=%.3f exit(prev)=%.3f",
+            "планувальник: перехід між блоками №%lu → №%lu: гранична=%.3f швидк_вход=%.3f швидк_вих(попер)=%.3f",
             prev->seq,
             node.seq,
             junction,
@@ -334,7 +334,7 @@ bool planner_enqueue (const planner_segment_t *segment) {
 #ifdef DEBUG
     trace_write (
         LOG_DEBUG,
-        "planner: enqueue блок #%lu start=(%.3f,%.3f) target=(%.3f,%.3f) len=%.3f entry=%.3f nominal=%.3f pen=%d",
+        "планувальник: постановка блока №%lu старт=(%.3f,%.3f) ціль=(%.3f,%.3f) довжина=%.3f швидк_вход=%.3f номінал=%.3f перо=%d",
         node.seq,
         start[0],
         start[1],
@@ -436,7 +436,7 @@ bool planner_pop (plan_block_t *out) {
 #ifdef DEBUG
     trace_write (
         LOG_DEBUG,
-        "planner: pop блок #%lu len=%.3f start=%.3f end=%.3f cruise=%.3f accel=%.3f dist[a/c/d]=(%.3f/%.3f/%.3f) pen=%d",
+        "планувальник: видача блока №%lu довжина=%.3f початок=%.3f кінець=%.3f крейсер=%.3f прискорення=%.3f ділянки[a/c/d]=(%.3f/%.3f/%.3f) перо=%d",
         out->seq,
         out->length_mm,
         out->start_speed_mm_s,
