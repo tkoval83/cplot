@@ -5,6 +5,8 @@
 #include "cmd.h"
 #include "axidraw.h"
 #include "axistate.h"
+#include "canvas.h"
+#include "config.h"
 #include "fontreg.h"
 #include "help.h"
 #include "hud.h"
@@ -1012,26 +1014,10 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
 }
 
 /**
- * Виконати підкоманду print (побудова розкладки та відправлення на пристрій).
+ * Виконати підкоманду print.
  *
- * Контракт:
- * - `in` містить увесь вхідний текст (прочитаний з файлу або переданий напряму).
- * - Якщо dry_run=true, фактична взаємодія з пристроєм не виконується, лише лог та підготовка.
- * - verbose керує рівнем деталізації журналу (див. verbose_level_t).
- * - На даному етапі реалізація є заглушкою і повертає успіх.
- *
- * @param in               Текст, що необхідно обробити (UTF-8 або ASCII).
- * @param font_family      Родина шрифтів або NULL для типової.
- * @param paper_w_mm       Ширина паперу (мм).
- * @param paper_h_mm       Висота паперу (мм).
- * @param margin_top_mm    Верхнє поле (мм).
- * @param margin_right_mm  Праве поле (мм).
- * @param margin_bottom_mm Нижнє поле (мм).
- * @param margin_left_mm   Ліве поле (мм).
- * @param orientation      Значення з enum orientation_t (див. args.h): 1 портрет, 2 альбом.
- * @param dry_run          Імітація без реального виконання.
- * @param verbose          Рівень деталізації логів.
- * @return 0 успіх; ненульовий код — помилка.
+ * Справжня побудова траєкторій буде виконуватися модулем canvas; наразі функція
+ * повертає код помилки, оскільки canvas ще не реалізовано.
  */
 cmd_result_t cmd_print_execute (
     string_t in,
@@ -1045,7 +1031,7 @@ cmd_result_t cmd_print_execute (
     int orientation,
     bool dry_run,
     verbose_level_t verbose) {
-    LOGI ("Почато побудову та друк");
+    LOGI ("Почато побудову траєкторії");
     trace_write (
         LOG_INFO,
         "cmd.print: bytes=%zu font=%s папір=%.1fx%.1f поля=%.1f/%.1f/%.1f/%.1f орієнтація=%d "
@@ -1053,18 +1039,45 @@ cmd_result_t cmd_print_execute (
         in.len, font_family ? font_family : "<типовий>", paper_w_mm, paper_h_mm, margin_top_mm,
         margin_right_mm, margin_bottom_mm, margin_left_mm, orientation, dry_run ? "так" : "ні",
         verbose);
-    (void)paper_w_mm;
-    (void)paper_h_mm;
-    (void)margin_top_mm;
-    (void)margin_right_mm;
-    (void)margin_bottom_mm;
-    (void)margin_left_mm;
-    (void)in;
-    (void)font_family;
-    (void)orientation;
+
+    double effective_w = paper_w_mm;
+    double effective_h = paper_h_mm;
+    if (orientation == ORIENT_LANDSCAPE) {
+        effective_w = paper_h_mm;
+        effective_h = paper_w_mm;
+    }
+
+    double x0 = margin_left_mm;
+    double y0 = margin_top_mm;
+    double x1 = effective_w - margin_right_mm;
+    double y1 = effective_h - margin_bottom_mm;
+
+    if (!(x1 > x0) || !(y1 > y0)) {
+        LOGE ("Некоректні поля — робоча область відсутня");
+        return 2;
+    }
+
+    canvas_options_t canvas_opts = {
+        .paper_w_mm = paper_w_mm,
+        .paper_h_mm = paper_h_mm,
+        .margin_top_mm = margin_top_mm,
+        .margin_right_mm = margin_right_mm,
+        .margin_bottom_mm = margin_bottom_mm,
+        .margin_left_mm = margin_left_mm,
+        .orientation = (orientation_t)orientation,
+        .font_family = font_family,
+    };
+
+    canvas_plan_t plan;
+    if (!canvas_plan_document (in.chars, in.len, &canvas_opts, &plan)) {
+        LOGE ("canvas ще не реалізовано — побудова перервана");
+        return 1;
+    }
+
+    canvas_plan_dispose (&plan);
     (void)dry_run;
     (void)verbose;
-    fprintf (stdout, "Друк: ще не реалізовано\n");
+    LOGI ("Планування виконано (результат поки не використовується)");
     return 0;
 }
 

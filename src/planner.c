@@ -1,0 +1,337 @@
+/**
+ * @file planner.c
+ * @brief Спрощений планувальник траєкторії з урахуванням кута повороту.
+ */
+
+#include "planner.h"
+
+#include <math.h>
+#include <stddef.h>
+#include <string.h>
+
+#include "log.h"
+
+#define PLANNER_QUEUE_SIZE 32
+#define EPSILON_MM 1e-6
+
+/** @brief Внутрішній вузол черги планувальника. */
+typedef struct {
+    double target[2];
+    double delta[2];
+    double unit_vec[2];
+    double length_mm;
+    double nominal_speed;
+    double entry_speed;
+    double exit_speed;
+    bool pen_down;
+} planner_node_t;
+
+static planner_limits_t g_limits;
+static planner_node_t g_nodes[PLANNER_QUEUE_SIZE];
+static size_t g_head;
+static size_t g_tail;
+static size_t g_count;
+static double g_last_position[2];
+
+/**
+ * @brief Повернути попередній індекс у кільцевій черзі.
+ *
+ * @param idx Поточний індекс у масиві вузлів.
+ * @return Індекс попереднього елемента.
+ */
+static size_t planner_prev_index (size_t idx) {
+    return (idx == 0) ? (PLANNER_QUEUE_SIZE - 1) : (idx - 1);
+}
+
+/**
+ * @brief Повернути наступний індекс у кільцевій черзі.
+ *
+ * @param idx Поточний індекс у масиві вузлів.
+ * @return Наступний індекс із урахуванням циклічності.
+ */
+static size_t planner_next_index (size_t idx) {
+    return (idx + 1) % PLANNER_QUEUE_SIZE;
+}
+
+/** @brief Перевірити, чи заповнений буфер вузлів. */
+static bool planner_is_full (void) {
+    return g_count == PLANNER_QUEUE_SIZE;
+}
+
+/** @brief Отримати останній доданий вузол (тільки читання). */
+static const planner_node_t *planner_last_node (void) {
+    if (g_count == 0)
+        return NULL;
+    size_t idx = planner_prev_index (g_head);
+    return &g_nodes[idx];
+}
+
+/** @brief Отримати останній вузол із можливістю модифікації. */
+static planner_node_t *planner_last_node_mut (void) {
+    if (g_count == 0)
+        return NULL;
+    size_t idx = planner_prev_index (g_head);
+    return &g_nodes[idx];
+}
+
+/**
+ * @brief Повернути додатне значення або запасний варіант.
+ *
+ * @param value Значення для перевірки.
+ * @param fallback Значення, що повертається при некоректності.
+ */
+static double clamp_positive (double value, double fallback) {
+    if (!(value > 0.0) || isinf (value) || isnan (value))
+        return fallback;
+    return value;
+}
+
+/**
+ * @brief Обчислити максимально безпечну швидкість у точці стику сегментів.
+ *
+ * @param prev Попередній сегмент шляху.
+ * @param curr Поточний сегмент шляху.
+ * @return Відкоригована швидкість у мм/с.
+ */
+static double compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
+    if (!prev || !curr)
+        return 0.0;
+    if (g_limits.cornering_distance_mm <= 0.0)
+        return 0.0;
+    double dot = prev->unit_vec[0] * curr->unit_vec[0] + prev->unit_vec[1] * curr->unit_vec[1];
+    if (!isfinite (dot))
+        return 0.0;
+    if (dot > 0.999999)
+        return clamp_positive (g_limits.max_speed_mm_s, 0.0);
+    if (dot < -0.999999)
+        dot = -0.999999;
+    double sin_theta_half = sqrt (0.5 * (1.0 - dot));
+    if (sin_theta_half <= 1e-9)
+        return clamp_positive (g_limits.max_speed_mm_s, 0.0);
+    double numerator = g_limits.max_accel_mm_s2 * g_limits.cornering_distance_mm * sin_theta_half;
+    double denom = 1.0 - sin_theta_half;
+    if (denom <= 0.0)
+        return 0.0;
+    double limit = sqrt (numerator / denom);
+    if (!isfinite (limit) || limit <= 0.0)
+        return 0.0;
+    if (limit > g_limits.max_speed_mm_s)
+        limit = g_limits.max_speed_mm_s;
+    return limit;
+}
+
+/**
+ * @brief Додати вузол до буфера та оновити індекс head.
+ *
+ * @param node Вузол для збереження.
+ */
+static void planner_store_node (const planner_node_t *node) {
+    g_nodes[g_head] = *node;
+    g_head = planner_next_index (g_head);
+    ++g_count;
+}
+
+/**
+ * @brief Зняти вузол з хвоста буфера.
+ *
+ * @param out Структура для вихідних даних.
+ */
+static void planner_pop_tail (planner_node_t *out) {
+    if (g_count == 0)
+        return;
+    *out = g_nodes[g_tail];
+    g_tail = planner_next_index (g_tail);
+    --g_count;
+}
+
+/**
+ * @brief Ініціалізувати планувальник і застосувати обмеження.
+ *
+ * @param limits Параметри обмежень (може бути NULL для типових).
+ */
+void planner_init (const planner_limits_t *limits) {
+    memset (&g_limits, 0, sizeof (g_limits));
+    if (limits)
+        g_limits = *limits;
+    if (!(g_limits.max_speed_mm_s > 0.0))
+        g_limits.max_speed_mm_s = 40.0;
+    if (!(g_limits.max_accel_mm_s2 > 0.0))
+        g_limits.max_accel_mm_s2 = 1000.0;
+    if (!(g_limits.cornering_distance_mm >= 0.0))
+        g_limits.cornering_distance_mm = 0.0;
+    if (!(g_limits.min_segment_mm >= 0.0))
+        g_limits.min_segment_mm = 0.0;
+    planner_reset ();
+}
+
+/** @brief Очистити чергу планувальника та скинути позицію. */
+void planner_reset (void) {
+    g_head = 0;
+    g_tail = 0;
+    g_count = 0;
+    g_last_position[0] = 0.0;
+    g_last_position[1] = 0.0;
+}
+
+/**
+ * @brief Синхронізувати внутрішню позицію з зовнішнім станом.
+ *
+ * @param position_mm Координати X/Y у мм.
+ */
+void planner_sync_position (const double position_mm[2]) {
+    if (!position_mm)
+        return;
+    g_last_position[0] = position_mm[0];
+    g_last_position[1] = position_mm[1];
+    if (g_count == 0)
+        return;
+    planner_node_t *last = planner_last_node_mut ();
+    if (last) {
+        last->target[0] = position_mm[0];
+        last->target[1] = position_mm[1];
+    }
+}
+
+bool planner_enqueue (const planner_segment_t *segment) {
+    if (!segment)
+        return false;
+    if (planner_is_full ()) {
+        LOGW ("Черга планувальника переповнена");
+        return false;
+    }
+
+    double start[2];
+    if (g_count == 0) {
+        start[0] = g_last_position[0];
+        start[1] = g_last_position[1];
+    } else {
+        const planner_node_t *last = planner_last_node ();
+        start[0] = last->target[0];
+        start[1] = last->target[1];
+    }
+
+    double delta[2];
+    delta[0] = segment->target_mm[0] - start[0];
+    delta[1] = segment->target_mm[1] - start[1];
+    double length_mm = hypot (delta[0], delta[1]);
+
+    if (length_mm < g_limits.min_segment_mm) {
+        planner_node_t *last_mut = planner_last_node_mut ();
+        if (last_mut) {
+            last_mut->target[0] = segment->target_mm[0];
+            last_mut->target[1] = segment->target_mm[1];
+        }
+        g_last_position[0] = segment->target_mm[0];
+        g_last_position[1] = segment->target_mm[1];
+        return true;
+    }
+
+    planner_node_t node;
+    memset (&node, 0, sizeof (node));
+    node.target[0] = segment->target_mm[0];
+    node.target[1] = segment->target_mm[1];
+    node.delta[0] = delta[0];
+    node.delta[1] = delta[1];
+    node.length_mm = length_mm;
+    node.pen_down = segment->pen_down;
+
+    double inv_length = 1.0 / length_mm;
+    node.unit_vec[0] = delta[0] * inv_length;
+    node.unit_vec[1] = delta[1] * inv_length;
+
+    double nominal = segment->feed_mm_s;
+    nominal = clamp_positive (nominal, g_limits.max_speed_mm_s);
+    if (nominal > g_limits.max_speed_mm_s)
+        nominal = g_limits.max_speed_mm_s;
+    node.nominal_speed = nominal;
+    node.entry_speed = 0.0;
+    node.exit_speed = 0.0;
+
+    if (g_count == 0) {
+        node.entry_speed = 0.0;
+    } else {
+        planner_node_t *prev = planner_last_node_mut ();
+        double junction = compute_junction_speed (prev, &node);
+        double clamped = fmin (junction, fmin (prev->nominal_speed, node.nominal_speed));
+        if (clamped < 0.0)
+            clamped = 0.0;
+        prev->exit_speed = fmin (prev->nominal_speed, clamped);
+        node.entry_speed = prev->exit_speed;
+    }
+
+    planner_store_node (&node);
+    g_last_position[0] = node.target[0];
+    g_last_position[1] = node.target[1];
+    return true;
+}
+
+bool planner_has_blocks (void) {
+    return g_count > 0;
+}
+
+static void compute_trapezoid_profile (planner_node_t *node, plan_block_t *out) {
+    const double length = node->length_mm;
+    const double v0 = node->entry_speed;
+    const double v1 = node->exit_speed;
+    double vmax = node->nominal_speed;
+    if (!(vmax > 0.0))
+        vmax = g_limits.max_speed_mm_s;
+    double accel = g_limits.max_accel_mm_s2;
+    if (!(accel > 0.0))
+        accel = 1000.0;
+
+    double accel_dist = fmax (0.0, (vmax * vmax - v0 * v0) / (2.0 * accel));
+    double decel_dist = fmax (0.0, (vmax * vmax - v1 * v1) / (2.0 * accel));
+    double cruise_speed = vmax;
+
+    if (accel_dist + decel_dist > length) {
+        double numerator = 2.0 * accel * length + v0 * v0 + v1 * v1;
+        double v_cap = sqrt (fmax (numerator / 2.0, 0.0));
+        if (v_cap < fmax (v0, v1))
+            v_cap = fmax (v0, v1);
+        if (v_cap < 0.0)
+            v_cap = 0.0;
+        cruise_speed = fmin (v_cap, vmax);
+        accel_dist = fmax (0.0, (cruise_speed * cruise_speed - v0 * v0) / (2.0 * accel));
+        decel_dist = fmax (0.0, (cruise_speed * cruise_speed - v1 * v1) / (2.0 * accel));
+    }
+
+    double cruise_dist = length - accel_dist - decel_dist;
+    if (cruise_dist < 0.0)
+        cruise_dist = 0.0;
+
+    out->accel_distance_mm = accel_dist;
+    out->decel_distance_mm = decel_dist;
+    out->cruise_distance_mm = cruise_dist;
+    out->cruise_speed_mm_s = cruise_speed;
+    out->accel_mm_s2 = accel;
+}
+
+bool planner_pop (plan_block_t *out) {
+    if (!out || g_count == 0)
+        return false;
+
+    planner_node_t node;
+    planner_pop_tail (&node);
+
+    memset (out, 0, sizeof (*out));
+    out->delta_mm[0] = node.delta[0];
+    out->delta_mm[1] = node.delta[1];
+    out->length_mm = node.length_mm;
+    out->unit_vec[0] = node.unit_vec[0];
+    out->unit_vec[1] = node.unit_vec[1];
+    out->start_speed_mm_s = node.entry_speed;
+    out->end_speed_mm_s = node.exit_speed;
+    out->nominal_speed_mm_s = node.nominal_speed;
+    out->pen_down = node.pen_down;
+
+    compute_trapezoid_profile (&node, out);
+
+    // Після вилучення потрібно оновити останню позицію, якщо черга спорожніла.
+    if (g_count == 0) {
+        g_last_position[0] = node.target[0];
+        g_last_position[1] = node.target[1];
+    }
+
+    return true;
+}
