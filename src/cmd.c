@@ -520,25 +520,6 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
  * @param interval Інтервал між оновленнями в секундах; значення ≤0 замінюється на 1.0.
  * @param max_iter Кількість оновлень; від’ємне значення означає безкінечний режим.
  */
-static void shell_watch (double interval, int max_iter) {
-    if (interval <= 0.0)
-        interval = 1.0;
-    struct timespec sleep_ts;
-    sleep_ts.tv_sec = (time_t)interval;
-    sleep_ts.tv_nsec = (long)((interval - (double)sleep_ts.tv_sec) * 1e9);
-    if (sleep_ts.tv_nsec < 0)
-        sleep_ts.tv_nsec = 0;
-    if (max_iter < 0)
-        fprintf (stdout, "Натисніть Ctrl+C для зупинки watch\n");
-    for (int i = 0; max_iter < 0 || i < max_iter; ++i) {
-        if (!hud_render (NULL, false))
-            fprintf (stdout, "HUD недоступний (немає контексту)\n");
-        if (max_iter >= 0 && i + 1 >= max_iter)
-            break;
-        nanosleep (&sleep_ts, NULL);
-    }
-}
-
 static bool shell_get_position (axidraw_device_t *dev, double *x_mm, double *y_mm) {
     update_state_from_device (dev, "query", "query", 0, 0);
     axistate_t state;
@@ -570,17 +551,12 @@ static void shell_print_help (void) {
     fprintf (stdout, "  pen up|down|toggle   — керування пером\n");
     fprintf (stdout, "  motors on|off        — увімкнути або вимкнути мотори\n");
     fprintf (stdout, "  abort                — аварійно зупинити всі рухи\n");
-    fprintf (stdout, "  state                — показати останній відомий стан пристрою\n");
-    fprintf (stdout, "  watch [sec [n]]      — періодично показувати стан (Ctrl+C для переривання)\n");
     fprintf (stdout, "  moveto <x> <y>       — переміститися у абсолютні координати (мм)\n");
     fprintf (stdout, "  lineto <x> <y>       — провести лінію до абсолютних координат (мм)\n");
     fprintf (stdout, "  move <dx> <dy>       — зсув на dx/dy мм\n");
     fprintf (stdout, "  line <dx> <dy>       — провести лінію на dx/dy мм (відносно)\n");
     fprintf (stdout, "  jog <dx> <dy>        — ручний зсув на dx/dy мм\n");
     fprintf (stdout, "  home                 — повернутися у початкову позицію\n");
-    fprintf (stdout, "  status               — показати агрегований стан контролера\n");
-    fprintf (stdout, "  position             — показати поточну позицію\n");
-    fprintf (stdout, "  version              — показати версію прошивки контролера\n");
     fprintf (stdout, "  reset                — підняти перо, очистити лічильники й вимкнути мотори\n");
     fprintf (stdout, "  reboot               — перезавантажити контролер EBB\n");
 }
@@ -708,35 +684,6 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
         }
         if (strcasecmp (cmd, "list") == 0) {
             cmd_device_list (current_model, verbose);
-            continue;
-        }
-        if (strcasecmp (cmd, "state") == 0 || strcasecmp (cmd, "stats") == 0) {
-            hud_render (NULL, true);
-            continue;
-        }
-        if (strcasecmp (cmd, "watch") == 0) {
-            double interval = 1.0;
-            int max_iter = -1;
-            if (ntokens >= 2) {
-                if (!parse_double_str (tokens[1], &interval) || interval <= 0.0) {
-                    LOGW ("Некоректний інтервал watch");
-                    continue;
-                }
-            }
-            if (ntokens >= 3) {
-                char *endc = NULL;
-                long cnt = strtol (tokens[2], &endc, 10);
-                if (!tokens[2][0] || (endc && *endc)) {
-                    LOGW ("Некоректне значення лічильника для watch");
-                    continue;
-                }
-                if (cnt < 0)
-                    max_iter = -1;
-                else
-                    max_iter = (int)cnt;
-            }
-            hud_render (NULL, true);
-            shell_watch (interval, max_iter);
             continue;
         }
         if (strcasecmp (cmd, "connect") == 0) {
@@ -917,27 +864,6 @@ cmd_result_t cmd_device_shell (const char *port, const char *model, verbose_leve
             if (rc != 0)
                 LOGE ("Не вдалося виконати зсув");
             update_state_from_device (&dev, "jog", "jog", rc, 0);
-            continue;
-        }
-        if (strcasecmp (cmd, "status") == 0) {
-            int rc = device_status_cb (&dev, NULL);
-            if (rc != 0)
-                LOGE ("Не вдалося отримати статус");
-            update_state_from_device (&dev, "status", "status", rc, 0);
-            continue;
-        }
-        if (strcasecmp (cmd, "position") == 0) {
-            int rc = device_position_cb (&dev, NULL);
-            if (rc != 0)
-                LOGE ("Не вдалося отримати позицію");
-            update_state_from_device (&dev, "position", "position", rc, 0);
-            continue;
-        }
-        if (strcasecmp (cmd, "version") == 0) {
-            int rc = device_version_cb (&dev, NULL);
-            if (rc != 0)
-                LOGE ("Не вдалося отримати версію контролера");
-            update_state_from_device (&dev, "version", "version", rc, 0);
             continue;
         }
         if (strcasecmp (cmd, "reset") == 0) {
