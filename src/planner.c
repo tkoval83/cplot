@@ -25,6 +25,7 @@ typedef struct {
     double entry_speed;
     double exit_speed;
     bool pen_down;
+    unsigned long seq;
 } planner_node_t;
 
 static planner_limits_t g_limits;
@@ -33,6 +34,7 @@ static size_t g_head;
 static size_t g_tail;
 static size_t g_count;
 static double g_last_position[2];
+static unsigned long g_next_seq;
 
 /**
  * @brief Повернути попередній індекс у кільцевій черзі.
@@ -167,6 +169,13 @@ bool planner_init (const planner_limits_t *limits) {
 
     g_limits = *limits;
     planner_reset ();
+    trace_write (
+        LOG_DEBUG,
+        "planner: ініціалізація max_speed=%.3f мм/с max_accel=%.3f мм/с² corner=%.3f мм min_segment=%.3f мм",
+        g_limits.max_speed_mm_s,
+        g_limits.max_accel_mm_s2,
+        g_limits.cornering_distance_mm,
+        g_limits.min_segment_mm);
     return true;
 }
 
@@ -177,6 +186,8 @@ void planner_reset (void) {
     g_count = 0;
     g_last_position[0] = 0.0;
     g_last_position[1] = 0.0;
+    g_next_seq = 0;
+    trace_write (LOG_DEBUG, "planner: скидання черги");
 }
 
 /**
@@ -187,6 +198,9 @@ void planner_reset (void) {
 void planner_sync_position (const double position_mm[2]) {
     if (!position_mm)
         return;
+    trace_write (
+        LOG_DEBUG,
+        "planner: синхронізація позиції → (%.3f, %.3f)", position_mm[0], position_mm[1]);
     g_last_position[0] = position_mm[0];
     g_last_position[1] = position_mm[1];
     if (g_count == 0)
@@ -249,6 +263,15 @@ bool planner_enqueue (const planner_segment_t *segment) {
                 last_mut->entry_speed = last_mut->nominal_speed;
             if (last_mut->exit_speed > last_mut->nominal_speed)
                 last_mut->exit_speed = last_mut->nominal_speed;
+            trace_write (
+                LOG_DEBUG,
+                "planner: злиття короткого сегмента у блок #%lu → старт=(%.3f, %.3f) ціль=(%.3f, %.3f) довжина=%.6f мм",
+                last_mut->seq,
+                start_x,
+                start_y,
+                last_mut->target[0],
+                last_mut->target[1],
+                last_mut->length_mm);
         }
         g_last_position[0] = segment->target_mm[0];
         g_last_position[1] = segment->target_mm[1];
@@ -283,6 +306,7 @@ bool planner_enqueue (const planner_segment_t *segment) {
     node.nominal_speed = nominal;
     node.entry_speed = 0.0;
     node.exit_speed = 0.0;
+    node.seq = ++g_next_seq;
 
     if (g_count == 0) {
         node.entry_speed = 0.0;
@@ -294,6 +318,14 @@ bool planner_enqueue (const planner_segment_t *segment) {
             clamped = 0.0;
         prev->exit_speed = fmin (prev->nominal_speed, clamped);
         node.entry_speed = prev->exit_speed;
+        trace_write (
+            LOG_DEBUG,
+            "planner: переход між блоками #%lu → #%lu: junction=%.3f entry=%.3f exit(prev)=%.3f",
+            prev->seq,
+            node.seq,
+            junction,
+            node.entry_speed,
+            prev->exit_speed);
     }
 
     planner_store_node (&node);
@@ -302,13 +334,16 @@ bool planner_enqueue (const planner_segment_t *segment) {
 #ifdef DEBUG
     trace_write (
         LOG_DEBUG,
-        "planner: enqueue len=%.3f entry=%.3f nominal=%.3f pen=%d target=(%.3f,%.3f)",
+        "planner: enqueue блок #%lu start=(%.3f,%.3f) target=(%.3f,%.3f) len=%.3f entry=%.3f nominal=%.3f pen=%d",
+        node.seq,
+        start[0],
+        start[1],
+        node.target[0],
+        node.target[1],
         node.length_mm,
         node.entry_speed,
         node.nominal_speed,
-        node.pen_down,
-        node.target[0],
-        node.target[1]);
+        node.pen_down);
 #endif
     return true;
 }
@@ -380,6 +415,7 @@ bool planner_pop (plan_block_t *out) {
     planner_pop_tail (&node);
 
     memset (out, 0, sizeof (*out));
+    out->seq = node.seq;
     out->delta_mm[0] = node.delta[0];
     out->delta_mm[1] = node.delta[1];
     out->length_mm = node.length_mm;
@@ -400,11 +436,16 @@ bool planner_pop (plan_block_t *out) {
 #ifdef DEBUG
     trace_write (
         LOG_DEBUG,
-        "planner: pop len=%.3f start=%.3f end=%.3f cruise=%.3f pen=%d",
+        "planner: pop блок #%lu len=%.3f start=%.3f end=%.3f cruise=%.3f accel=%.3f dist[a/c/d]=(%.3f/%.3f/%.3f) pen=%d",
+        out->seq,
         out->length_mm,
         out->start_speed_mm_s,
         out->end_speed_mm_s,
         out->cruise_speed_mm_s,
+        out->accel_mm_s2,
+        out->accel_distance_mm,
+        out->cruise_distance_mm,
+        out->decel_distance_mm,
         out->pen_down);
 #endif
 

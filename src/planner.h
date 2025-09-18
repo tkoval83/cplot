@@ -35,6 +35,7 @@ typedef struct {
  * @brief Підготовлений блок траєкторії (після планування).
  */
 typedef struct {
+    unsigned long seq;          /**< Послідовний ідентифікатор блоку. */
     double delta_mm[2];           /**< Зміщення сегмента у мм (x, y). */
     double length_mm;             /**< Довжина сегмента у мм. */
     double unit_vec[2];           /**< Нормований напрямок руху. */

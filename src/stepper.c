@@ -18,7 +18,7 @@
 #define LM_RATE_SCALE (2147483648.0 * LM_INTERVAL_SEC)
 
 /**
- * @brief Опис однієї трапецієподібної фази для LM-команди.
+ * @brief Опис однієї трапецієподібної фази для LM-команди та її відстеження.
  */
 typedef struct {
     double distance_mm;
@@ -27,6 +27,9 @@ typedef struct {
     int32_t steps_a;
     int32_t steps_b;
     double duration_s;
+    unsigned long block_seq;
+    size_t phase_index;
+    size_t phase_count;
 } stepper_phase_t;
 
 /**
@@ -85,11 +88,12 @@ static double phase_duration_s (double distance_mm, double start_speed, double e
 /**
  * @brief Відправити підготовлену фазу руху у вигляді LM-команди.
  *
- * @param ctx   Контекст stepper-підсистеми.
- * @param phase Фаза з попередньо розрахованими параметрами.
+ * @param ctx           Контекст stepper-підсистеми.
+ * @param phase         Фаза з попередньо розрахованими параметрами.
+ * @param send_command  true → відправляти команду на пристрій; false → лише логувати.
  * @return true при успіху або коли рух не потребує кроків; false при помилці відправлення.
  */
-static bool stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase) {
+static bool stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase, bool send_command) {
     if (!ctx || !phase)
         return false;
     if (phase->distance_mm <= STEPPER_EPS_MM || (phase->steps_a == 0 && phase->steps_b == 0))
@@ -134,19 +138,27 @@ static bool stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *p
             accel2 = (rate2_end > rate2) ? 1 : -1;
     }
 
-#ifdef DEBUG
+    const char *mode = (send_command && ctx->cfg.dev != NULL) ? "відправка" : "імітація";
     trace_write (
         LOG_DEBUG,
-        "stepper.phase: dist=%.4f start=%.3f end=%.3f stepsA=%d stepsB=%d duration=%.4f",
+        "stepper.phase: блок #%lu фаза %zu/%zu режим=%s відстань=%.4f початок=%.3f кінець=%.3f крокиA=%d крокиB=%d rateA=%u accelA=%d rateB=%u accelB=%d інтервалів=%u тривалість=%.4f",
+        phase->block_seq,
+        phase->phase_index + 1,
+        phase->phase_count,
+        mode,
         phase->distance_mm,
         phase->start_speed_mm_s,
         phase->end_speed_mm_s,
         phase->steps_a,
         phase->steps_b,
+        rate1,
+        accel1,
+        rate2,
+        accel2,
+        intervals,
         duration_s);
-#endif
 
-    if (ctx->cfg.dev == NULL)
+    if (!send_command || ctx->cfg.dev == NULL)
         return true;
 
     int rc = axidraw_move_lowlevel (
@@ -230,35 +242,49 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     size_t phase_count = 0;
 
     if (block->accel_distance_mm > STEPPER_EPS_MM) {
-        phases[phase_count++] = (stepper_phase_t){
+        size_t idx = phase_count++;
+        phases[idx] = (stepper_phase_t) {
             .distance_mm = block->accel_distance_mm,
             .start_speed_mm_s = block->start_speed_mm_s,
             .end_speed_mm_s = block->cruise_speed_mm_s,
+            .block_seq = block->seq,
+            .phase_index = idx,
         };
     }
     if (block->cruise_distance_mm > STEPPER_EPS_MM) {
-        phases[phase_count++] = (stepper_phase_t){
+        size_t idx = phase_count++;
+        phases[idx] = (stepper_phase_t) {
             .distance_mm = block->cruise_distance_mm,
             .start_speed_mm_s = block->cruise_speed_mm_s,
             .end_speed_mm_s = block->cruise_speed_mm_s,
+            .block_seq = block->seq,
+            .phase_index = idx,
         };
     }
     if (block->decel_distance_mm > STEPPER_EPS_MM) {
-        phases[phase_count++] = (stepper_phase_t){
+        size_t idx = phase_count++;
+        phases[idx] = (stepper_phase_t) {
             .distance_mm = block->decel_distance_mm,
             .start_speed_mm_s = block->cruise_speed_mm_s,
             .end_speed_mm_s = block->end_speed_mm_s,
+            .block_seq = block->seq,
+            .phase_index = idx,
         };
     }
 
     if (phase_count == 0) {
-        phases[0] = (stepper_phase_t){
+        phases[0] = (stepper_phase_t) {
             .distance_mm = block->length_mm,
             .start_speed_mm_s = block->start_speed_mm_s,
             .end_speed_mm_s = block->end_speed_mm_s,
+            .block_seq = block->seq,
+            .phase_index = 0,
         };
         phase_count = 1;
     }
+
+    for (size_t i = 0; i < phase_count; ++i)
+        phases[i].phase_count = phase_count;
 
     double total_length = block->length_mm;
     double total_duration_s = 0.0;
@@ -295,25 +321,22 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     uint32_t approx_duration_ms = (uint32_t)llround (total_duration_s * 1000.0);
 
     LOGD (
-        "Stepper: блок %lu delta=(%.3f,%.3f) len=%.3f pen=%s", ctx->emitted_blocks + 1,
+        "Stepper: блок %lu зміщення=(%.3f,%.3f) довжина=%.3f перо=%s", block->seq,
         block->delta_mm[0], block->delta_mm[1], block->length_mm, block->pen_down ? "так" : "ні");
     LOGD (
-        "Stepper: steps X=%d Y=%d A=%d B=%d, тривалість≈%u мс", steps_x, steps_y, steps_a_total,
+        "Stepper: кроки X=%d Y=%d A=%d B=%d, тривалість≈%u мс", steps_x, steps_y, steps_a_total,
         steps_b_total, approx_duration_ms);
-#ifdef DEBUG
     trace_write (
         LOG_DEBUG,
-        "stepper: block=%lu length=%.3f cruise=%.3f phases=%zu", ctx->emitted_blocks + 1,
+        "stepper: блок=%lu довжина=%.3f крейсер=%.3f фаз=%zu", block->seq,
         block->length_mm,
         block->cruise_speed_mm_s,
         phase_count);
-#endif
 
-    if (!dry_run && ctx->cfg.dev) {
-        for (size_t i = 0; i < phase_count; ++i) {
-            if (!stepper_emit_phase (ctx, &phases[i]))
-                return false;
-        }
+    bool send_cmd = (!dry_run && ctx->cfg.dev != NULL);
+    for (size_t i = 0; i < phase_count; ++i) {
+        if (!stepper_emit_phase (ctx, &phases[i], send_cmd))
+            return false;
     }
 
     ++ctx->emitted_blocks;
