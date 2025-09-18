@@ -294,6 +294,18 @@ bool planner_enqueue (const planner_segment_t *segment) {
                         last_mut->entry_speed = last_mut->nominal_speed;
                     if (last_mut->exit_speed > last_mut->nominal_speed)
                         last_mut->exit_speed = last_mut->nominal_speed;
+                    if (g_count > 1) {
+                        size_t prev_idx = planner_prev_index (planner_prev_index (g_head));
+                        planner_node_t *prev = &g_nodes[prev_idx];
+                        double updated_junction = compute_junction_speed (prev, last_mut);
+                        double clamped_junction = fmin (last_mut->nominal_speed, prev->nominal_speed);
+                        if (updated_junction < clamped_junction)
+                            clamped_junction = updated_junction;
+                        if (clamped_junction < 0.0)
+                            clamped_junction = 0.0;
+                        prev->exit_speed = fmin (prev->nominal_speed, clamped_junction);
+                        last_mut->entry_speed = prev->exit_speed;
+                    }
                     merged = true;
                     trace_write (
                         LOG_DEBUG,
