@@ -277,7 +277,7 @@ bool planner_enqueue (const planner_segment_t *segment) {
                 double dot = last_mut->unit_vec[0] * new_unit_x + last_mut->unit_vec[1] * new_unit_y;
                 if (dot > 1.0)
                     dot = 1.0;
-                if (dot >= 0.999) {
+                if (dot >= 0.999 && last_mut->pen_down == segment->pen_down) {
                     last_mut->target[0] = segment->target_mm[0];
                     last_mut->target[1] = segment->target_mm[1];
                     last_mut->delta[0] = new_delta_x;
@@ -290,7 +290,6 @@ bool planner_enqueue (const planner_segment_t *segment) {
                         new_nominal = g_limits.max_speed_mm_s;
                     if (last_mut->nominal_speed <= 0.0 || new_nominal < last_mut->nominal_speed)
                         last_mut->nominal_speed = new_nominal;
-                    last_mut->pen_down = segment->pen_down;
                     if (last_mut->entry_speed > last_mut->nominal_speed)
                         last_mut->entry_speed = last_mut->nominal_speed;
                     if (last_mut->exit_speed > last_mut->nominal_speed)
@@ -305,6 +304,11 @@ bool planner_enqueue (const planner_segment_t *segment) {
                         last_mut->target[0],
                         last_mut->target[1],
                         last_mut->length_mm);
+                } else if (dot >= 0.999) {
+                    trace_write (
+                        LOG_DEBUG,
+                        "планувальник: пропущено злиття короткого сегмента через стан пера (блок №%lu)",
+                        last_mut ? last_mut->seq : 0ul);
                 }
             }
         }
