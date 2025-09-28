@@ -1,0 +1,91 @@
+/**
+ * @file string.c
+ * @brief Shared utility helpers for safe string manipulation.
+ */
+
+#include "str.h"
+
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+
+/**
+ * @brief Виділити новий рядок і скопіювати в нього `src`.
+ *
+ * @param src     Вхідний рядок (NUL-термінований).
+ * @param[out] out_dst Отримує адресу нового буфера (`free` викликача).
+ * @return 0 при успіху; -1 при помилці памʼяті; -2 при некоректних аргументах.
+ */
+int string_duplicate (const char *src, char **out_dst) {
+    if (!src || !out_dst)
+        return -2;
+    size_t len = strlen (src);
+    char *copy = (char *)malloc (len + 1);
+    if (!copy)
+        return -1;
+    memcpy (copy, src, len + 1);
+    *out_dst = copy;
+    return 0;
+}
+
+/**
+ * @brief Безпечно скопіювати `src` у буфер з обмеженою довжиною.
+ *
+ * @param dst      Буфер призначення.
+ * @param dst_size Розмір буфера.
+ * @param src      Джерело (може бути NULL → записати порожній рядок).
+ */
+void string_copy (char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0)
+        return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    strncpy (dst, src, dst_size - 1);
+    dst[dst_size - 1] = '\0';
+}
+
+/**
+ * @brief Порівняти два ASCII-рядки без урахування регістру.
+ */
+bool string_equals_ci (const char *a, const char *b) {
+    if (!a || !b)
+        return false;
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a;
+        unsigned char cb = (unsigned char)*b;
+        if (tolower (ca) != tolower (cb))
+            return false;
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+/**
+ * @brief Перетворити рядок у нижній регістр (ASCII).
+ */
+void string_to_lower_ascii (char *s) {
+    if (!s)
+        return;
+    for (; *s; ++s)
+        *s = (char)tolower ((unsigned char)*s);
+}
+
+/**
+ * @brief Обрізати ASCII-пробіли з початку та кінця рядка.
+ */
+void string_trim_ascii (char *s) {
+    if (!s)
+        return;
+    char *start = s;
+    while (*start && isspace ((unsigned char)*start))
+        ++start;
+    if (start != s)
+        memmove (s, start, strlen (start) + 1);
+    char *end = s + strlen (s);
+    while (end > s && isspace ((unsigned char)end[-1]))
+        --end;
+    *end = '\0';
+}

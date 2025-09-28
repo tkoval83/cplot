@@ -1,0 +1,44 @@
+[
+  {
+    "label": "Build",
+    "command": "make",
+    "args": ["-j"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "hide": "if_success",
+    "show_summary": true,
+    "show_command": true
+  },
+  {
+    "label": "Run",
+    "command": "sh",
+    "args": ["-lc", "./bin/cplot"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "hide": "never"
+  },
+  {
+    "label": "Tests",
+    "command": "make",
+    "args": ["tests"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "hide": "never"
+  },
+  {
+    "label": "Valgrind",
+    "command": "make",
+    "args": ["valgrind"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "hide": "never"
+  },
+  {
+    "label": "Clean",
+    "command": "make",
+    "args": ["clean"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "hide": "always"
+  }
+]

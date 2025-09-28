@@ -1,0 +1,10 @@
+Package: cplot
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: @ARCH@
+Maintainer: cplot Project <noreply@example.com>
+Depends: libc6
+Description: CLI для плотерного керування
+ Містить вбудовані шрифти Hershey та обгортку CPLOT_DATA_DIR.
+Rules-Requires-Root: no

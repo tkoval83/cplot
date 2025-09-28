@@ -1,0 +1,6 @@
+CompileFlags:
+  # Force pure C (no Objective-C/C++) so clangd doesn't try ObjC++ and reject -std=gnu99
+  Add:
+    - -xc
+    - -std=gnu99
+    - -Isrc

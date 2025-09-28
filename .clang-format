@@ -1,0 +1,17 @@
+---
+BasedOnStyle: GNU
+IndentWidth: 4
+UseTab: Never
+ColumnLimit: 100
+AlignAfterOpenBracket: AlwaysBreak
+# When a function parameter list exceeds the column limit, put one parameter per line
+BinPackParameters: false
+# Use 1TBS/Attach: put { on the same line as function/statement
+BreakBeforeBraces: Attach
+# Keep return type on same line as function name
+AlwaysBreakAfterReturnType: None
+AlwaysBreakAfterDefinitionReturnType: None
+PointerAlignment: Right
+AllowShortIfStatementsOnASingleLine: false
+...
+
