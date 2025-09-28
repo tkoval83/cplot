@@ -6,10 +6,10 @@
 #define CPLOT_DRAWING_H
 
 #include "canvas.h"
-#include <stddef.h>
-#include <stdint.h>
 #include "planner.h"
 #include "text.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +26,7 @@ typedef struct {
     double margin_bottom_mm;
     double margin_left_mm;
     orientation_t orientation;
+    int fit_to_frame; /* 0=disabled, 1=scale down to fit page */
 } drawing_page_t;
 
 /**
@@ -37,10 +38,7 @@ typedef struct {
 } drawing_layout_t;
 
 /* Локальні базові типи вводу/виводу для модуля рендерингу */
-typedef enum {
-    STR_ENC_UTF8 = 0,
-    STR_ENC_ASCII = 1
-} string_encoding_t;
+typedef enum { STR_ENC_UTF8 = 0, STR_ENC_ASCII = 1 } string_encoding_t;
 
 typedef struct string_view {
     const char *chars;

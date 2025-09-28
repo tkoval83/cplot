@@ -27,6 +27,7 @@ typedef struct {
     double margin_left_mm;     /**< Ліве поле (мм). */
     orientation_t orientation; /**< Орієнтація сторінки. */
     const char *font_family;   /**< Родина шрифтів (може бути NULL). */
+    bool fit_to_frame;         /**< Масштабувати вміст, щоби вмістився у рамку сторінки. */
 } canvas_options_t;
 
 /**

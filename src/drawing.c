@@ -107,6 +107,7 @@ int drawing_build_layout (
         .margin_left_mm = page->margin_left_mm,
         .orientation = page->orientation,
         .font_family = font_family,
+        .fit_to_frame = page->fit_to_frame ? true : false,
     };
 
     canvas_layout_t layout_mm;
@@ -143,6 +144,7 @@ int drawing_build_layout_from_paths (
         .margin_left_mm = page->margin_left_mm,
         .orientation = page->orientation,
         .font_family = NULL,
+        .fit_to_frame = page->fit_to_frame ? true : false,
     };
 
     canvas_layout_t layout_mm;

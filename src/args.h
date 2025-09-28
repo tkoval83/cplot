@@ -23,14 +23,7 @@
 #define FILE_NAME_SIZE 512
 
 /// Підкоманди, які підтримує CLI.
-typedef enum {
-    CMD_NONE = 0,
-    CMD_PRINT,
-    CMD_DEVICE,
-    CMD_FONTS,
-    CMD_CONFIG,
-    CMD_VERSION
-} cmd_t;
+typedef enum { CMD_NONE = 0, CMD_PRINT, CMD_DEVICE, CMD_FONTS, CMD_CONFIG, CMD_VERSION } cmd_t;
 
 /**
  * @enum device_action_kind_t
@@ -110,7 +103,8 @@ typedef enum arg_code {
     ARG_PREVIEW = 20,
     ARG_FORMAT = 21,
     ARG_FONT_FAMILIES = 22,
-    ARG_FONT_FAMILY_VALUE = 23
+    ARG_FONT_FAMILY_VALUE = 23,
+    ARG_FIT_PAGE = 24
 } arg_code_t;
 
 /** Опис однієї опції CLI. */
@@ -191,6 +185,7 @@ struct options {
     char output_path[FILE_NAME_SIZE]; /**< --output: шлях файлу для превʼю */
     bool dry_run;
     bool verbose;
+    bool fit_page;                    /**< --fit-page: масштабувати, щоб вміститись на сторінку */
     // Типографіка
     char font_family[128]; /**< напр., "Serif Bold" або id "hershey_serif_bold" */
     double font_size_pt;   /**< Кегль у пунктах (0 → використовувати конфіг). */
@@ -211,7 +206,7 @@ struct options {
     char config_set_pairs[512]; /**< пари key=value через кому */
 
     // Прапорці підкоманди fonts
-    bool fonts_list; /**< запитано перелік шрифтів */
+    bool fonts_list;          /**< запитано перелік шрифтів */
     bool fonts_list_families; /**< замість гарнітур — лише родини шрифтів */
 
     /* Поля shape вилучені з CLI */

@@ -6,6 +6,7 @@
 #include "str.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -88,4 +89,45 @@ void string_trim_ascii (char *s) {
     while (end > s && isspace ((unsigned char)end[-1]))
         --end;
     *end = '\0';
+}
+
+int str_utf8_decode (const char *input, uint32_t *out_cp, size_t *consumed) {
+    if (!input || !out_cp)
+        return -1;
+    const unsigned char *s = (const unsigned char *)input;
+    size_t used = 0;
+    uint32_t cp = 0;
+    if ((s[0] & 0x80) == 0) {
+        cp = s[0];
+        used = 1;
+    } else if ((s[0] & 0xE0) == 0xC0) {
+        if ((s[1] & 0xC0) != 0x80)
+            return -1;
+        cp = ((uint32_t)(s[0] & 0x1F) << 6) | (uint32_t)(s[1] & 0x3F);
+        used = 2;
+        if (cp < 0x80)
+            return -1;
+    } else if ((s[0] & 0xF0) == 0xE0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80)
+            return -1;
+        cp = ((uint32_t)(s[0] & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6)
+             | (uint32_t)(s[2] & 0x3F);
+        used = 3;
+        if (cp < 0x800)
+            return -1;
+    } else if ((s[0] & 0xF8) == 0xF0) {
+        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80)
+            return -1;
+        cp = ((uint32_t)(s[0] & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12)
+             | ((uint32_t)(s[2] & 0x3F) << 6) | (uint32_t)(s[3] & 0x3F);
+        used = 4;
+        if (cp < 0x10000)
+            return -1;
+    } else {
+        return -1;
+    }
+    if (consumed)
+        *consumed = used;
+    *out_cp = cp;
+    return 0;
 }

@@ -7,11 +7,11 @@
  * Публічний інтерфейс зводиться до `options_parser`, яким користується main(),
  * та допоміжних функцій для довідки (`argdefs_*`).
  */
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "args.h"
 #include "config.h"
@@ -87,9 +87,9 @@ static cmd_t parse_command_name (const char *name) {
     static const struct {
         const char *name;
         cmd_t cmd;
-    } k_cmd_map[] = { { "print", CMD_PRINT },    { "device", CMD_DEVICE }, { "fonts", CMD_FONTS },
-                      { "font", CMD_FONTS },     { "config", CMD_CONFIG },
-                      { "version", CMD_VERSION } };
+    } k_cmd_map[]
+        = { { "print", CMD_PRINT }, { "device", CMD_DEVICE }, { "fonts", CMD_FONTS },
+            { "font", CMD_FONTS },  { "config", CMD_CONFIG }, { "version", CMD_VERSION } };
     for (size_t i = 0; i < sizeof (k_cmd_map) / sizeof (k_cmd_map[0]); ++i) {
         if (strcmp (name, k_cmd_map[i].name) == 0)
             return k_cmd_map[i].cmd;
@@ -268,6 +268,7 @@ static const struct option k_long_options[] = {
     { "output", required_argument, 0, ARG_OUTPUT },
     { "format", required_argument, 0, ARG_FORMAT },
     { "preview", no_argument, 0, ARG_PREVIEW },
+    { "fit-page", no_argument, 0, ARG_FIT_PAGE },
     { "dry-run", no_argument, 0, ARG_DRY_RUN },
     { "verbose", no_argument, 0, ARG_VERBOSE },
     { "device-name", required_argument, 0, ARG_DEVICE_NAME },
@@ -315,6 +316,8 @@ static const cli_option_desc_t k_option_descs[] = {
     { "height", required_argument, ARG_HEIGHT, '\0', "мм", "layout", "Висота паперу" },
     { "preview", no_argument, ARG_PREVIEW, '\0', NULL, "layout",
       "Не надсилати на пристрій; вивести прев’ю у stdout" },
+    { "fit-page", no_argument, ARG_FIT_PAGE, '\0', NULL, "layout",
+      "Масштабувати вміст, щоб вмістився на одну сторінку (без розбиття)" },
     { "png", no_argument, ARG_PNG, '\0', NULL, "layout", "При --preview вивести PNG замість SVG" },
     { "output", required_argument, ARG_OUTPUT, '\0', "PATH", "layout",
       "Тільки з --preview: зберегти у файл (без stdout)" },
@@ -441,7 +444,7 @@ void switch_options (int arg, options_t *options) {
         LOGD ("отримано прапорець версії");
         break;
 
-    /* long-опції обробляються вище у циклі; сюди вони не потрапляють */
+        /* long-опції обробляються вище у циклі; сюди вони не потрапляють */
 
     case '?':
         /* getopt уже вивів повідомлення про помилку */
@@ -525,6 +528,10 @@ static bool handle_layout_option (int arg, const char *value, options_t *options
         if (value)
             options->paper_h_mm = atof (value);
         LOGD ("висота=%.3f мм", options->paper_h_mm);
+        return true;
+    case ARG_FIT_PAGE:
+        options->fit_page = true;
+        LOGD ("масштаб: вміст у межах однієї сторінки");
         return true;
     case ARG_FORMAT:
         if (value && (strcmp (value, "markdown") == 0)) {
@@ -702,6 +709,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
     /* Позначаємо відсутні значення як NaN, щоб cmd самостійно вирішував дефолти. */
     options->paper_w_mm = NAN;
     options->paper_h_mm = NAN;
+    options->fit_page = true; /* default: single-page fit */
     options->margin_top_mm = NAN;
     options->margin_right_mm = NAN;
     options->margin_bottom_mm = NAN;

@@ -218,8 +218,9 @@ static int32_t mm_to_steps (axidraw_device_t *dev, double mm) {
         return INT32_MAX;
     }
     if (scaled < (double)INT32_MIN) {
-        LOGW ("Конвертація міліметрів у кроки призвела до від’ємного переповнення — обмежено "
-              "мінімумом");
+        LOGW (
+            "Конвертація міліметрів у кроки призвела до від’ємного переповнення — обмежено "
+            "мінімумом");
         return INT32_MIN;
     }
 
@@ -248,6 +249,26 @@ static uint32_t motion_duration_ms (double distance_mm, double speed_mm_s) {
     if (ms > (double)AXIDRAW_MAX_DURATION_MS)
         ms = (double)AXIDRAW_MAX_DURATION_MS;
     return (uint32_t)ms;
+}
+
+/* ------------------------- Fit-to-page helpers ------------------------- */
+static void page_frame_dims(const drawing_page_t *page, double *out_w, double *out_h) {
+    double fw = 0.0, fh = 0.0;
+    if (page->orientation == ORIENT_PORTRAIT) {
+        fw = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
+        fh = page->paper_w_mm - page->margin_left_mm - page->margin_right_mm;
+    } else {
+        fw = page->paper_w_mm - page->margin_left_mm - page->margin_right_mm;
+        fh = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
+    }
+    if (out_w) *out_w = fw;
+    if (out_h) *out_h = fh;
+}
+
+static double clamp_scale(double s) {
+    if (!(s > 0.0)) return 1.0;
+    if (s > 1.0) s = 1.0; /* only down */
+    return s * 0.985; /* small margin */
 }
 
 /* ===================== SHAPE (підкоманда) ===================== */
@@ -499,8 +520,9 @@ static int device_home_cb (axidraw_device_t *dev, void *ctx) {
     double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 150.0;
     double steps_per_mm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
     if (!(steps_per_mm > 0.0)) {
-        LOGE ("Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
-              "позицію");
+        LOGE (
+            "Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
+            "позицію");
         return -1;
     }
     double steps_per_sec = speed * steps_per_mm;
@@ -1639,6 +1661,7 @@ cmd_result_t cmd_print_execute (
     double margin_bottom,
     double margin_left,
     int orientation,
+    bool fit_page,
     bool dry_run,
     bool verbose) {
     (void)dry_run;
@@ -1671,6 +1694,8 @@ cmd_result_t cmd_print_execute (
         orientation);
     if (setup_rc != 0)
         return setup_rc;
+    page.fit_to_frame = fit_page ? 1 : 0;
+    LOGD("cmd: fit_page flag=%d", page.fit_to_frame);
 
     string_t input = { .chars = in_chars ? in_chars : "", .len = in_len, .enc = STR_ENC_UTF8 };
     if (markdown) {
@@ -1684,6 +1709,30 @@ cmd_result_t cmd_print_execute (
         geom_paths_t md_paths;
         if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
             return 1;
+
+        /* Якщо запрошено fit-page — приблизно підігнати кегль і перерендерити. */
+        if (page.fit_to_frame) {
+            double fw, fh;
+            page_frame_dims(&page, &fw, &fh);
+            geom_bbox_t bb;
+            if (geom_bbox_of_paths(&md_paths, &bb) == 0) {
+                double cw = bb.max_x - bb.min_x;
+                double ch = bb.max_y - bb.min_y;
+                if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
+                    geom_paths_free(&md_paths);
+                    double sx = fw / cw;
+                    double sy = fh / ch;
+                    double s = clamp_scale(sx < sy ? sx : sy);
+                    double new_pt = mopts.base_size_pt * s;
+                    if (new_pt < 3.0)
+                        new_pt = 3.0;
+                    mopts.base_size_pt = new_pt;
+                    /* Оскільки змінився кегль — перерендеримо, щоб отримати інший перенос рядків. */
+                    if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
+                        return 1;
+                }
+            }
+        }
         drawing_layout_t layout_info;
         if (drawing_build_layout_from_paths (&page, &md_paths, &layout_info) != 0) {
             geom_paths_free (&md_paths);
@@ -1696,6 +1745,25 @@ cmd_result_t cmd_print_execute (
         drawing_layout_t layout_info = { 0 };
         if (drawing_build_layout (&page, family, font_size, input, &layout_info) != 0)
             return 1;
+
+        if (page.fit_to_frame) {
+            double fw, fh;
+            page_frame_dims(&page, &fw, &fh);
+            geom_bbox_t bb = layout_info.layout.bounds_mm;
+            double cw = bb.max_x - bb.min_x;
+            double ch = bb.max_y - bb.min_y;
+            if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
+                drawing_layout_dispose(&layout_info);
+                double sx = fw / cw;
+                double sy = fh / ch;
+                double s = clamp_scale(sx < sy ? sx : sy);
+                double new_pt = font_size * s;
+                if (new_pt < 3.0)
+                    new_pt = 3.0;
+                if (drawing_build_layout (&page, family, new_pt, input, &layout_info) != 0)
+                    return 1;
+            }
+        }
         drawing_layout_dispose (&layout_info);
         return 0;
     }
@@ -1715,6 +1783,7 @@ cmd_result_t cmd_print_preview (
     double margin_bottom,
     double margin_left,
     int orientation,
+    int fit_page,
     int preview_png,
     bool verbose,
     uint8_t **out_bytes,
@@ -1746,6 +1815,7 @@ cmd_result_t cmd_print_preview (
         orientation);
     if (setup_rc != 0)
         return setup_rc;
+    page.fit_to_frame = fit_page ? 1 : 0;
 
     string_t input = { .chars = in_chars ? in_chars : "", .len = in_len, .enc = STR_ENC_UTF8 };
     int rc = 0;
@@ -1761,6 +1831,20 @@ cmd_result_t cmd_print_preview (
         geom_paths_t md_paths;
         if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
             return 1;
+        if (page.fit_to_frame) {
+            double fw, fh; page_frame_dims(&page, &fw, &fh);
+            geom_bbox_t bb; if (geom_bbox_of_paths(&md_paths, &bb) == 0) {
+                double cw = bb.max_x - bb.min_x; double ch = bb.max_y - bb.min_y;
+                if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
+                    geom_paths_free(&md_paths);
+                    double sx = fw / cw, sy = fh / ch; double s = clamp_scale(sx < sy ? sx : sy);
+                    double new_pt = mopts.base_size_pt * s; if (new_pt < 3.0) new_pt = 3.0;
+                    mopts.base_size_pt = new_pt;
+                    if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
+                        return 1;
+                }
+            }
+        }
         drawing_layout_t layout_info;
         if (drawing_build_layout_from_paths (&page, &md_paths, &layout_info) != 0) {
             geom_paths_free (&md_paths);
@@ -1773,6 +1857,18 @@ cmd_result_t cmd_print_preview (
         drawing_layout_t layout_info = { 0 };
         if (drawing_build_layout (&page, family, font_size, input, &layout_info) != 0)
             return 1;
+        if (page.fit_to_frame) {
+            double fw, fh; page_frame_dims(&page, &fw, &fh);
+            geom_bbox_t bb = layout_info.layout.bounds_mm;
+            double cw = bb.max_x - bb.min_x; double ch = bb.max_y - bb.min_y;
+            if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
+                drawing_layout_dispose(&layout_info);
+                double sx = fw / cw, sy = fh / ch; double s = clamp_scale(sx < sy ? sx : sy);
+                double new_pt = font_size * s; if (new_pt < 3.0) new_pt = 3.0;
+                if (drawing_build_layout (&page, family, new_pt, input, &layout_info) != 0)
+                    return 1;
+            }
+        }
         rc = layout_to_bytes (&layout_info, format, out_bytes, out_len);
         drawing_layout_dispose (&layout_info);
     }
@@ -2072,3 +2168,4 @@ cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm
         port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, "ручний зсув", device_jog_cb, &ctx,
         false);
 }
+/* (helpers defined earlier) */

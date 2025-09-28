@@ -10,6 +10,7 @@
 #include "fontreg.h"
 #include "glyph.h"
 #include "shape.h"
+#include "str.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -23,54 +24,11 @@
 #define ARRAY_LEN(arr) (sizeof (arr) / sizeof ((arr)[0]))
 #endif
 
-/**
- * @brief Декодувати один символ UTF-8 у кодову точку.
- *
- * @param input    Початок UTF-8 послідовності.
- * @param[out] out_cp Кодова точка.
- * @param[out] consumed Кількість використаних байтів (може бути NULL).
- * @return 0 при успіху; -1 при некоректній послідовності або аргументах.
+/* Впередні оголошення будуть нижче після визначень структур. */
+
+/*
+ * Декодування UTF-8 тепер централізоване у str_utf8_decode() (див. str.c).
  */
-static int decode_utf8(const char *input, uint32_t *out_cp, size_t *consumed) {
-    if (!input || !out_cp)
-        return -1;
-    const unsigned char *s = (const unsigned char *)input;
-    size_t used = 0;
-    uint32_t cp = 0;
-    if ((s[0] & 0x80) == 0) {
-        cp = s[0];
-        used = 1;
-    } else if ((s[0] & 0xE0) == 0xC0) {
-        if ((s[1] & 0xC0) != 0x80)
-            return -1;
-        cp = ((uint32_t)(s[0] & 0x1F) << 6) | (uint32_t)(s[1] & 0x3F);
-        used = 2;
-        if (cp < 0x80)
-            return -1;
-    } else if ((s[0] & 0xF0) == 0xE0) {
-        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80)
-            return -1;
-        cp = ((uint32_t)(s[0] & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6)
-             | (uint32_t)(s[2] & 0x3F);
-        used = 3;
-        if (cp < 0x800)
-            return -1;
-    } else if ((s[0] & 0xF8) == 0xF0) {
-        if ((s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80)
-            return -1;
-        cp = ((uint32_t)(s[0] & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12)
-             | ((uint32_t)(s[2] & 0x3F) << 6) | (uint32_t)(s[3] & 0x3F);
-        used = 4;
-        if (cp < 0x10000)
-            return -1;
-    } else {
-        return -1;
-    }
-    if (consumed)
-        *consumed = used;
-    *out_cp = cp;
-    return 0;
-}
 
 /**
  * @brief Порівняти два 32-бітні значення (для qsort).
@@ -79,7 +37,7 @@ static int decode_utf8(const char *input, uint32_t *out_cp, size_t *consumed) {
  * @param b Вказівник на друге значення `uint32_t`.
  * @return -1, 0 або 1 залежно від порядку.
  */
-static int cmp_uint32(const void *a, const void *b) {
+static int cmp_uint32 (const void *a, const void *b) {
     uint32_t ua = *(const uint32_t *)a;
     uint32_t ub = *(const uint32_t *)b;
     if (ua < ub)
@@ -97,7 +55,7 @@ static int cmp_uint32(const void *a, const void *b) {
  * @param needed Мінімальна необхідна кількість елементів.
  * @return 0 при успіху; -1 при помилці памʼяті або некоректних аргументах.
  */
-static int ensure_codepoints_capacity(uint32_t **arr, size_t *cap, size_t needed) {
+static int ensure_codepoints_capacity (uint32_t **arr, size_t *cap, size_t needed) {
     if (!arr || !cap)
         return -1;
     if (*cap >= needed)
@@ -105,7 +63,7 @@ static int ensure_codepoints_capacity(uint32_t **arr, size_t *cap, size_t needed
     size_t new_cap = (*cap == 0) ? 16 : *cap;
     while (new_cap < needed)
         new_cap *= 2;
-    uint32_t *grown = realloc(*arr, new_cap * sizeof(*grown));
+    uint32_t *grown = realloc (*arr, new_cap * sizeof (*grown));
     if (!grown)
         return -1;
     *arr = grown;
@@ -121,7 +79,7 @@ static int ensure_codepoints_capacity(uint32_t **arr, size_t *cap, size_t needed
  * @param[out] out_count Кількість елементів у масиві.
  * @return 0 при успіху; -1 при помилці памʼяті або некоректних аргументах.
  */
-static int collect_codepoints(const char *text, uint32_t **out_codes, size_t *out_count) {
+static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *out_count) {
     if (!out_codes || !out_count)
         return -1;
     *out_codes = NULL;
@@ -136,7 +94,7 @@ static int collect_codepoints(const char *text, uint32_t **out_codes, size_t *ou
     while (*cursor) {
         uint32_t cp = 0;
         size_t consumed = 0;
-        if (decode_utf8 (cursor, &cp, &consumed) != 0 || consumed == 0) {
+        if (str_utf8_decode (cursor, &cp, &consumed) != 0 || consumed == 0) {
             ++cursor;
             continue;
         }
@@ -185,7 +143,7 @@ typedef struct {
  *
  * @param stats Структура для обнулення.
  */
-static void font_usage_stats_init(font_usage_stats_t *stats) {
+static void font_usage_stats_init (font_usage_stats_t *stats) {
     if (!stats)
         return;
     memset (stats, 0, sizeof (*stats));
@@ -196,7 +154,7 @@ static void font_usage_stats_init(font_usage_stats_t *stats) {
  *
  * @param stats Структура для очищення.
  */
-static void font_usage_stats_dispose(font_usage_stats_t *stats) {
+static void font_usage_stats_dispose (font_usage_stats_t *stats) {
     if (!stats)
         return;
     free (stats->entries);
@@ -212,7 +170,7 @@ static void font_usage_stats_dispose(font_usage_stats_t *stats) {
  * @param name  Назва шрифту.
  * @return 0 при успіху; -1 при помилці памʼяті.
  */
-static int font_usage_stats_increment(font_usage_stats_t *stats, const char *name) {
+static int font_usage_stats_increment (font_usage_stats_t *stats, const char *name) {
     if (!stats || !name || !*name)
         return 0;
     for (size_t i = 0; i < stats->count; ++i) {
@@ -223,8 +181,7 @@ static int font_usage_stats_increment(font_usage_stats_t *stats, const char *nam
     }
     if (stats->count == stats->cap) {
         size_t new_cap = (stats->cap == 0) ? 4 : stats->cap * 2;
-        font_usage_entry_t *grown =
-            realloc(stats->entries, new_cap * sizeof(*grown));
+        font_usage_entry_t *grown = realloc (stats->entries, new_cap * sizeof (*grown));
         if (!grown)
             return -1;
         stats->entries = grown;
@@ -243,7 +200,7 @@ static int font_usage_stats_increment(font_usage_stats_t *stats, const char *nam
  * @param stats Структура статистики.
  * @return Найпопулярніший запис або NULL, якщо даних немає.
  */
-static const font_usage_entry_t *font_usage_stats_dominant(const font_usage_stats_t *stats) {
+static const font_usage_entry_t *font_usage_stats_dominant (const font_usage_stats_t *stats) {
     if (!stats || stats->count == 0)
         return NULL;
     const font_usage_entry_t *best = &stats->entries[0];
@@ -263,7 +220,7 @@ static const font_usage_entry_t *font_usage_stats_dominant(const font_usage_stat
  * @param stats Структура статистики.
  * @return Сумарна кількість гліфів.
  */
-static size_t font_usage_stats_total(const font_usage_stats_t *stats) {
+static size_t font_usage_stats_total (const font_usage_stats_t *stats) {
     if (!stats)
         return 0;
     size_t total = 0;
@@ -297,6 +254,156 @@ typedef struct {
     bool missing;         /**< true, якщо гліф відсутній */
 } glyph_segment_t;
 
+/* Впередні оголошення будуть додані після визначення split_result_t. */
+
+/* -------------------- Внутрішній IR для пайплайна розкладки -------------------- */
+
+typedef enum {
+    TK_WORD = 1,
+    TK_SPACE = 2,
+    TK_NEWLINE = 3,
+} token_type_t;
+
+typedef struct {
+    token_type_t type; /**< тип токена */
+    const char *ptr;   /**< вказівник у вихідному буфері (для WORD) */
+    size_t len;        /**< довжина у байтах (для WORD) */
+    /* Результат шейпінгу/вимірювання для WORD */
+    glyph_segment_t *segs;
+    size_t seg_count;
+    double width_units; /**< ширина слова у вихідних одиницях */
+    bool ascii_only;    /**< true якщо слово ASCII (для гіпенізації) */
+} text_token_t;
+
+static void tokens_dispose (text_token_t *toks, size_t count) {
+    if (!toks)
+        return;
+    for (size_t i = 0; i < count; ++i)
+        free (toks[i].segs);
+    free (toks);
+}
+
+static int tokenize_text (const char *input, text_token_t **out, size_t *out_count) {
+    if (!out || !out_count)
+        return -1;
+    *out = NULL;
+    *out_count = 0;
+    if (!input)
+        input = "";
+
+    size_t cap = 0, count = 0;
+    text_token_t *toks = NULL;
+    const char *p = input;
+    bool have_space_run = false;
+    while (*p) {
+        unsigned char ch = (unsigned char)*p;
+        if (ch == '\r') {
+            ++p; /* ігнорувати */
+            continue;
+        }
+        if (ch == '\n') {
+            if (have_space_run)
+                have_space_run = false; /* пробіли не емінуються перед явним переносом */
+            if (count == cap) {
+                size_t nc = cap ? cap * 2 : 16;
+                text_token_t *nt = realloc (toks, nc * sizeof *nt);
+                if (!nt) {
+                    free (toks);
+                    return -1;
+                }
+                toks = nt;
+                cap = nc;
+            }
+            toks[count++] = (text_token_t){ .type = TK_NEWLINE };
+            ++p;
+            continue;
+        }
+        if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v') {
+            have_space_run = true;
+            ++p;
+            continue;
+        }
+        /* якщо був пробільний ран — вставити один SPACE */
+        if (have_space_run) {
+            if (count == cap) {
+                size_t nc = cap ? cap * 2 : 16;
+                text_token_t *nt = realloc (toks, nc * sizeof *nt);
+                if (!nt) {
+                    free (toks);
+                    return -1;
+                }
+                toks = nt;
+                cap = nc;
+            }
+            toks[count++] = (text_token_t){ .type = TK_SPACE };
+            have_space_run = false;
+        }
+        /* WORD токен */
+        const char *start = p;
+        size_t len = 0;
+        while (p[len]) {
+            unsigned char c = (unsigned char)p[len];
+            if (c == '\n' || c == '\r' || c == ' ' || c == '\t' || c == '\f' || c == '\v')
+                break;
+            ++len;
+        }
+        if (len == 0) {
+            ++p;
+            continue;
+        }
+        if (count == cap) {
+            size_t nc = cap ? cap * 2 : 16;
+            text_token_t *nt = realloc (toks, nc * sizeof *nt);
+            if (!nt) {
+                free (toks);
+                return -1;
+            }
+            toks = nt;
+            cap = nc;
+        }
+        toks[count++] = (text_token_t){ .type = TK_WORD, .ptr = start, .len = len };
+        p += len;
+    }
+    /* якщо рядок завершується пробілами — не емінуємо їх у SPACE, як і раніше */
+    *out = toks;
+    *out_count = count;
+    return 0;
+}
+
+/* Прототип для шейпера слів, який використовує build_word_segments(). */
+static int build_word_segments (
+    const font_render_context_t *ctx,
+    const char *word,
+    size_t word_len,
+    glyph_segment_t **segments_out,
+    size_t *count_out,
+    double *width_units_out,
+    size_t *missing_out,
+    bool *ascii_only_out);
+
+static int
+shape_measure_words (const font_render_context_t *ctx, text_token_t *toks, size_t count) {
+    if (!ctx || !toks)
+        return -1;
+    for (size_t i = 0; i < count; ++i) {
+        if (toks[i].type != TK_WORD)
+            continue;
+        double width = 0.0;
+        bool ascii_only = true;
+        glyph_segment_t *segs = NULL;
+        size_t seg_count = 0;
+        if (build_word_segments (
+                ctx, toks[i].ptr, toks[i].len, &segs, &seg_count, &width, NULL, &ascii_only)
+            != 0)
+            return -1;
+        toks[i].segs = segs;
+        toks[i].seg_count = seg_count;
+        toks[i].width_units = width;
+        toks[i].ascii_only = ascii_only;
+    }
+    return 0;
+}
+
 /**
  * @brief Результат розбиття слова під час переносу.
  */
@@ -309,12 +416,37 @@ typedef struct {
     bool inserted_hyphen;      /**< чи додано штучний дефіс */
 } split_result_t;
 
+/* Впередні оголошення внутрішніх хелперів, що використовуються у фазах пайплайна */
+static int build_word_segments (
+    const font_render_context_t *ctx,
+    const char *word,
+    size_t word_len,
+    glyph_segment_t **segments_out,
+    size_t *count_out,
+    double *width_units_out,
+    size_t *missing_out,
+    bool *ascii_only_out);
+static int split_segments (
+    const glyph_segment_t *segments,
+    size_t seg_count,
+    double available_units,
+    const font_render_context_t *ctx,
+    bool ascii_only,
+    bool allow_hyphenation,
+    split_result_t *out);
+static int force_split_segments (
+    const glyph_segment_t *segments,
+    size_t seg_count,
+    double available_units,
+    const font_render_context_t *ctx,
+    split_result_t *out);
+
 /**
  * @brief Звільнити масив внутрішніх рядків розкладки разом із буферами.
  * @param lines Масив рядків.
  * @param count Кількість елементів у масиві.
  */
-static void free_lines(layout_line_t *lines, size_t count) {
+static void free_lines (layout_line_t *lines, size_t count) {
     if (!lines)
         return;
     for (size_t i = 0; i < count; ++i)
@@ -329,7 +461,7 @@ static void free_lines(layout_line_t *lines, size_t count) {
  * @param needed Мінімальний розмір (включно з NUL).
  * @return 0 якщо успішно; -1 при нестачі пам’яті.
  */
-static int line_reserve(layout_line_t *line, size_t needed) {
+static int line_reserve (layout_line_t *line, size_t needed) {
     if (!line)
         return -1;
     if (line->cap >= needed)
@@ -337,7 +469,7 @@ static int line_reserve(layout_line_t *line, size_t needed) {
     size_t new_cap = line->cap ? line->cap : 32;
     while (new_cap < needed)
         new_cap *= 2;
-    char *grown = realloc(line->text, new_cap);
+    char *grown = realloc (line->text, new_cap);
     if (!grown)
         return -1;
     line->text = grown;
@@ -352,7 +484,7 @@ static int line_reserve(layout_line_t *line, size_t needed) {
  * @param c    Символ (байт) для додавання.
  * @return 0 при успіху; -1 при помилці.
  */
-static int line_append_char(layout_line_t *line, char c) {
+static int line_append_char (layout_line_t *line, char c) {
     if (!line)
         return -1;
     if (line_reserve (line, line->len + 2) != 0)
@@ -370,7 +502,7 @@ static int line_append_char(layout_line_t *line, char c) {
  * @param len  Довжина підрядка у байтах.
  * @return 0 при успіху; -1 при помилці.
  */
-static int line_append_bytes(layout_line_t *line, const char *data, size_t len) {
+static int line_append_bytes (layout_line_t *line, const char *data, size_t len) {
     if (!line)
         return -1;
     if (len == 0)
@@ -392,13 +524,13 @@ static int line_append_bytes(layout_line_t *line, const char *data, size_t len) 
  * @param start_index Індекс першого символу у вхідному тексті.
  * @return Вказівник на новий рядок або NULL при помилці.
  */
-static layout_line_t *add_new_line(
-    layout_line_t **lines, size_t *count, size_t *cap, size_t start_index) {
+static layout_line_t *
+add_new_line (layout_line_t **lines, size_t *count, size_t *cap, size_t start_index) {
     if (!lines || !count || !cap)
         return NULL;
     if (*cap <= *count) {
         size_t new_cap = (*cap == 0) ? 8 : (*cap * 2);
-        layout_line_t *grown = realloc(*lines, new_cap * sizeof(*grown));
+        layout_line_t *grown = realloc (*lines, new_cap * sizeof (*grown));
         if (!grown)
             return NULL;
         *lines = grown;
@@ -421,12 +553,368 @@ static layout_line_t *add_new_line(
  *
  * @param res Структура з префіксом/суфіксом, яку треба очистити.
  */
-static void split_result_dispose(split_result_t *res) {
+static void split_result_dispose (split_result_t *res) {
     if (!res)
         return;
     free (res->prefix);
     free (res->suffix);
     memset (res, 0, sizeof (*res));
+}
+
+static void assign_layout_positions (
+    const text_layout_opts_t *opts,
+    const font_render_context_t *ctx,
+    layout_line_t *lines,
+    size_t line_count) {
+    if (!opts || !ctx || !lines)
+        return;
+    double line_spacing_factor = (opts->line_spacing > 0.0) ? opts->line_spacing : 1.2;
+    double line_height_units = ctx->line_height_units * ctx->scale;
+    double baseline_units = 0.0;
+    double frame_width = opts->frame_width;
+    for (size_t i = 0; i < line_count; ++i) {
+        layout_line_t *line = &lines[i];
+        line->baseline_units = baseline_units;
+        double offset = 0.0;
+        if (opts->align == TEXT_ALIGN_CENTER && frame_width > line->width_units)
+            offset = (frame_width - line->width_units) / 2.0;
+        else if (opts->align == TEXT_ALIGN_RIGHT && frame_width > line->width_units)
+            offset = frame_width - line->width_units;
+        line->offset_units = (offset > 0.0) ? offset : 0.0;
+        baseline_units += line_height_units * line_spacing_factor;
+    }
+}
+
+/* -------------------- Розбиття на рядки з використанням токенів -------------------- */
+
+static int break_tokens_into_lines (
+    const text_layout_opts_t *opts,
+    const font_render_context_t *ctx,
+    const text_token_t *toks,
+    size_t tok_count,
+    layout_line_t **lines_out,
+    size_t *line_count_out) {
+    if (!opts || !ctx || !lines_out || !line_count_out)
+        return -1;
+
+    layout_line_t *lines = NULL;
+    size_t line_count = 0, line_cap = 0;
+    size_t consumed_input_total = 0; /* як у попередній реалізації */
+    size_t assigned_input_current = 0;
+    layout_line_t *current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+    if (!current)
+        return -1;
+
+    const double space_width_units = ctx->space_advance_units * ctx->scale;
+    bool pending_space = false;
+    bool last_break_explicit = false;
+
+    for (size_t i = 0; i < tok_count; ++i) {
+        const text_token_t *tk = &toks[i];
+        if (tk->type == TK_NEWLINE) {
+            consumed_input_total += assigned_input_current + 1; /* +1 за "\n" */
+            assigned_input_current = 0;
+            current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+            if (!current) {
+                free_lines (lines, line_count);
+                return -1;
+            }
+            pending_space = false;
+            last_break_explicit = true;
+            continue;
+        }
+        if (tk->type == TK_SPACE) {
+            pending_space = current->len > 0 || pending_space;
+            continue;
+        }
+
+        /* WORD */
+        const char *pending_word_ptr = tk->ptr;
+        size_t pending_word_len = tk->len;
+        glyph_segment_t *pending_segments = tk->segs; /* не власність: не звільняти */
+        size_t pending_seg_count = tk->seg_count;
+        double pending_word_width = tk->width_units;
+        bool pending_ascii_only = tk->ascii_only;
+        char *owned_ptr = NULL; /* коли створюємо суфікс */
+        int segments_owned = 0; /* 1 якщо потрібно free() */
+
+        while (pending_seg_count > 0) {
+            double available_units = opts->frame_width - current->width_units;
+            bool insert_space = pending_space && current->len > 0;
+            if (insert_space)
+                available_units -= space_width_units;
+
+            if (available_units < 0.0 && current->len > 0) {
+                consumed_input_total += assigned_input_current;
+                assigned_input_current = 0;
+                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                if (!current) {
+                    if (segments_owned)
+                        free (pending_segments);
+                    free (owned_ptr);
+                    free_lines (lines, line_count);
+                    return -1;
+                }
+                pending_space = false;
+                last_break_explicit = false;
+                continue;
+            }
+
+            if (pending_word_width <= available_units || current->len == 0) {
+                if (insert_space) {
+                    if (line_append_char (current, ' ') != 0) {
+                        if (segments_owned)
+                            free (pending_segments);
+                        free (owned_ptr);
+                        free_lines (lines, line_count);
+                        return -1;
+                    }
+                    current->width_units += space_width_units;
+                    assigned_input_current += 1; /* один пробіл із входу */
+                }
+                if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
+                    if (segments_owned)
+                        free (pending_segments);
+                    free (owned_ptr);
+                    free_lines (lines, line_count);
+                    return -1;
+                }
+                current->width_units += pending_word_width;
+                assigned_input_current += pending_word_len;
+                if (segments_owned) {
+                    free (pending_segments);
+                    segments_owned = 0;
+                }
+                free (owned_ptr);
+                owned_ptr = NULL;
+                pending_seg_count = 0;
+                last_break_explicit = false;
+                break;
+            }
+
+            split_result_t split;
+            if (split_segments (
+                    pending_segments, pending_seg_count, available_units, ctx, pending_ascii_only,
+                    opts->hyphenate, &split)) {
+                if (insert_space) {
+                    if (line_append_char (current, ' ') != 0) {
+                        split_result_dispose (&split);
+                        if (segments_owned)
+                            free (pending_segments);
+                        free (owned_ptr);
+                        free_lines (lines, line_count);
+                        return -1;
+                    }
+                    current->width_units += space_width_units;
+                    assigned_input_current += 1;
+                }
+                if (line_append_bytes (current, split.prefix, split.prefix_len) != 0) {
+                    split_result_dispose (&split);
+                    if (segments_owned)
+                        free (pending_segments);
+                    free (owned_ptr);
+                    free_lines (lines, line_count);
+                    return -1;
+                }
+                current->width_units += split.prefix_width_units;
+                assigned_input_current += split.prefix_len;
+                current->hyphenated = true;
+
+                /* коригування індекса: штучний дефіс не належить вхідному тексту */
+                if (split.inserted_hyphen && assigned_input_current > 0)
+                    consumed_input_total += assigned_input_current - 1;
+                else
+                    consumed_input_total += assigned_input_current;
+                assigned_input_current = 0;
+                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                if (!current) {
+                    split_result_dispose (&split);
+                    if (segments_owned)
+                        free (pending_segments);
+                    free (owned_ptr);
+                    free_lines (lines, line_count);
+                    return -1;
+                }
+                pending_space = false;
+                last_break_explicit = false;
+
+                if (segments_owned) {
+                    free (pending_segments);
+                    segments_owned = 0;
+                }
+                free (owned_ptr);
+                owned_ptr = NULL;
+
+                char *next_owned = split.suffix;
+                size_t next_len = split.suffix_len;
+                split.suffix = NULL;
+                free (split.prefix);
+                split.prefix = NULL;
+                split_result_dispose (&split);
+                owned_ptr = next_owned;
+                pending_word_ptr = owned_ptr ? owned_ptr : "";
+                pending_word_len = next_len;
+                if (pending_word_len == 0) {
+                    pending_seg_count = 0;
+                    pending_word_width = 0.0;
+                    break;
+                }
+                if (build_word_segments (
+                        ctx, pending_word_ptr, pending_word_len, &pending_segments,
+                        &pending_seg_count, &pending_word_width, NULL, &pending_ascii_only)
+                    != 0) {
+                    free (owned_ptr);
+                    free_lines (lines, line_count);
+                    return -1;
+                }
+                segments_owned = 1;
+                continue;
+            }
+
+            if (opts->break_long_words) {
+                split_result_t fsplit;
+                if (force_split_segments (
+                        pending_segments, pending_seg_count, available_units, ctx, &fsplit)) {
+                    if (insert_space) {
+                        if (line_append_char (current, ' ') != 0) {
+                            split_result_dispose (&fsplit);
+                            if (segments_owned)
+                                free (pending_segments);
+                            free (owned_ptr);
+                            free_lines (lines, line_count);
+                            return -1;
+                        }
+                        current->width_units += space_width_units;
+                        assigned_input_current += 1;
+                    }
+                    if (line_append_bytes (current, fsplit.prefix, fsplit.prefix_len) != 0) {
+                        split_result_dispose (&fsplit);
+                        if (segments_owned)
+                            free (pending_segments);
+                        free (owned_ptr);
+                        free_lines (lines, line_count);
+                        return -1;
+                    }
+                    current->width_units += fsplit.prefix_width_units;
+                    assigned_input_current += fsplit.prefix_len - (fsplit.inserted_hyphen ? 1 : 0);
+                    current->hyphenated = fsplit.inserted_hyphen;
+
+                    consumed_input_total += assigned_input_current;
+                    assigned_input_current = 0;
+                    current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                    if (!current) {
+                        split_result_dispose (&fsplit);
+                        if (segments_owned)
+                            free (pending_segments);
+                        free (owned_ptr);
+                        free_lines (lines, line_count);
+                        return -1;
+                    }
+                    pending_space = false;
+                    last_break_explicit = false;
+
+                    if (segments_owned) {
+                        free (pending_segments);
+                        segments_owned = 0;
+                    }
+                    free (owned_ptr);
+                    owned_ptr = NULL;
+
+                    char *next_owned = fsplit.suffix;
+                    size_t next_len = fsplit.suffix_len;
+                    fsplit.suffix = NULL;
+                    free (fsplit.prefix);
+                    fsplit.prefix = NULL;
+                    split_result_dispose (&fsplit);
+                    owned_ptr = next_owned;
+                    pending_word_ptr = owned_ptr ? owned_ptr : "";
+                    pending_word_len = next_len;
+                    if (pending_word_len == 0) {
+                        pending_seg_count = 0;
+                        pending_word_width = 0.0;
+                        break;
+                    }
+                    if (build_word_segments (
+                            ctx, pending_word_ptr, pending_word_len, &pending_segments,
+                            &pending_seg_count, &pending_word_width, NULL, &pending_ascii_only)
+                        != 0) {
+                        free (owned_ptr);
+                        free_lines (lines, line_count);
+                        return -1;
+                    }
+                    segments_owned = 1;
+                    continue;
+                }
+            }
+
+            if (current->len > 0) {
+                consumed_input_total += assigned_input_current;
+                assigned_input_current = 0;
+                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                if (!current) {
+                    if (segments_owned)
+                        free (pending_segments);
+                    free (owned_ptr);
+                    free_lines (lines, line_count);
+                    return -1;
+                }
+                pending_space = false;
+                last_break_explicit = false;
+                continue;
+            }
+
+            if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
+                if (segments_owned)
+                    free (pending_segments);
+                free (owned_ptr);
+                free_lines (lines, line_count);
+                return -1;
+            }
+            current->width_units += pending_word_width;
+            consumed_input_total += assigned_input_current + pending_word_len;
+            assigned_input_current = 0;
+            current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+            if (!current) {
+                if (segments_owned)
+                    free (pending_segments);
+                free (owned_ptr);
+                free_lines (lines, line_count);
+                return -1;
+            }
+            pending_space = false;
+            last_break_explicit = false;
+            if (segments_owned) {
+                free (pending_segments);
+                segments_owned = 0;
+            }
+            free (owned_ptr);
+            owned_ptr = NULL;
+            break;
+        }
+
+        pending_space = false;
+        if (segments_owned) {
+            free (pending_segments);
+            segments_owned = 0;
+        }
+        free (owned_ptr);
+        owned_ptr = NULL;
+        last_break_explicit = false;
+    }
+
+    consumed_input_total += assigned_input_current;
+
+    if (line_count > 1) {
+        layout_line_t *last = &lines[line_count - 1];
+        if ((!last->text || last->len == 0) && !last_break_explicit) {
+            free (last->text);
+            line_count--;
+        }
+    }
+
+    *lines_out = lines;
+    *line_count_out = line_count;
+    return 0;
 }
 
 /**
@@ -445,7 +933,7 @@ static void split_result_dispose(split_result_t *res) {
  * @param ascii_only_out   true, якщо слово містить лише ASCII (може бути NULL).
  * @return 0 у разі успіху; -1 при помилці.
  */
-static int build_word_segments(
+static int build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
     size_t word_len,
@@ -467,7 +955,7 @@ static int build_word_segments(
     if (word_len == 0)
         return 0;
 
-    glyph_segment_t *segments = calloc(word_len, sizeof(*segments));
+    glyph_segment_t *segments = calloc (word_len, sizeof (*segments));
     if (!segments)
         return -1;
 
@@ -476,7 +964,7 @@ static int build_word_segments(
     while (offset < word_len) {
         uint32_t cp = 0;
         size_t consumed = 0;
-        if (decode_utf8 (word + offset, &cp, &consumed) != 0 || consumed == 0) {
+        if (str_utf8_decode (word + offset, &cp, &consumed) != 0 || consumed == 0) {
             if (missing_out)
                 (*missing_out)++;
             cp = ' ';
@@ -532,7 +1020,7 @@ static int build_word_segments(
  * @param out              Результат із частинами слова (очищати split_result_dispose()).
  * @return 1 якщо розбиття виконано; 0 якщо слово не розбивається; -1 при помилці.
  */
-static int split_segments(
+static int split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
     double available_units,
@@ -564,8 +1052,8 @@ static int split_segments(
         for (size_t i = (size_t)last_hyphen_index + 1; i < seg_count; ++i)
             suffix_bytes += segments[i].byte_len;
 
-        out->prefix = malloc(prefix_bytes + 1);
-        out->suffix = malloc(suffix_bytes + 1);
+        out->prefix = malloc (prefix_bytes + 1);
+        out->suffix = malloc (suffix_bytes + 1);
         if (!out->prefix || !out->suffix) {
             split_result_dispose (out);
             return 0;
@@ -610,8 +1098,8 @@ static int split_segments(
     for (size_t i = (size_t)best_index + 1; i < seg_count; ++i)
         suffix_bytes += segments[i].byte_len;
 
-    out->prefix = malloc(prefix_bytes + 2);
-    out->suffix = malloc(suffix_bytes + 1);
+    out->prefix = malloc (prefix_bytes + 2);
+    out->suffix = malloc (suffix_bytes + 1);
     if (!out->prefix || !out->suffix) {
         split_result_dispose (out);
         return 0;
@@ -636,7 +1124,7 @@ static int split_segments(
  * дефіс, якщо він поміщається. Повертає 1 при успіху, 0 якщо розбиття не
  * вдалося (напр., перший гліф уже більший за available_units).
  */
-static int force_split_segments(
+static int force_split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
     double available_units,
@@ -644,7 +1132,7 @@ static int force_split_segments(
     split_result_t *out) {
     if (!segments || !seg_count || !ctx || !out)
         return 0;
-    memset(out, 0, sizeof(*out));
+    memset (out, 0, sizeof (*out));
 
     double hyphen_units = ctx->hyphen_advance_units * ctx->scale;
     double accum = 0.0;
@@ -670,18 +1158,18 @@ static int force_split_segments(
 
     int insert_hyphen = (suffix_bytes > 0) && ((accum + hyphen_units) <= available_units);
 
-    out->prefix = (char *)malloc(prefix_bytes + (insert_hyphen ? 2 : 1));
-    out->suffix = (char *)malloc(suffix_bytes + 1);
+    out->prefix = (char *)malloc (prefix_bytes + (insert_hyphen ? 2 : 1));
+    out->suffix = (char *)malloc (suffix_bytes + 1);
     if (!out->prefix || !out->suffix) {
-        split_result_dispose(out);
+        split_result_dispose (out);
         return 0;
     }
-    memcpy(out->prefix, segments[0].ptr, prefix_bytes);
+    memcpy (out->prefix, segments[0].ptr, prefix_bytes);
     if (insert_hyphen)
         out->prefix[prefix_bytes++] = '-';
     out->prefix[prefix_bytes] = '\0';
     if (suffix_bytes > 0)
-        memcpy(out->suffix, segments[(size_t)idx + 1].ptr, suffix_bytes);
+        memcpy (out->suffix, segments[(size_t)idx + 1].ptr, suffix_bytes);
     out->suffix[suffix_bytes] = '\0';
     out->prefix_len = prefix_bytes;
     out->suffix_len = suffix_bytes;
@@ -702,7 +1190,7 @@ static int force_split_segments(
  * @param missing_glyphs  Лічильник гліфів, яких бракує у шрифті.
  * @return 0 при успіху; -1 при помилці.
  */
-static int render_line_text(
+static int render_line_text (
     const font_render_context_t *ctx,
     font_fallback_t *fallbacks,
     const char *line_text,
@@ -725,7 +1213,7 @@ static int render_line_text(
         }
         uint32_t cp = 0;
         size_t consumed = 0;
-        if (decode_utf8 (cursor, &cp, &consumed) != 0 || consumed == 0) {
+        if (str_utf8_decode (cursor, &cp, &consumed) != 0 || consumed == 0) {
             pen_x += ctx->space_advance_units;
             ++cursor;
             if (missing_glyphs)
@@ -803,7 +1291,7 @@ typedef struct {
  * @param pos       Позиція (байтовий індекс) у рядку.
  * @return Прапорці стилів, що покривають позицію `pos`.
  */
-static unsigned span_flags_at_position(const span_run_t *runs, size_t run_count, size_t pos) {
+static unsigned span_flags_at_position (const span_run_t *runs, size_t run_count, size_t pos) {
     unsigned flags = 0;
     if (!runs)
         return 0;
@@ -816,7 +1304,7 @@ static unsigned span_flags_at_position(const span_run_t *runs, size_t run_count,
 /**
  * @brief Ініціалізує стан декорації.
  */
-static void inline_decoration_init(inline_decoration_t *dec, double y_mm, unsigned flag) {
+static void inline_decoration_init (inline_decoration_t *dec, double y_mm, unsigned flag) {
     if (!dec)
         return;
     dec->active = false;
@@ -829,7 +1317,7 @@ static void inline_decoration_init(inline_decoration_t *dec, double y_mm, unsign
 /**
  * @brief Вмикає декорацію з зазначеної позиції, якщо вона неактивна.
  */
-static void inline_decoration_start(inline_decoration_t *dec, double start_mm) {
+static void inline_decoration_start (inline_decoration_t *dec, double start_mm) {
     if (!dec || dec->active)
         return;
     dec->active = true;
@@ -840,7 +1328,7 @@ static void inline_decoration_start(inline_decoration_t *dec, double start_mm) {
 /**
  * @brief Розширює діапазон декорації до нової позиції.
  */
-static void inline_decoration_extend(inline_decoration_t *dec, double end_mm) {
+static void inline_decoration_extend (inline_decoration_t *dec, double end_mm) {
     if (!dec || !dec->active)
         return;
     if (end_mm > dec->last_mm)
@@ -850,7 +1338,7 @@ static void inline_decoration_extend(inline_decoration_t *dec, double end_mm) {
 /**
  * @brief Завершує декорацію та малює відповідну лінію.
  */
-static void inline_decoration_stop(inline_decoration_t *dec, geom_paths_t *out) {
+static void inline_decoration_stop (inline_decoration_t *dec, geom_paths_t *out) {
     if (!dec || !dec->active)
         return;
     if (dec->last_mm > dec->start_mm) {
@@ -864,7 +1352,7 @@ static void inline_decoration_stop(inline_decoration_t *dec, geom_paths_t *out) 
 /**
  * @brief Зупиняє декорацію, якщо у наступній позиції її прапор більше не встановлено.
  */
-static void inline_decoration_flush_if_needed(
+static void inline_decoration_flush_if_needed (
     inline_decoration_t *dec, unsigned next_flags, geom_paths_t *out) {
     if (!dec)
         return;
@@ -886,7 +1374,7 @@ typedef struct {
  * @param strike_y Y позиція лінії закреслення (у вихідних одиницях).
  * @param underline_y Y позиція підкреслення (у вихідних одиницях).
  */
-static void decoration_state_init(decoration_state_t *state, double strike_y, double underline_y) {
+static void decoration_state_init (decoration_state_t *state, double strike_y, double underline_y) {
     if (!state)
         return;
     inline_decoration_init (&state->strike, strike_y, STYLE_STRIKE);
@@ -899,7 +1387,7 @@ static void decoration_state_init(decoration_state_t *state, double strike_y, do
  * @param flags Прапорці стилю на поточній позиції (TEXT_STYLE_*).
  * @param pen_mm Поточне X положення пера у мм.
  */
-static void decoration_state_start(decoration_state_t *state, unsigned flags, double pen_mm) {
+static void decoration_state_start (decoration_state_t *state, unsigned flags, double pen_mm) {
     if (!state)
         return;
     if ((flags & STYLE_STRIKE) && !state->strike.active)
@@ -911,7 +1399,7 @@ static void decoration_state_start(decoration_state_t *state, unsigned flags, do
 /**
  * @brief Розширити активні декорації до нової X позиції пера.
  */
-static void decoration_state_extend(decoration_state_t *state, double pen_mm) {
+static void decoration_state_extend (decoration_state_t *state, double pen_mm) {
     if (!state)
         return;
     inline_decoration_extend (&state->strike, pen_mm);
@@ -921,7 +1409,8 @@ static void decoration_state_extend(decoration_state_t *state, double pen_mm) {
 /**
  * @brief Завершити декорації, якщо у наступній позиції прапорці зняті.
  */
-static void decoration_state_flush(decoration_state_t *state, unsigned next_flags, geom_paths_t *out) {
+static void
+decoration_state_flush (decoration_state_t *state, unsigned next_flags, geom_paths_t *out) {
     if (!state)
         return;
     inline_decoration_flush_if_needed (&state->strike, next_flags, out);
@@ -931,17 +1420,55 @@ static void decoration_state_flush(decoration_state_t *state, unsigned next_flag
 /**
  * @brief Завершити всі активні декорації та домалювати лінії.
  */
-static void decoration_state_stop(decoration_state_t *state, geom_paths_t *out) {
+static void decoration_state_stop (decoration_state_t *state, geom_paths_t *out) {
     if (!state)
         return;
     inline_decoration_stop (&state->strike, out);
     inline_decoration_stop (&state->underline, out);
 }
 
+static int slice_spans_for_line (
+    const text_span_t *spans,
+    size_t span_count,
+    const layout_line_t *line,
+    span_run_t **out_runs,
+    size_t *out_count) {
+    if (!out_runs || !out_count || !line)
+        return -1;
+    *out_runs = NULL;
+    *out_count = 0;
+    span_run_t *runs = NULL;
+    size_t count = 0, cap = 0;
+    for (size_t r = 0; r < span_count; ++r) {
+        size_t s = spans[r].start;
+        size_t e = s + spans[r].length;
+        size_t ls = line->start_index;
+        size_t le = line->start_index + line->len;
+        if (e <= ls || s >= le)
+            continue;
+        size_t is = (s > ls) ? (s - ls) : 0;
+        size_t ie = (e < le) ? (e - ls) : (le - ls);
+        if (count == cap) {
+            size_t nc = cap ? cap * 2 : 4;
+            span_run_t *nr = realloc (runs, nc * sizeof *nr);
+            if (!nr) {
+                free (runs);
+                return -1;
+            }
+            runs = nr;
+            cap = nc;
+        }
+        runs[count++] = (span_run_t){ .start = is, .length = (ie - is), .flags = spans[r].flags };
+    }
+    *out_runs = runs;
+    *out_count = count;
+    return 0;
+}
+
 /**
  * @brief Відмалювати рядок із урахуванням стилів (bold/italic/strike/underline).
  */
-static int render_line_text_spans(
+static int render_line_text_spans (
     const font_render_context_t *ctx_regular,
     const font_render_context_t *ctx_bold,
     const font_render_context_t *ctx_italic,
@@ -967,8 +1494,7 @@ static int render_line_text_spans(
 
     decoration_state_t deco;
     decoration_state_init (
-        &deco,
-        baseline_units - (ctx_regular->line_height_units * ctx_regular->scale) * 0.28,
+        &deco, baseline_units - (ctx_regular->line_height_units * ctx_regular->scale) * 0.28,
         baseline_units + (ctx_regular->line_height_units * ctx_regular->scale) * 0.08);
 
     const char *cursor = line_text;
@@ -989,7 +1515,7 @@ static int render_line_text_spans(
 
         uint32_t cp = 0;
         size_t consumed = 0;
-        if (decode_utf8 (cursor, &cp, &consumed) != 0 || consumed == 0) {
+        if (str_utf8_decode (cursor, &cp, &consumed) != 0 || consumed == 0) {
             pen_x_font += ctx_regular->space_advance_units;
             decoration_state_extend (&deco, pen_x_font * ctx_regular->scale);
             ++cursor;
@@ -1025,8 +1551,8 @@ static int render_line_text_spans(
         }
 
         double advance_units = 0.0;
-        int glyph_rc
-            = font_emit_glyph_paths (ctx->font, cp, pen_x_font, baseline_font, ctx->scale, out, &advance_units);
+        int glyph_rc = font_emit_glyph_paths (
+            ctx->font, cp, pen_x_font, baseline_font, ctx->scale, out, &advance_units);
         if (glyph_rc == 0) {
             if ((active_flags & TEXT_STYLE_BOLD) && !want_italic
                 && !(ctx == ctx_bold || ctx == ctx_bold_italic)) {
@@ -1039,7 +1565,8 @@ static int render_line_text_spans(
                 (*rendered_glyphs)++;
         } else if (glyph_rc == 1) {
             double fb_adv = 0.0;
-            int fb_rc = font_fallback_emit (fb, ctx, cp, pen_x_font, baseline_units, out, &fb_adv, NULL);
+            int fb_rc
+                = font_fallback_emit (fb, ctx, cp, pen_x_font, baseline_units, out, &fb_adv, NULL);
             if (fb_rc == 0) {
                 pen_x_font += fb_adv;
                 decoration_state_extend (&deco, pen_x_font * ctx->scale);
@@ -1066,11 +1593,10 @@ static int render_line_text_spans(
     return 0;
 }
 
-
 /**
  * @copydoc text_render_hershey
  */
-int text_render_hershey(
+int text_render_hershey (
     const char *text,
     const char *family,
     double size_pt,
@@ -1145,7 +1671,7 @@ int text_render_hershey(
 
         uint32_t cp = 0;
         size_t consumed = 0;
-        if (decode_utf8 (cursor, &cp, &consumed) != 0 || consumed == 0) {
+        if (str_utf8_decode (cursor, &cp, &consumed) != 0 || consumed == 0) {
             ++missing;
             ++cursor;
             continue;
@@ -1225,7 +1751,7 @@ int text_render_hershey(
 /**
  * @copydoc text_layout_render
  */
-int text_layout_render(
+int text_layout_render (
     const char *text,
     const text_layout_opts_t *opts,
     geom_paths_t *out,
@@ -1235,7 +1761,7 @@ int text_layout_render(
     return text_layout_render_spans (text, opts, NULL, 0, out, lines_out, lines_count, info);
 }
 
-int text_layout_render_spans(
+int text_layout_render_spans (
     const char *text,
     const text_layout_opts_t *opts,
     const text_span_t *spans,
@@ -1303,337 +1829,28 @@ int text_layout_render_spans(
         info->line_height = ctx.line_height_units * ctx.scale;
     }
 
-    /* Лічильник байтів вхідного рядка, вже розміщених у попередніх рядках. */
-    size_t consumed_input_total = 0;
-    /* Скільки байтів з входу покладено в поточний рядок (без доданих дефісів). */
-    size_t assigned_input_current = 0;
+    /* Підготуємо місце під майбутні лінії для LAYOUT_FAIL() */
     layout_line_t *lines = NULL;
     size_t line_count = 0;
-    size_t line_cap = 0;
-    layout_line_t *current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
-    if (!current)
+
+    /* 1) Токенізація */
+    text_token_t *toks = NULL;
+    size_t tok_count = 0;
+    if (tokenize_text (input, &toks, &tok_count) != 0)
         LAYOUT_FAIL ();
-
-    double space_width_units = ctx.space_advance_units * ctx.scale;
-    bool pending_space = false;
-    bool last_break_explicit = false;
-
-    const char *cursor = input;
-    while (*cursor) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (ch == '\r') {
-            ++cursor;
-            continue;
-        }
-        if (ch == '\n') {
-            /* Нова лінія за явним символом переносу: врахувати \n у спожиті байти. */
-            consumed_input_total += assigned_input_current + 1; /* +1 за "\n" */
-            assigned_input_current = 0;
-            current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
-            if (!current)
-                LAYOUT_FAIL ();
-            pending_space = false;
-            last_break_explicit = true;
-            ++cursor;
-            continue;
-        }
-        if (ch == ' ' || ch == '\t' || ch == '\f' || ch == '\v') {
-            pending_space = current->len > 0 || pending_space;
-            ++cursor;
-            continue;
-        }
-
-        const char *word_start = cursor;
-        size_t word_len = 0;
-        while (cursor[word_len]) {
-            unsigned char c = (unsigned char)cursor[word_len];
-            if (c == '\n' || c == '\r' || c == ' ' || c == '\t' || c == '\f' || c == '\v')
-                break;
-            ++word_len;
-        }
-        cursor += word_len;
-
-        glyph_segment_t *segments = NULL;
-        size_t seg_count = 0;
-        double word_width_units = 0.0;
-        bool ascii_only = true;
-        if (build_word_segments (
-                &ctx, word_start, word_len, &segments, &seg_count, &word_width_units, NULL,
-                &ascii_only)
-            != 0) {
-            LAYOUT_FAIL ();
-        }
-
-        const char *pending_word_ptr = word_start;
-        char *owned_ptr = NULL;
-        size_t pending_word_len = word_len;
-        glyph_segment_t *pending_segments = segments;
-        size_t pending_seg_count = seg_count;
-        double pending_word_width = word_width_units;
-        bool pending_ascii_only = ascii_only;
-
-        while (pending_seg_count > 0) {
-            double available_units = frame_width - current->width_units;
-            bool insert_space = pending_space && current->len > 0;
-            if (insert_space)
-                available_units -= space_width_units;
-
-            if (available_units < 0.0 && current->len > 0) {
-                consumed_input_total += assigned_input_current;
-                assigned_input_current = 0;
-                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
-                if (!current) {
-                    free (pending_segments);
-                    pending_segments = NULL;
-                    LAYOUT_FAIL ();
-                }
-                pending_space = false;
-                continue;
-            }
-
-            if (pending_word_width <= available_units || current->len == 0) {
-                if (insert_space) {
-                    if (line_append_char (current, ' ') != 0) {
-                        free (pending_segments);
-                        pending_segments = NULL;
-                        free (owned_ptr);
-                        LAYOUT_FAIL ();
-                    }
-                    current->width_units += space_width_units;
-                    assigned_input_current += 1; /* один пробіл із входу */
-                }
-                if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
-                    free (pending_segments);
-                    pending_segments = NULL;
-                    free (owned_ptr);
-                    LAYOUT_FAIL ();
-                }
-                current->width_units += pending_word_width;
-                assigned_input_current += pending_word_len;
-                pending_seg_count = 0;
-                free (pending_segments);
-                pending_segments = NULL;
-                last_break_explicit = false;
-                break;
-            }
-
-            split_result_t split;
-            if (split_segments (
-                    pending_segments, pending_seg_count, available_units, &ctx, pending_ascii_only,
-                    opts->hyphenate, &split)) {
-                if (insert_space) {
-                    if (line_append_char (current, ' ') != 0) {
-                        split_result_dispose (&split);
-                        free (pending_segments);
-                        pending_segments = NULL;
-                        free (owned_ptr);
-                        LAYOUT_FAIL ();
-                    }
-                    current->width_units += space_width_units;
-                    assigned_input_current += 1;
-                }
-                if (line_append_bytes (current, split.prefix, split.prefix_len) != 0) {
-                    split_result_dispose (&split);
-                    free (pending_segments);
-                    pending_segments = NULL;
-                    free (owned_ptr);
-                    LAYOUT_FAIL ();
-                }
-                current->width_units += split.prefix_width_units;
-                assigned_input_current += split.prefix_len;
-                current->hyphenated = true;
-
-                /* Перенос: завершити рядок; відняти штучний дефіс (він не належить вхідному тексту)
-                 */
-                if (split.inserted_hyphen && assigned_input_current > 0)
-                    consumed_input_total += assigned_input_current - 1;
-                else
-                    consumed_input_total += assigned_input_current;
-                assigned_input_current = 0;
-                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
-                if (!current) {
-                    split_result_dispose (&split);
-                    free (pending_segments);
-                    pending_segments = NULL;
-                    free (owned_ptr);
-                    LAYOUT_FAIL ();
-                }
-                pending_space = false;
-                last_break_explicit = false;
-
-                free (pending_segments);
-                pending_segments = NULL;
-                free (owned_ptr);
-
-                char *next_owned = split.suffix;
-                size_t next_len = split.suffix_len;
-                split.suffix = NULL;
-                free (split.prefix);
-                split.prefix = NULL;
-                split_result_dispose (&split);
-                owned_ptr = next_owned;
-                pending_word_ptr = owned_ptr ? owned_ptr : "";
-                pending_word_len = next_len;
-
-                if (pending_word_len == 0) {
-                    pending_seg_count = 0;
-                    pending_word_width = 0.0;
-                    break;
-                }
-
-                if (build_word_segments (
-                        &ctx, pending_word_ptr, pending_word_len, &pending_segments,
-                        &pending_seg_count, &pending_word_width, NULL, &pending_ascii_only)
-                    != 0) {
-                    free (owned_ptr);
-                    LAYOUT_FAIL ();
-                }
-                continue;
-            }
-
-            /* Якщо слово довше за рядок і не розбивається звичайно —
-             * примусово відтяти, щоби не виходити за межі кадру. */
-            if (opts->break_long_words) {
-                split_result_t fsplit;
-                if (force_split_segments(
-                        pending_segments, pending_seg_count, available_units, &ctx, &fsplit)) {
-                    if (insert_space) {
-                        if (line_append_char(current, ' ') != 0) {
-                            split_result_dispose(&fsplit);
-                            free(pending_segments);
-                            pending_segments = NULL;
-                            free(owned_ptr);
-                            LAYOUT_FAIL();
-                        }
-                        current->width_units += space_width_units;
-                        assigned_input_current += 1;
-                    }
-                    if (line_append_bytes(current, fsplit.prefix, fsplit.prefix_len) != 0) {
-                        split_result_dispose(&fsplit);
-                        free(pending_segments);
-                        pending_segments = NULL;
-                        free(owned_ptr);
-                        LAYOUT_FAIL();
-                    }
-                    current->width_units += fsplit.prefix_width_units;
-                    assigned_input_current += fsplit.prefix_len - (fsplit.inserted_hyphen ? 1 : 0);
-                    current->hyphenated = fsplit.inserted_hyphen;
-
-                    consumed_input_total += assigned_input_current + (fsplit.inserted_hyphen ? 0 : 0);
-                    assigned_input_current = 0;
-                    current = add_new_line(&lines, &line_count, &line_cap, consumed_input_total);
-                    if (!current) {
-                        split_result_dispose(&fsplit);
-                        free(pending_segments);
-                        pending_segments = NULL;
-                        free(owned_ptr);
-                        LAYOUT_FAIL();
-                    }
-                    pending_space = false;
-                    last_break_explicit = false;
-
-                    free(pending_segments);
-                    pending_segments = NULL;
-                    free(owned_ptr);
-
-                    char *next_owned = fsplit.suffix;
-                    size_t next_len = fsplit.suffix_len;
-                    fsplit.suffix = NULL;
-                    free(fsplit.prefix);
-                    fsplit.prefix = NULL;
-                    split_result_dispose(&fsplit);
-                    owned_ptr = next_owned;
-                    pending_word_ptr = owned_ptr ? owned_ptr : "";
-                    pending_word_len = next_len;
-
-                    if (pending_word_len == 0) {
-                        pending_seg_count = 0;
-                        pending_word_width = 0.0;
-                        break;
-                    }
-                    if (build_word_segments(
-                            &ctx, pending_word_ptr, pending_word_len, &pending_segments,
-                            &pending_seg_count, &pending_word_width, NULL, &pending_ascii_only)
-                        != 0) {
-                        free(owned_ptr);
-                        LAYOUT_FAIL();
-                    }
-                    continue;
-                }
-            }
-
-            if (current->len > 0) {
-                consumed_input_total += assigned_input_current;
-                assigned_input_current = 0;
-                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
-                if (!current) {
-                    free (pending_segments);
-                    pending_segments = NULL;
-                    free (owned_ptr);
-                    LAYOUT_FAIL ();
-                }
-                pending_space = false;
-                last_break_explicit = false;
-                continue;
-            }
-
-            if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
-                free (pending_segments);
-                pending_segments = NULL;
-                free (owned_ptr);
-                LAYOUT_FAIL ();
-            }
-            current->width_units += pending_word_width;
-            consumed_input_total += assigned_input_current + pending_word_len;
-            assigned_input_current = 0;
-            current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
-            if (!current) {
-                free (pending_segments);
-                pending_segments = NULL;
-                free (owned_ptr);
-                LAYOUT_FAIL ();
-            }
-            pending_space = false;
-            last_break_explicit = false;
-            free (pending_segments);
-            pending_segments = NULL;
-            break;
-        }
-
-        pending_space = false;
-        if (pending_segments) {
-            free (pending_segments);
-            pending_segments = NULL;
-        }
-        free (owned_ptr);
-        owned_ptr = NULL;
-        last_break_explicit = false;
+    /* 2) Шейпінг/вимірювання слів */
+    if (shape_measure_words (&ctx, toks, tok_count) != 0) {
+        tokens_dispose (toks, tok_count);
+        LAYOUT_FAIL ();
     }
-
-    consumed_input_total += assigned_input_current;
-
-    if (line_count > 1) {
-        layout_line_t *last = &lines[line_count - 1];
-        if ((!last->text || last->len == 0) && !last_break_explicit) {
-            free (last->text);
-            line_count--;
-        }
+    /* 3) Переноси рядків */
+    if (break_tokens_into_lines (opts, &ctx, toks, tok_count, &lines, &line_count) != 0) {
+        tokens_dispose (toks, tok_count);
+        LAYOUT_FAIL ();
     }
-
-    double line_spacing_factor = (opts->line_spacing > 0.0) ? opts->line_spacing : 1.2;
-    double line_height_units = ctx.line_height_units * ctx.scale;
-    double baseline_units = 0.0;
-    for (size_t i = 0; i < line_count; ++i) {
-        layout_line_t *line = &lines[i];
-        line->baseline_units = baseline_units;
-        double offset = 0.0;
-        if (opts->align == TEXT_ALIGN_CENTER && frame_width > line->width_units)
-            offset = (frame_width - line->width_units) / 2.0;
-        else if (opts->align == TEXT_ALIGN_RIGHT && frame_width > line->width_units)
-            offset = frame_width - line->width_units;
-        line->offset_units = (offset > 0.0) ? offset : 0.0;
-        baseline_units += line_height_units * line_spacing_factor;
-    }
+    tokens_dispose (toks, tok_count);
+    /* 4) Базові лінії та X-зсуви */
+    assign_layout_positions (opts, &ctx, lines, line_count);
 
     size_t rendered_glyphs = 0;
     size_t missing_glyphs = 0;
@@ -1643,29 +1860,9 @@ int text_layout_render_spans(
             continue;
         /* Підрядні спани, що перетинаються з рядком */
         span_run_t *line_runs = NULL;
-        size_t line_run_count = 0, line_run_cap = 0;
-        for (size_t r = 0; r < span_count; ++r) {
-            size_t s = spans[r].start;
-            size_t e = s + spans[r].length;
-            size_t ls = line->start_index;
-            size_t le = line->start_index + line->len;
-            if (e <= ls || s >= le)
-                continue;
-            size_t is = (s > ls) ? (s - ls) : 0;
-            size_t ie = (e < le) ? (e - ls) : (le - ls);
-            if (line_run_count == line_run_cap) {
-                size_t nc = line_run_cap ? line_run_cap * 2 : 4;
-                span_run_t *nr = realloc(line_runs, nc * sizeof(*nr));
-                if (!nr) {
-                    free (line_runs);
-                    LAYOUT_FAIL ();
-                }
-                line_runs = nr;
-                line_run_cap = nc;
-            }
-            line_runs[line_run_count++]
-                = (span_run_t){ .start = is, .length = (ie - is), .flags = spans[r].flags };
-        }
+        size_t line_run_count = 0;
+        if (slice_spans_for_line (spans, span_count, line, &line_runs, &line_run_count) != 0)
+            LAYOUT_FAIL ();
 
         /* Підібрати контексти для стилів, якщо потрібно */
         const font_render_context_t *ctx_bold = NULL, *ctx_italic = NULL, *ctx_bold_italic = NULL;
@@ -1764,7 +1961,7 @@ int text_layout_render_spans(
     }
 
     if (lines_out) {
-        text_line_metrics_t *metrics = calloc(line_count, sizeof(*metrics));
+        text_line_metrics_t *metrics = calloc (line_count, sizeof (*metrics));
         if (!metrics)
             LAYOUT_FAIL ();
         for (size_t i = 0; i < line_count; ++i) {
@@ -1807,4 +2004,4 @@ int text_layout_render_spans(
 /**
  * @copydoc text_layout_free_lines
  */
-void text_layout_free_lines(text_line_metrics_t *lines) { free(lines); }
+void text_layout_free_lines (text_line_metrics_t *lines) { free (lines); }

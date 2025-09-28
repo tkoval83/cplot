@@ -943,7 +943,10 @@ int font_release (font_t *font) {
 }
 
 int font_style_context_resolve (
-    const char *preferred_family, double size_pt, geom_units_t units, unsigned style_flags,
+    const char *preferred_family,
+    double size_pt,
+    geom_units_t units,
+    unsigned style_flags,
     font_render_context_t *out_ctx) {
     if (!out_ctx)
         return -1;

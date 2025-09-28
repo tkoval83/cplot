@@ -86,6 +86,11 @@ canvas_status_t canvas_layout_document (
     if (!options || !source_paths || !out_layout)
         return CANVAS_STATUS_INVALID_INPUT;
 
+    LOGD("canvas: fit_to_frame=%d, paper=%.2fx%.2f, margins tlbr=%.1f,%.1f,%.1f,%.1f, orient=%d",
+         options->fit_to_frame ? 1 : 0, options->paper_w_mm, options->paper_h_mm,
+         options->margin_top_mm, options->margin_left_mm, options->margin_bottom_mm,
+         options->margin_right_mm, (int)options->orientation);
+
     canvas_status_t opt_rc = validate_options (options);
     if (opt_rc != CANVAS_STATUS_OK)
         return opt_rc;
@@ -148,12 +153,14 @@ canvas_status_t canvas_layout_document (
         return CANVAS_STATUS_INTERNAL_ERROR;
 
     if (layout.orientation == ORIENT_PORTRAIT) {
+        /* Повернути у портретну систему координат */
         geom_paths_t rotated;
         rc = geom_paths_rotate (&normalized, M_PI_2, 0.0, 0.0, &rotated);
         geom_paths_free (&normalized);
         if (rc != 0)
             return CANVAS_STATUS_INTERNAL_ERROR;
 
+        /* Масштабування після повороту, щоб оцінювати ширину/висоту у координатах сторінки */
         geom_bbox_t rotated_bbox;
         if (geom_bbox_of_paths (&rotated, &rotated_bbox) != 0) {
             geom_paths_free (&rotated);
@@ -166,12 +173,36 @@ canvas_status_t canvas_layout_document (
             *out_layout = layout;
             return CANVAS_STATUS_OK;
         }
-
+        double frame_w = layout.frame_w_mm;
+        double frame_h = layout.frame_h_mm;
+        double width = rotated_bbox.max_x - rotated_bbox.min_x;
+        double height = rotated_bbox.max_y - rotated_bbox.min_y;
+        double scale = 1.0;
+        if (options->fit_to_frame && ((width > frame_w) || (height > frame_h))) {
+            double sx = frame_w / (width > 0.0 ? width : frame_w);
+            double sy = frame_h / (height > 0.0 ? height : frame_h);
+            scale = sx < sy ? sx : sy;
+            if (!(scale > 0.0) || scale > 1.0)
+                scale = 1.0;
+            LOGD("canvas: fit portrait scale=%.4f (w=%.2f h=%.2f frame=%.2f×%.2f)", scale, width, height, frame_w, frame_h);
+        }
+        geom_paths_t scaled = rotated;
+        bool have_scaled = false;
+        if (scale != 1.0) {
+            if (geom_paths_scale (&rotated, scale, scale, &scaled) != 0) {
+                geom_paths_free (&rotated);
+                return CANVAS_STATUS_INTERNAL_ERROR;
+            }
+            geom_paths_free (&rotated);
+            have_scaled = true;
+            geom_bbox_of_paths (&scaled, &rotated_bbox);
+        }
         double dx = (options->paper_w_mm - options->margin_right_mm) - rotated_bbox.max_x;
         double dy = options->margin_top_mm - rotated_bbox.min_y;
         geom_paths_t placed;
-        rc = geom_paths_translate (&rotated, dx, dy, &placed);
-        geom_paths_free (&rotated);
+        rc = geom_paths_translate (&scaled, dx, dy, &placed);
+        if (have_scaled)
+            geom_paths_free (&scaled);
         if (rc != 0)
             return CANVAS_STATUS_INTERNAL_ERROR;
 
@@ -180,6 +211,7 @@ canvas_status_t canvas_layout_document (
         layout.start_y_mm = layout.bounds_mm.min_y;
         layout.paths_mm = placed;
     } else {
+        /* Ландшафт: масштабувати у поточній системі координат */
         geom_bbox_t norm_bbox;
         if (geom_bbox_of_paths (&normalized, &norm_bbox) != 0) {
             geom_paths_free (&normalized);
@@ -192,12 +224,37 @@ canvas_status_t canvas_layout_document (
             *out_layout = layout;
             return CANVAS_STATUS_OK;
         }
-
+        double width = norm_bbox.max_x - norm_bbox.min_x;
+        double height = norm_bbox.max_y - norm_bbox.min_y;
+        double frame_w = layout.frame_w_mm;
+        double frame_h = layout.frame_h_mm;
+        double scale = 1.0;
+        if (options->fit_to_frame && ((width > frame_w) || (height > frame_h))) {
+            double sx = frame_w / (width > 0.0 ? width : frame_w);
+            double sy = frame_h / (height > 0.0 ? height : frame_h);
+            scale = sx < sy ? sx : sy;
+            if (!(scale > 0.0) || scale > 1.0)
+                scale = 1.0;
+            LOGD("canvas: fit landscape scale=%.4f (w=%.2f h=%.2f frame=%.2f×%.2f)", scale, width, height, frame_w, frame_h);
+        }
+        geom_paths_t scaled = normalized;
+        bool have_scaled = false;
+        if (scale != 1.0) {
+            if (geom_paths_scale (&normalized, scale, scale, &scaled) != 0) {
+                geom_paths_free (&normalized);
+                return CANVAS_STATUS_INTERNAL_ERROR;
+            }
+            geom_paths_free (&normalized);
+            have_scaled = true;
+        }
         double dx = options->margin_left_mm;
         double dy = options->margin_top_mm;
         geom_paths_t placed;
-        rc = geom_paths_translate (&normalized, dx, dy, &placed);
-        geom_paths_free (&normalized);
+        rc = geom_paths_translate (&scaled, dx, dy, &placed);
+        if (have_scaled)
+            geom_paths_free (&scaled);
+        else
+            geom_paths_free (&normalized);
         if (rc != 0)
             return CANVAS_STATUS_INTERNAL_ERROR;
 

@@ -35,6 +35,7 @@ cmd_result_t cmd_print_execute (
     double margin_bottom_mm,
     double margin_left_mm,
     int orientation,
+    bool fit_page,
     bool dry_run,
     bool verbose);
 
@@ -74,6 +75,7 @@ cmd_result_t cmd_print_preview (
     double margin_bottom_mm,
     double margin_left_mm,
     int orientation,
+    int fit_page,
     int preview_png,
     bool verbose,
     uint8_t **out_bytes,
@@ -99,7 +101,8 @@ cmd_result_t cmd_font_list_execute (bool families_only, bool verbose);
  * @param verbose    Рівень деталізації.
  * @return 0 успіх; ненульовий код — помилка.
  */
-cmd_result_t cmd_config_execute (int action, const char *set_pairs, config_t *inout_cfg, bool verbose);
+cmd_result_t
+cmd_config_execute (int action, const char *set_pairs, config_t *inout_cfg, bool verbose);
 
 /**
  * Показати конфігурацію (деталізована функція для config --show).
@@ -148,7 +151,8 @@ cmd_result_t cmd_device_motors_on (const char *alias, const char *model, bool ve
 cmd_result_t cmd_device_motors_off (const char *alias, const char *model, bool verbose);
 cmd_result_t cmd_device_abort (const char *alias, const char *model, bool verbose);
 cmd_result_t cmd_device_home (const char *alias, const char *model, bool verbose);
-cmd_result_t cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm, bool verbose);
+cmd_result_t
+cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm, bool verbose);
 cmd_result_t cmd_device_version (const char *alias, const char *model, bool verbose);
 cmd_result_t cmd_device_status (const char *alias, const char *model, bool verbose);
 cmd_result_t cmd_device_position (const char *alias, const char *model, bool verbose);

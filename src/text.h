@@ -20,13 +20,13 @@
 /**
  * @defgroup text Текст і розкладка
  * @brief Рендеринг і розкладка тексту шрифтами Hershey.
- * @{ 
+ * @{
  */
 
 /**
  * @name Прапорці інлайнового стилю
  * Прапорці стилю, що можуть застосовуватись до спанів або всієї строки.
- * @{ 
+ * @{
  */
 enum {
     TEXT_STYLE_NONE = 0,          /**< Без додаткового стилю */
@@ -80,7 +80,7 @@ typedef struct {
  * @retval 0 успіх
  * @retval -1 помилка (виділення пам'яті, резолвер шрифтів, тощо)
  */
-int text_render_hershey(
+int text_render_hershey (
     const char *text,
     const char *family,
     double size_pt,
@@ -111,10 +111,10 @@ typedef struct {
     unsigned style_flags; /**< прапорці жирний/курсив/підкреслення (поки ігноруються) */
     geom_units_t units;   /**< GEOM_UNITS_MM або GEOM_UNITS_IN */
     // компонування
-    double frame_width;  /**< доступна ширина для переносу, у 'units' */
-    text_align_t align;  /**< left/center/right */
-    int hyphenate;       /**< 0=вимкн. (типово), 1=увімкн. */
-    double line_spacing; /**< множник, типово 1.2 якщо <= 0 */
+    double frame_width;   /**< доступна ширина для переносу, у 'units' */
+    text_align_t align;   /**< left/center/right */
+    int hyphenate;        /**< 0=вимкн. (типово), 1=увімкн. */
+    double line_spacing;  /**< множник, типово 1.2 якщо <= 0 */
     int break_long_words; /**< 1: примусово ділити довгі слова, що не вміщаються у frame_width */
 } text_layout_opts_t;
 
@@ -132,9 +132,9 @@ typedef struct {
  * Використовується для передачі форматування до механізму розкладки.
  */
 typedef struct text_span {
-    size_t start;  /**< початок у байтах у сирому UTF-8 тексті */
-    size_t length; /**< довжина у байтах */
-    unsigned flags;/**< бітова маска TEXT_STYLE_* */
+    size_t start;   /**< початок у байтах у сирому UTF-8 тексті */
+    size_t length;  /**< довжина у байтах */
+    unsigned flags; /**< бітова маска TEXT_STYLE_* */
 } text_span_t;
 
 /** Додатковий інлайновий стиль: закреслення. */
@@ -160,7 +160,7 @@ typedef struct text_span {
  * @brief Розкладка і рендеринг багаторядкового тексту (без спанів).
  * @copydetails text_layout_render_spans
  */
-int text_layout_render(
+int text_layout_render (
     const char *text,
     const text_layout_opts_t *opts,
     geom_paths_t *out,
@@ -194,7 +194,7 @@ int text_layout_render(
  * @retval 0 успіх
  * @retval -1 помилка (аргументи, пам'ять, резолвер шрифтів)
  */
-int text_layout_render_spans(
+int text_layout_render_spans (
     const char *text,
     const text_layout_opts_t *opts,
     const text_span_t *spans,
@@ -212,7 +212,7 @@ int text_layout_render_spans(
  * @brief Звільнити масив, повернений `text_layout_render()`/`text_layout_render_spans()`.
  * @param lines Вказівник, повернений через `lines_out`.
  */
-void text_layout_free_lines(text_line_metrics_t *lines);
+void text_layout_free_lines (text_line_metrics_t *lines);
 
 /** @} */ /* end of group: text */
 

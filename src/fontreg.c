@@ -601,7 +601,9 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         fp = fopen ("hershey/index.json", "r");
     if (!fp) {
         LOGE ("не знайдено індекс шрифтів");
-        log_print (LOG_ERROR, "реєстр шрифтів: індекс відсутній (root=%s)", root ? root : "<робочий каталог>");
+        log_print (
+            LOG_ERROR, "реєстр шрифтів: індекс відсутній (root=%s)",
+            root ? root : "<робочий каталог>");
         return -2;
     }
     /* Зчитати увесь файл у пам'ять */

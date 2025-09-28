@@ -5,9 +5,10 @@
 
 #include "cli.h"
 
+#include "args.h"
 #include "cmd.h"
 #include "help.h"
-#include "args.h"
+#include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -71,41 +72,62 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
         } else {
             if (isatty (STDIN_FILENO))
                 return 1;
-            size_t cap = 8192; size_t len = 0;
+            size_t cap = 8192;
+            size_t len = 0;
             owned = (char *)malloc (cap);
-            if (!owned) return 1;
+            if (!owned)
+                return 1;
             while (!feof (stdin) && !ferror (stdin)) {
                 if (len + 4096 > cap) {
-                    size_t nc = cap * 2; char *nb = (char *)realloc (owned, nc);
-                    if (!nb) { free (owned); return 1; }
-                    owned = nb; cap = nc;
+                    size_t nc = cap * 2;
+                    char *nb = (char *)realloc (owned, nc);
+                    if (!nb) {
+                        free (owned);
+                        return 1;
+                    }
+                    owned = nb;
+                    cap = nc;
                 }
                 size_t chunk = cap - len;
                 size_t n = fread (owned + len, 1, chunk, stdin);
-                len += n; if (n == 0) break;
+                len += n;
+                if (n == 0)
+                    break;
             }
-            if (ferror (stdin)) { free (owned); return 1; }
+            if (ferror (stdin)) {
+                free (owned);
+                return 1;
+            }
             owned = (char *)realloc (owned, len + 1);
-            if (!owned) return 1;
+            if (!owned)
+                return 1;
             owned[len] = '\0';
-            in_chars = owned; in_len = len;
+            in_chars = owned;
+            in_len = len;
         }
 
         const char *family = options->font_family;
         const char *model = options->device_model;
         if (options->preview) {
-            uint8_t *bytes = NULL; size_t blen = 0;
+            LOGD("cli: fit_page option=%d", options->fit_page ? 1 : 0);
+            uint8_t *bytes = NULL;
+            size_t blen = 0;
             int rc = cmd_print_preview (
                 in_chars, in_len, options->input_format == INPUT_FORMAT_MARKDOWN, family,
                 options->font_size_pt, model, options->paper_w_mm, options->paper_h_mm,
                 options->margin_top_mm, options->margin_right_mm, options->margin_bottom_mm,
-                options->margin_left_mm, options->orientation,
-                options->preview_png ? 1 : 0, options->verbose,
-                &bytes, &blen);
+                options->margin_left_mm, options->orientation, options->fit_page ? 1 : 0,
+                options->preview_png ? 1 : 0,
+                options->verbose, &bytes, &blen);
             if (rc == 0 && bytes) {
                 if (options->output_path[0]) {
                     FILE *fp = fopen (options->output_path, "wb");
-                    if (!fp) rc = 1; else { fwrite (bytes, 1, blen, fp); fclose (fp); }
+                    if (!fp)
+                        rc = 1;
+                    else {
+                        fwrite (bytes, 1, blen, fp);
+                        fclose (fp);
+                    }
                 } else {
                     fwrite (bytes, 1, blen, stdout);
                 }
@@ -118,7 +140,8 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
                 in_chars, in_len, options->input_format == INPUT_FORMAT_MARKDOWN, family,
                 options->font_size_pt, model, options->paper_w_mm, options->paper_h_mm,
                 options->margin_top_mm, options->margin_right_mm, options->margin_bottom_mm,
-                options->margin_left_mm, options->orientation, options->dry_run, options->verbose);
+                options->margin_left_mm, options->orientation, options->fit_page,
+                options->dry_run, options->verbose);
             free (owned);
             return rc;
         }
@@ -168,7 +191,9 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
         }
     }
     case CMD_FONTS:
-        return options->fonts_list ? cmd_font_list_execute (options->fonts_list_families, options->verbose) : 2;
+        return options->fonts_list
+                   ? cmd_font_list_execute (options->fonts_list_families, options->verbose)
+                   : 2;
     case CMD_CONFIG: {
         switch (options->config_action) {
         case CFG_SHOW:

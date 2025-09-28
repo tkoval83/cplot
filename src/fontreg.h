@@ -18,8 +18,8 @@ typedef struct {
 
 /** Стисла інформація про родину шрифтів. */
 typedef struct {
-    char key[64];   /**< нормалізований ключ родини (lowercase, snake_case) */
-    char name[96];  /**< читабельна назва родини */
+    char key[64];  /**< нормалізований ключ родини (lowercase, snake_case) */
+    char name[96]; /**< читабельна назва родини */
 } font_family_name_t;
 
 /**
