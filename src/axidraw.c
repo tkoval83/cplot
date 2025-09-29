@@ -223,7 +223,7 @@ const axidraw_settings_t *axidraw_device_settings (const axidraw_device_t *dev) 
  * @param mm Відстань у мм.
  * @return Кроки (із насиченням до int32_t).
  */
-static int32_t mm_to_steps (const axidraw_device_t *dev, double mm) {
+int32_t axidraw_mm_to_steps (const axidraw_device_t *dev, double mm) {
     const axidraw_settings_t *cfg = axidraw_device_settings (dev);
     double spmm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
     if (!(spmm > 0.0)) {
@@ -273,8 +273,8 @@ int axidraw_move_mm (axidraw_device_t *dev, double dx_mm, double dy_mm, double s
     const axidraw_settings_t *cfg = axidraw_device_settings (dev);
     double speed = (speed_mm_s > 0.0) ? speed_mm_s
                                       : ((cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 75.0);
-    int32_t steps_x = mm_to_steps (dev, dx_mm);
-    int32_t steps_y = mm_to_steps (dev, dy_mm);
+    int32_t steps_x = axidraw_mm_to_steps (dev, dx_mm);
+    int32_t steps_y = axidraw_mm_to_steps (dev, dy_mm);
     double distance = hypot (dx_mm, dy_mm);
     uint32_t duration = duration_from_mm_speed (distance, speed);
     return axidraw_move_xy (dev, duration, steps_x, steps_y);

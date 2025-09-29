@@ -160,22 +160,6 @@ stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase, bool s
 }
 
 /**
- * @brief Повертає `steps_per_mm` із конфігурації або налаштувань пристрою.
- */
-static double resolve_steps_per_mm (const stepper_config_t *cfg) {
-    if (cfg && cfg->steps_per_mm > 0.0)
-        return cfg->steps_per_mm;
-    if (cfg && cfg->dev) {
-        const axidraw_settings_t *s = axidraw_device_settings (cfg->dev);
-        if (s && s->steps_per_mm > 0.0)
-            return s->steps_per_mm;
-    }
-
-    LOGE ("крокувач: коефіцієнт кроків на міліметр не встановлено (потрібен профіль пристрою)");
-    return 0.0;
-}
-
-/**
  * @copydoc stepper_init
  */
 void stepper_init (stepper_context_t *ctx, const stepper_config_t *cfg) {
@@ -184,30 +168,27 @@ void stepper_init (stepper_context_t *ctx, const stepper_config_t *cfg) {
     if (cfg) {
         ctx->cfg = *cfg;
     } else {
-        ctx->cfg.steps_per_mm = 0.0;
         ctx->cfg.dev = NULL;
     }
-
-    if (!(ctx->cfg.steps_per_mm > 0.0))
-        ctx->cfg.steps_per_mm = resolve_steps_per_mm (&ctx->cfg);
     ctx->emitted_blocks = 0;
 }
 
-/** \brief Конвертує зміщення блоку у кроки по осях X/Y. */
+/** \brief Конвертує зміщення блоку у кроки по осях X/Y через AxiDraw. */
 static void mm_to_steps (
-    const stepper_context_t *ctx,
-    const plan_block_t *block,
-    int32_t *steps_x_out,
+    const stepper_context_t *ctx, const plan_block_t *block, int32_t *steps_x_out,
     int32_t *steps_y_out) {
-    double spmm = ctx->cfg.steps_per_mm;
-    if (!(spmm > 0.0))
-        spmm = resolve_steps_per_mm (&ctx->cfg);
-    double steps_x = block->delta_mm[0] * spmm;
-    double steps_y = block->delta_mm[1] * spmm;
+    int32_t sx = 0, sy = 0;
+    if (ctx && ctx->cfg.dev) {
+        sx = axidraw_mm_to_steps (ctx->cfg.dev, block->delta_mm[0]);
+        sy = axidraw_mm_to_steps (ctx->cfg.dev, block->delta_mm[1]);
+    } else {
+        LOGE (
+            "крокувач: відсутній пристрій для конвертації мм→кроки (потрібен профіль пристрою)");
+    }
     if (steps_x_out)
-        *steps_x_out = (int32_t)llround (steps_x);
+        *steps_x_out = sx;
     if (steps_y_out)
-        *steps_y_out = (int32_t)llround (steps_y);
+        *steps_y_out = sy;
 }
 
 /**

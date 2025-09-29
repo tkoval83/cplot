@@ -231,6 +231,14 @@ int axidraw_home (
  */
 int axidraw_move_mm (axidraw_device_t *dev, double dx_mm, double dy_mm, double speed_mm_s);
 
+/**
+ * @brief Перетворює відстань у мм на кроки відповідно до профілю пристрою.
+ * @param dev Пристрій (джерело steps_per_mm).
+ * @param mm Відстань у міліметрах.
+ * @return Кількість кроків (насичення до діапазону int32).
+ */
+int32_t axidraw_mm_to_steps (const axidraw_device_t *dev, double mm);
+
 #ifdef __cplusplus
 }
 #endif

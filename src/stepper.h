@@ -23,7 +23,6 @@ extern "C" {
  * @brief Конфігурація крокувача.
  */
 typedef struct {
-    double steps_per_mm;     /**< Кількість кроків на мм (якщо 0 — береться з профілю пристрою). */
     axidraw_device_t *dev;   /**< Відкритий пристрій AxiDraw або `NULL` для dry‑run. */
 } stepper_config_t;
 
