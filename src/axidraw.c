@@ -1045,29 +1045,4 @@ int axidraw_home (
     return rc;
 }
 
-/**
- * @brief Зібрати агрегований статус пристрою.
- *
- * @param dev       Структура пристрою.
- * @param snapshot  Буфер для результату (не NULL).
- * @return Код повернення драйвера EBB (0 → успіх).
- */
-int axidraw_status (axidraw_device_t *dev, ebb_status_snapshot_t *snapshot) {
-    if (axidraw_require_connection (dev) != 0)
-        return -1;
-    int rc = ebb_collect_status (dev->port, snapshot, dev->timeout_ms);
-    if (rc != 0) {
-        LOGE (AXIDRAW_LOG ("Не вдалося зібрати статус (код %d)"), rc);
-        log_print (LOG_ERROR, "пристрій: статус — помилка %d", rc);
-    } else {
-        LOGD (
-            "axidraw: статус motion=%d/%d/%d fifo=%d pen=%d", snapshot->motion.command_active,
-            snapshot->motion.motor1_active, snapshot->motion.motor2_active,
-            snapshot->motion.fifo_pending, snapshot->pen_up);
-        log_print (
-            LOG_DEBUG, "пристрій: активна=%d m1=%d m2=%d черга=%d перо=%d",
-            snapshot->motion.command_active, snapshot->motion.motor1_active,
-            snapshot->motion.motor2_active, snapshot->motion.fifo_pending, snapshot->pen_up);
-    }
-    return rc;
-}
+/* axidraw_status() вилучено: використовуйте прямі виклики ebb_query_* у вищих рівнях. */

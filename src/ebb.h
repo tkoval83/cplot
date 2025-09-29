@@ -45,17 +45,8 @@ typedef struct {
     int fifo_pending;   /**< 1 якщо FIFO не порожній (версії ≥ 2.4.4). */
 } ebb_motion_status_t;
 
-/**
- * Агрегований знімок стану плотера.
- */
-typedef struct {
-    ebb_motion_status_t motion; /**< Дані з QM. */
-    int32_t steps_axis1;        /**< Поточна позиція по осі 1 (QS). */
-    int32_t steps_axis2;        /**< Поточна позиція по осі 2 (QS). */
-    bool pen_up;                /**< Стан пера (QP). */
-    bool servo_power;           /**< Живлення сервоприводу (QR). */
-    char firmware[64];          /**< Рядок версії/нікнейму (V/QT). */
-} ebb_status_snapshot_t;
+/* Агрегований знімок стану вилучено; для отримання інформації використовуйте
+ * окремі виклики ebb_query_motion/steps/pen/servo_power/version. */
 
 /**
  * Надіслати команду EM для ввімкнення/вимкнення моторів та вибору мікрокроку.
@@ -244,7 +235,7 @@ int ebb_query_version (serial_port_t *sp, char *version_buf, size_t version_len,
 /**
  * Зібрати агрегований знімок стану (QM, QS, QP, QR, V).
  */
-int ebb_collect_status (serial_port_t *sp, ebb_status_snapshot_t *snapshot, int timeout_ms);
+/* ebb_collect_status() вилучено. */
 
 /**
  * @brief Налаштувати параметр режиму (команда SC).

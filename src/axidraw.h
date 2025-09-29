@@ -300,7 +300,8 @@ int axidraw_home (
  * @param snapshot Вихідна структура (не NULL).
  * @return 0 при успіху; -1 при помилці.
  */
-int axidraw_status (axidraw_device_t *dev, ebb_status_snapshot_t *snapshot);
+/* Знімок стану пристрою через агреговану функцію вилучено; використовуйте
+ * точкові запити ebb_query_* замість axidraw_status(). */
 
 #ifdef __cplusplus
 }

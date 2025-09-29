@@ -148,48 +148,7 @@ static void warn_device_busy (void) {
     LOGW ("Пристрій вже використовується (%s)", holder);
 }
 
-#ifdef DEBUG
-static void
-debug_log_snapshot (const char *phase, bool have_snapshot, const ebb_status_snapshot_t *snap) {
-    if (!have_snapshot || !snap) {
-        LOGD ("налагодження[%s]: статус недоступний", phase);
-        return;
-    }
-    LOGD (
-        "налагодження[%s]: активна=%d моторX=%d моторY=%d fifo=%d перо_піднято=%d "
-        "позиція=(%ld,%ld)",
-        phase, snap->motion.command_active, snap->motion.motor1_active, snap->motion.motor2_active,
-        snap->motion.fifo_pending, snap->pen_up, (long)snap->steps_axis1, (long)snap->steps_axis2);
-}
-#else
-static void
-debug_log_snapshot (const char *phase, bool have_snapshot, const ebb_status_snapshot_t *snap) {
-    (void)phase;
-    (void)have_snapshot;
-    (void)snap;
-}
-#endif
-
-/**
- * @brief Зчитати та залогувати стан пристрою після виконання команди.
- *
- * @param dev        Пристрій AxiDraw.
- * @param phase      Позначка етапу (before/after тощо).
- * @param action     Людиночиткий опис дії.
- * @param command_rc Код повернення основної дії.
- * @param wait_rc    Результат очікування простою (якщо застосовно).
- */
-static void update_state_from_device (
-    axidraw_device_t *dev, const char *phase, const char *action, int command_rc, int wait_rc) {
-    (void)command_rc;
-    (void)wait_rc;
-    (void)action;
-    ebb_status_snapshot_t snap;
-    bool ok = false;
-    if (dev && axidraw_device_is_connected (dev))
-        ok = axidraw_status (dev, &snap) == 0;
-    debug_log_snapshot (phase, ok, ok ? &snap : NULL);
-}
+/* Вилучено налагоджувальні знімки стану пристрою для спрощення виводу. */
 
 /**
  * @brief Конвертувати міліметри у кроки AxiDraw із захистом від переповнення.
@@ -298,11 +257,10 @@ static int wait_for_device_idle (axidraw_device_t *dev) {
         return -1;
     struct timespec pause = { .tv_sec = 0, .tv_nsec = 20 * 1000000L };
     for (int attempt = 0; attempt < AXIDRAW_IDLE_WAIT_ATTEMPTS; ++attempt) {
-        ebb_status_snapshot_t snapshot;
-        if (axidraw_status (dev, &snapshot) != 0)
+        ebb_motion_status_t ms = { 0 };
+        if (ebb_query_motion (dev->port, &ms, dev->timeout_ms) != 0)
             return -1;
-        if (!snapshot.motion.command_active && !snapshot.motion.motor1_active
-            && !snapshot.motion.motor2_active && !snapshot.motion.fifo_pending)
+        if (!ms.command_active && !ms.motor1_active && !ms.motor2_active && !ms.fifo_pending)
             return 0;
         nanosleep (&pause, NULL);
     }
@@ -365,8 +323,6 @@ static int with_axidraw_device (
     if (verbose == VERBOSE_ON)
         LOGI ("Виконання дії '%s' на порту %s", action_name, dev.port_path);
 
-    update_state_from_device (&dev, "before", action_name, 0, 0);
-
     int rc = 0;
     if (cb)
         rc = cb (&dev, ctx);
@@ -377,9 +333,7 @@ static int with_axidraw_device (
     if (rc == 0 && wait_idle)
         idle_rc = wait_for_device_idle (&dev);
 
-    const char *phase
-        = (rc != 0) ? "error" : ((wait_idle && idle_rc == 0) ? "after_wait" : "after");
-    update_state_from_device (&dev, phase, action_name, rc, wait_idle ? idle_rc : 0);
+    (void)action_name; /* уникнути попередження про невикористану змінну у мінімальному логуванні */
 
     axidraw_device_disconnect (&dev);
 
@@ -494,17 +448,20 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
 
     rc = axidraw_move_xy (dev, duration, steps_x, steps_y);
     if (rc == 0 && wait_for_device_idle (dev) == 0) {
-        ebb_status_snapshot_t snapshot;
-        if (axidraw_status (dev, &snapshot) == 0) {
-            double steps_per_mm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
-            if (!(steps_per_mm > 0.0)) {
-                LOGE ("Коефіцієнт кроків на міліметр не встановлено (профіль відсутній)");
-            } else {
-                double pos_x = snapshot.steps_axis1 / steps_per_mm;
-                double pos_y = snapshot.steps_axis2 / steps_per_mm;
+        int32_t s1 = 0, s2 = 0;
+        if (ebb_query_steps (dev->port, &s1, &s2, dev->timeout_ms) == 0) {
+            double spmm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
+            if (spmm > 0.0) {
+                double pos_x = s1 / spmm;
+                double pos_y = s2 / spmm;
                 fprintf (
                     CMD_OUT, "Зсув виконано. Поточна позиція: X=%.3f мм, Y=%.3f мм\n", pos_x,
                     pos_y);
+            } else {
+                fprintf (
+                    CMD_OUT,
+                    "Зсув виконано. Поточна позиція: %d (кроки осі 1), %d (кроки осі 2)\n",
+                    s1, s2);
             }
         }
     }
@@ -571,28 +528,38 @@ static int device_version_cb (axidraw_device_t *dev, void *ctx) {
  */
 static int device_status_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
-    ebb_status_snapshot_t snapshot;
-    if (axidraw_status (dev, &snapshot) != 0)
+    ebb_motion_status_t ms = { 0 };
+    if (ebb_query_motion (dev->port, &ms, dev->timeout_ms) != 0)
         return -1;
+    int32_t s1 = 0, s2 = 0;
+    (void)ebb_query_steps (dev->port, &s1, &s2, dev->timeout_ms);
+    bool pen_up = false;
+    (void)ebb_query_pen (dev->port, &pen_up, dev->timeout_ms);
+    bool servo_on = false;
+    (void)ebb_query_servo_power (dev->port, &servo_on, dev->timeout_ms);
+    char version[64] = { 0 };
+    (void)ebb_query_version (dev->port, version, sizeof (version), dev->timeout_ms);
+
     fprintf (CMD_OUT, "Статус пристрою:\n");
-    fprintf (CMD_OUT, "  Команда активна: %s\n", snapshot.motion.command_active ? "так" : "ні");
-    fprintf (CMD_OUT, "  Мотор X активний: %s\n", snapshot.motion.motor1_active ? "так" : "ні");
-    fprintf (CMD_OUT, "  Мотор Y активний: %s\n", snapshot.motion.motor2_active ? "так" : "ні");
-    fprintf (CMD_OUT, "  FIFO непорожній: %s\n", snapshot.motion.fifo_pending ? "так" : "ні");
-    double steps_per_mm
-        = (axidraw_device_settings (dev) && axidraw_device_settings (dev)->steps_per_mm > 0.0)
-              ? axidraw_device_settings (dev)->steps_per_mm
-              : 0.0;
-    if (steps_per_mm > 0.0) {
-        fprintf (CMD_OUT, "  Позиція X: %.3f мм\n", snapshot.steps_axis1 / steps_per_mm);
-        fprintf (CMD_OUT, "  Позиція Y: %.3f мм\n", snapshot.steps_axis2 / steps_per_mm);
+    fprintf (CMD_OUT, "  Команда активна: %s\n", ms.command_active ? "так" : "ні");
+    fprintf (CMD_OUT, "  Мотор X активний: %s\n", ms.motor1_active ? "так" : "ні");
+    fprintf (CMD_OUT, "  Мотор Y активний: %s\n", ms.motor2_active ? "так" : "ні");
+    fprintf (CMD_OUT, "  FIFO непорожній: %s\n", ms.fifo_pending ? "так" : "ні");
+    double spmm = 0.0;
+    const axidraw_settings_t *cfg = axidraw_device_settings (dev);
+    if (cfg && cfg->steps_per_mm > 0.0)
+        spmm = cfg->steps_per_mm;
+    if (spmm > 0.0) {
+        fprintf (CMD_OUT, "  Позиція X: %.3f мм\n", s1 / spmm);
+        fprintf (CMD_OUT, "  Позиція Y: %.3f мм\n", s2 / spmm);
     } else {
         fprintf (CMD_OUT, "  Позиція X: (невідомо — steps_per_mm не встановлено)\n");
         fprintf (CMD_OUT, "  Позиція Y: (невідомо — steps_per_mm не встановлено)\n");
     }
-    fprintf (CMD_OUT, "  Перо підняте: %s\n", snapshot.pen_up ? "так" : "ні");
-    fprintf (CMD_OUT, "  Серво увімкнено: %s\n", snapshot.servo_power ? "так" : "ні");
-    fprintf (CMD_OUT, "  Прошивка: %s\n", snapshot.firmware);
+    fprintf (CMD_OUT, "  Перо підняте: %s\n", pen_up ? "так" : "ні");
+    fprintf (CMD_OUT, "  Серво увімкнено: %s\n", servo_on ? "так" : "ні");
+    if (version[0])
+        fprintf (CMD_OUT, "  Прошивка: %s\n", version);
     return 0;
 }
 

@@ -625,32 +625,7 @@ int ebb_query_version (serial_port_t *sp, char *version_buf, size_t version_len,
     return 0;
 }
 
-/**
- * @brief Зібрати агрегований статус, комбінуючи QM/QS/QP/QR/V.
- *
- * @param sp         Послідовний порт.
- * @param[out] snapshot Буфер результату.
- * @param timeout_ms Тайм-аут для кожного запиту.
- */
-int ebb_collect_status (serial_port_t *sp, ebb_status_snapshot_t *snapshot, int timeout_ms) {
-    if (!sp || !snapshot)
-        return -1;
-
-    memset (snapshot, 0, sizeof (*snapshot));
-
-    if (ebb_query_motion (sp, &snapshot->motion, timeout_ms) != 0)
-        return -1;
-    if (ebb_query_steps (sp, &snapshot->steps_axis1, &snapshot->steps_axis2, timeout_ms) != 0)
-        return -1;
-    if (ebb_query_pen (sp, &snapshot->pen_up, timeout_ms) != 0)
-        return -1;
-    if (ebb_query_servo_power (sp, &snapshot->servo_power, timeout_ms) != 0)
-        return -1;
-    if (ebb_query_version (sp, snapshot->firmware, sizeof (snapshot->firmware), timeout_ms) != 0)
-        return -1;
-
-    return 0;
-}
+/* ebb_collect_status() вилучено: викликайте ebb_query_motion/steps/pen/servo/version окремо. */
 
 /**
  * @brief Виконати аварійну зупинку (команда `ES`).
