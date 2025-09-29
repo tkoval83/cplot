@@ -1,6 +1,12 @@
 /**
  * @file glyph.h
- * @brief Представлення та доступ до контурних гліфів SVG.
+ * @brief Представлення та операції над гліфами Hershey.
+ * @defgroup glyph Гліфи
+ * @ingroup text
+ * @details
+ * Надає непрозорий тип гліфа, базову інформацію про нього та операції
+ * створення/читання/звільнення. Джерелом контурів виступає рядок SVG-path
+ * (значення атрибуту `d`).
  */
 #ifndef GLYPH_H
 #define GLYPH_H
@@ -12,52 +18,53 @@
 extern "C" {
 #endif
 
-/** Непрозорий дескриптор гліфа. */
+/**
+ * Непрозорий тип гліфа.
+ * @note Структура визначена у `glyph.c` і недоступна напряму користувачу API.
+ */
 typedef struct glyph glyph_t;
 
 /**
- * Метадані гліфа для швидкого доступу без парсингу контуру.
+ * Базова інформація про гліф.
  */
 typedef struct glyph_info {
-    uint32_t codepoint;   /**< Юнікод-кодова точка. */
-    double advance_width; /**< Горизонтальний крок (в одиницях шрифту). */
+    uint32_t codepoint;     /**< Юнікод кодова точка гліфа. */
+    double advance_width;   /**< Просування пера після гліфа (од. шрифту). */
 } glyph_info_t;
 
 /**
- * Створити гліф із SVG-атрибуту `d`.
- *
- * @param codepoint      Юнікод-значення гліфа.
- * @param advance_width  Значення horiz-adv-x у одиницях шрифту.
- * @param path_data      Рядок із SVG-командами (копіюється).
- * @param out_glyph      Вихідний гліф; не NULL.
- * @return 0 при успіху; -1 при помилці пам'яті; -2 при некоректних аргументах.
+ * @brief Створює гліф із SVG-path даних.
+ * @param codepoint Юнікод кодова точка.
+ * @param advance_width Просування у одиницях шрифту (метрики шрифту).
+ * @param path_data Рядок даних атрибута `d` SVG (не `NULL`).
+ * @param out_glyph [out] Куди помістити вказівник на створений гліф (не `NULL`).
+ * @return 0 — успіх;
+ *         -1 — помилка виділення памʼяті;
+ *         -2 — некоректні аргументи (`path_data==NULL` або `out_glyph==NULL`).
  */
 int glyph_create_from_svg_path (
     uint32_t codepoint, double advance_width, const char *path_data, glyph_t **out_glyph);
 
 /**
- * Отримати інформацію про гліф без доступу до повного контуру.
- * @param glyph   Гліф.
- * @param out     Вихідна структура для заповнення.
- * @return 0 при успіху; -1 якщо аргументи некоректні.
+ * @brief Отримує базову інформацію про гліф.
+ * @param glyph Вхідний гліф.
+ * @param out [out] Структура для заповнення метаданих.
+ * @return 0 — успіх; -1 — некоректні аргументи.
  */
 int glyph_get_info (const glyph_t *glyph, glyph_info_t *out);
 
 /**
- * Отримати сирий рядок контуру (SVG path `d`).
- *
- * Рядок лишається власністю гліфа та дійсний до виклику glyph_release().
- *
- * @param glyph Гліф.
- * @return Вказівник на рядок або NULL, якщо glyph==NULL.
+ * @brief Повертає сирі SVG-path дані гліфа.
+ * @param glyph Вхідний гліф.
+ * @return Вказівник на внутрішній рядок даних `d` або `NULL` для `NULL` гліфа.
+ * @warning Рядок належить гліфу й лишається дійсним до `glyph_release()`.
  */
 const char *glyph_get_path_data (const glyph_t *glyph);
 
 /**
- * Звільнити гліф та пов'язані дані.
- *
- * @param glyph Гліф для звільнення (може бути NULL).
- * @return 0 при успіху.
+ * @brief Вивільняє гліф і повʼязані ресурси.
+ * @param glyph Гліф або `NULL` (у цьому разі — no-op).
+ * @return 0 — завжди успіх.
  */
 int glyph_release (glyph_t *glyph);
 
@@ -65,4 +72,4 @@ int glyph_release (glyph_t *glyph);
 }
 #endif
 
-#endif /* GLYPH_H */
+#endif

@@ -1,6 +1,7 @@
 /**
  * @file canvas.c
- * @brief Трансформація шляхів тексту у координати пристрою з урахуванням орієнтації та полів.
+ * @brief Обчислення робочої рамки та перетворень полотна.
+ * @ingroup canvas
  */
 
 #include "canvas.h"
@@ -16,10 +17,9 @@
 #endif
 
 /**
- * @brief Перевірити валідність вхідних параметрів полотна.
- *
- * @param opt Опції полотна (може бути NULL).
- * @return `CANVAS_STATUS_OK`, якщо параметри коректні, або код помилки в іншому разі.
+ * @brief Перевіряє коректність параметрів полотна.
+ * @param opt Параметри сторінки та полів.
+ * @return CANVAS_STATUS_OK або код помилки.
  */
 static canvas_status_t validate_options (const canvas_options_t *opt) {
     if (!opt)
@@ -43,13 +43,10 @@ static canvas_status_t validate_options (const canvas_options_t *opt) {
 }
 
 /**
- * @brief Скопіювати шляхи у одиницях мм у новий буфер.
- *
- * Якщо вихідні шляхи вже в мм — виконується глибоке копіювання, інакше конвертація.
- *
- * @param src Джерело шляхів.
- * @param dst Призначення (не NULL).
- * @return Статус виконання.
+ * @brief Копіює або конвертує контури у міліметри.
+ * @param src Вхідні контури (мм або дюйми).
+ * @param dst [out] Вихідний контейнер у мм.
+ * @return CANVAS_STATUS_OK або CANVAS_STATUS_INTERNAL_ERROR.
  */
 static canvas_status_t copy_paths_mm (const geom_paths_t *src, geom_paths_t *dst) {
     if (!src || !dst)
@@ -69,14 +66,10 @@ static canvas_status_t copy_paths_mm (const geom_paths_t *src, geom_paths_t *dst
 }
 
 /**
- * @brief Розрахувати розкладку текстових шляхів на сторінці.
- *
- * Обчислює переведені в мм шляхи з урахуванням полів, орієнтації та початкової точки
- * для руху пристрою. Повернені шляхи потрібно звільнити `canvas_layout_dispose()`.
- *
- * @param options      Параметри полотна (орієнтація, поля, розмір сторінки).
- * @param source_paths Вхідні шляхи (у мм або інших одиницях).
- * @param[out] out_layout Структура для результату.
+ * @brief Формує розкладку полотна з урахуванням орієнтації та полів.
+ * @param options Параметри сторінки.
+ * @param source_paths Вхідні контури.
+ * @param out_layout [out] Результуючий макет.
  * @return Статус виконання.
  */
 canvas_status_t canvas_layout_document (
@@ -86,10 +79,11 @@ canvas_status_t canvas_layout_document (
     if (!options || !source_paths || !out_layout)
         return CANVAS_STATUS_INVALID_INPUT;
 
-    LOGD("canvas: fit_to_frame=%d, paper=%.2fx%.2f, margins tlbr=%.1f,%.1f,%.1f,%.1f, orient=%d",
-         options->fit_to_frame ? 1 : 0, options->paper_w_mm, options->paper_h_mm,
-         options->margin_top_mm, options->margin_left_mm, options->margin_bottom_mm,
-         options->margin_right_mm, (int)options->orientation);
+    LOGD (
+        "canvas: fit_to_frame=%d, paper=%.2fx%.2f, margins tlbr=%.1f,%.1f,%.1f,%.1f, orient=%d",
+        options->fit_to_frame ? 1 : 0, options->paper_w_mm, options->paper_h_mm,
+        options->margin_top_mm, options->margin_left_mm, options->margin_bottom_mm,
+        options->margin_right_mm, (int)options->orientation);
 
     canvas_status_t opt_rc = validate_options (options);
     if (opt_rc != CANVAS_STATUS_OK)
@@ -153,14 +147,13 @@ canvas_status_t canvas_layout_document (
         return CANVAS_STATUS_INTERNAL_ERROR;
 
     if (layout.orientation == ORIENT_PORTRAIT) {
-        /* Повернути у портретну систему координат */
+
         geom_paths_t rotated;
         rc = geom_paths_rotate (&normalized, M_PI_2, 0.0, 0.0, &rotated);
         geom_paths_free (&normalized);
         if (rc != 0)
             return CANVAS_STATUS_INTERNAL_ERROR;
 
-        /* Масштабування після повороту, щоб оцінювати ширину/висоту у координатах сторінки */
         geom_bbox_t rotated_bbox;
         if (geom_bbox_of_paths (&rotated, &rotated_bbox) != 0) {
             geom_paths_free (&rotated);
@@ -184,7 +177,9 @@ canvas_status_t canvas_layout_document (
             scale = sx < sy ? sx : sy;
             if (!(scale > 0.0) || scale > 1.0)
                 scale = 1.0;
-            LOGD("canvas: fit portrait scale=%.4f (w=%.2f h=%.2f frame=%.2f×%.2f)", scale, width, height, frame_w, frame_h);
+            LOGD (
+                "canvas: fit portrait scale=%.4f (w=%.2f h=%.2f frame=%.2f×%.2f)", scale, width,
+                height, frame_w, frame_h);
         }
         geom_paths_t scaled = rotated;
         bool have_scaled = false;
@@ -211,7 +206,7 @@ canvas_status_t canvas_layout_document (
         layout.start_y_mm = layout.bounds_mm.min_y;
         layout.paths_mm = placed;
     } else {
-        /* Ландшафт: масштабувати у поточній системі координат */
+
         geom_bbox_t norm_bbox;
         if (geom_bbox_of_paths (&normalized, &norm_bbox) != 0) {
             geom_paths_free (&normalized);
@@ -235,7 +230,9 @@ canvas_status_t canvas_layout_document (
             scale = sx < sy ? sx : sy;
             if (!(scale > 0.0) || scale > 1.0)
                 scale = 1.0;
-            LOGD("canvas: fit landscape scale=%.4f (w=%.2f h=%.2f frame=%.2f×%.2f)", scale, width, height, frame_w, frame_h);
+            LOGD (
+                "canvas: fit landscape scale=%.4f (w=%.2f h=%.2f frame=%.2f×%.2f)", scale, width,
+                height, frame_w, frame_h);
         }
         geom_paths_t scaled = normalized;
         bool have_scaled = false;
@@ -269,9 +266,8 @@ canvas_status_t canvas_layout_document (
 }
 
 /**
- * @brief Звільнити ресурси, пов'язані з розкладкою.
- *
- * @param layout Структура, яку потрібно очищити (може бути NULL).
+ * @brief Звільняє шляхи та обнуляє макет.
+ * @param layout Макет для очищення.
  */
 void canvas_layout_dispose (canvas_layout_t *layout) {
     if (!layout)

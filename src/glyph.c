@@ -1,6 +1,10 @@
 /**
  * @file glyph.c
- * @brief Реалізація контейнера для гліфів SVG.
+ * @brief Реалізація допоміжних перетворень гліфів.
+ * @ingroup glyph
+ * @details
+ * Містить внутрішнє представлення гліфа та реалізації операцій створення з
+ * SVG-path, отримання метаданих і звільнення ресурсів.
  */
 
 #include "glyph.h"
@@ -10,22 +14,16 @@
 #include <string.h>
 
 /**
- * @brief Приватний стан гліфа SVG.
+ * Внутрішнє представлення гліфа.
  */
 struct glyph {
-    uint32_t codepoint;
-    double advance_width;
-    char *path_data;
+    uint32_t codepoint;   /**< Юнікод кодова точка гліфа. */
+    double advance_width; /**< Просування пера після гліфа (од. шрифту). */
+    char *path_data;      /**< Копія рядка атрибута `d` SVG (власність обʼєкта). */
 };
 
 /**
- * @brief Створити гліф із SVG-опису шляху.
- *
- * @param codepoint     Кодова точка Unicode.
- * @param advance_width Ширина кроку (у внутрішніх одиницях).
- * @param path_data     Рядок `d` із SVG.
- * @param[out] out_glyph Новий гліф (необхідно звільнити `glyph_release`).
- * @return 0 при успіху; -1 при помилці памʼяті; -2 при некоректних аргументах.
+ * @copydoc glyph_create_from_svg_path
  */
 int glyph_create_from_svg_path (
     uint32_t codepoint, double advance_width, const char *path_data, glyph_t **out_glyph) {
@@ -45,11 +43,7 @@ int glyph_create_from_svg_path (
 }
 
 /**
- * @brief Отримати метрики гліфа.
- *
- * @param glyph Гліф.
- * @param[out] out Структура для заповнення.
- * @return 0 при успіху; -1 якщо вказівники некоректні.
+ * @copydoc glyph_get_info
  */
 int glyph_get_info (const glyph_t *glyph, glyph_info_t *out) {
     if (!glyph || !out)
@@ -60,7 +54,7 @@ int glyph_get_info (const glyph_t *glyph, glyph_info_t *out) {
 }
 
 /**
- * @brief Повернути сирий SVG-рядок `d` гліфа.
+ * @copydoc glyph_get_path_data
  */
 const char *glyph_get_path_data (const glyph_t *glyph) {
     if (!glyph)
@@ -69,7 +63,7 @@ const char *glyph_get_path_data (const glyph_t *glyph) {
 }
 
 /**
- * @brief Звільнити гліф та повʼязані ресурси.
+ * @copydoc glyph_release
  */
 int glyph_release (glyph_t *glyph) {
     if (!glyph)

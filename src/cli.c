@@ -1,6 +1,7 @@
 /**
  * @file cli.c
- * @brief Класичний CLI, що напряму виконує команди cplot.
+ * @brief Реалізація маршрутизації CLI-підкоманд.
+ * @ingroup cli
  */
 
 #include "cli.h"
@@ -14,12 +15,11 @@
 #include <unistd.h>
 
 /**
- * @brief Основний вхід до клієнтського режиму виконання команд.
- *
- * @param options Розібрані параметри командного рядка.
- * @param argc    Кількість аргументів вихідного argv.
- * @param argv    Початкові аргументи, потрібні для побудови віддаленої команди.
- * @return 0 у випадку успіху, ненульовий код інакше.
+ * @brief Маршрутизує виконання підкоманд згідно з розібраними опціями.
+ * @param options Розібрані параметри CLI.
+ * @param argc Початковий argc процесу (не використовується тут).
+ * @param argv Початковий argv процесу (не використовується тут).
+ * @return 0 — успіх, інакше код помилки підкоманди.
  */
 int cli_run (const options_t *options, int argc, char *argv[]) {
     (void)argc;
@@ -34,7 +34,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
     cmd_set_output (NULL);
     switch (options->cmd) {
     case CMD_PRINT: {
-        /* Читає вхід (файл або stdin), викликає API та за потреби формує превʼю. */
+
         char *owned = NULL;
         size_t in_len = 0;
         const char *in_chars = NULL;
@@ -109,7 +109,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
         const char *family = options->font_family;
         const char *model = options->device_model;
         if (options->preview) {
-            LOGD("cli: fit_page option=%d", options->fit_page ? 1 : 0);
+            LOGD ("cli: fit_page option=%d", options->fit_page ? 1 : 0);
             uint8_t *bytes = NULL;
             size_t blen = 0;
             int rc = cmd_print_preview (
@@ -117,8 +117,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
                 options->font_size_pt, model, options->paper_w_mm, options->paper_h_mm,
                 options->margin_top_mm, options->margin_right_mm, options->margin_bottom_mm,
                 options->margin_left_mm, options->orientation, options->fit_page ? 1 : 0,
-                options->preview_png ? 1 : 0,
-                options->verbose, &bytes, &blen);
+                options->preview_png ? 1 : 0, options->verbose, &bytes, &blen);
             if (rc == 0 && bytes) {
                 if (options->output_path[0]) {
                     FILE *fp = fopen (options->output_path, "wb");
@@ -140,8 +139,8 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
                 in_chars, in_len, options->input_format == INPUT_FORMAT_MARKDOWN, family,
                 options->font_size_pt, model, options->paper_w_mm, options->paper_h_mm,
                 options->margin_top_mm, options->margin_right_mm, options->margin_bottom_mm,
-                options->margin_left_mm, options->orientation, options->fit_page,
-                options->dry_run, options->verbose);
+                options->margin_left_mm, options->orientation, options->fit_page, options->dry_run,
+                options->verbose);
             free (owned);
             return rc;
         }
@@ -206,7 +205,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
             return 2;
         }
     }
-    /* SHAPE підкоманда вилучена з CLI (API доступний у cmd_shape). */
+
     case CMD_VERSION:
         return cmd_version_execute (options->verbose);
     default:

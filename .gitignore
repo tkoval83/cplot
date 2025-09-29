@@ -42,3 +42,6 @@
 # Project logs files
 /log/*
 !/log/.gitkeep
+
+# Project documentation
+/docs/api/*

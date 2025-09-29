@@ -1,7 +1,11 @@
 /**
  * @file text.c
- * @brief Рендеринг тексту Hershey у шляхи geom.
+ * @brief Реалізація рендерингу шрифтів Hershey та верстки.
  * @ingroup text
+ * @details
+ * Містить розбір UTF‑8, підбір шрифтів/фолбеків, простий токенізатор тексту,
+ * розстановку переносів і рендеринг рядків у контури Hershey. Всі координати
+ * повертаються у вказаних одиницях (`geom_units_t`).
  */
 
 #include "text.h"
@@ -20,23 +24,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** \brief Макрос для обчислення кількості елементів у статичному масиві. */
 #ifndef ARRAY_LEN
 #define ARRAY_LEN(arr) (sizeof (arr) / sizeof ((arr)[0]))
 #endif
 
-/* Впередні оголошення будуть нижче після визначень структур. */
-
-/*
- * Декодування UTF-8 тепер централізоване у str_utf8_decode() (див. str.c).
- */
-
-/**
- * @brief Порівняти два 32-бітні значення (для qsort).
- *
- * @param a Вказівник на перше значення `uint32_t`.
- * @param b Вказівник на друге значення `uint32_t`.
- * @return -1, 0 або 1 залежно від порядку.
- */
+/** \brief Порівняння `uint32_t` для `qsort`. */
 static int cmp_uint32 (const void *a, const void *b) {
     uint32_t ua = *(const uint32_t *)a;
     uint32_t ub = *(const uint32_t *)b;
@@ -48,12 +41,7 @@ static int cmp_uint32 (const void *a, const void *b) {
 }
 
 /**
- * @brief Забезпечити місткість масиву кодових точок при збиранні тексту.
- *
- * @param arr    Вказівник на масив (може перевиділятись).
- * @param cap    Поточна місткість (оновлюється).
- * @param needed Мінімальна необхідна кількість елементів.
- * @return 0 при успіху; -1 при помилці памʼяті або некоректних аргументах.
+ * @brief Гарантує ємність масиву кодових точок.
  */
 static int ensure_codepoints_capacity (uint32_t **arr, size_t *cap, size_t needed) {
     if (!arr || !cap)
@@ -72,12 +60,11 @@ static int ensure_codepoints_capacity (uint32_t **arr, size_t *cap, size_t neede
 }
 
 /**
- * @brief Зібрати та відсортувати унікальні кодові точки з UTF-8 рядка.
- *
- * @param text       Початковий текст у UTF-8.
- * @param[out] out_codes Динамічний масив кодових точок (може бути NULL, якщо текст порожній).
- * @param[out] out_count Кількість елементів у масиві.
- * @return 0 при успіху; -1 при помилці памʼяті або некоректних аргументах.
+ * @brief Декодує UTF‑8 рядок у унікальні відсортовані кодові точки.
+ * @param text Вхідний текст.
+ * @param out_codes [out] Масив кодових точок (`malloc`), або `NULL` якщо порожньо.
+ * @param out_count [out] Кількість елементів у `out_codes`.
+ * @return 0 — успіх; -1 — помилка памʼяті/аргументів.
  */
 static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *out_count) {
     if (!out_codes || !out_count)
@@ -121,39 +108,27 @@ static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *o
     return 0;
 }
 
-/**
- * @brief Внутрішній запис використання гарнітури (для статистики).
- */
+/** \brief Запис підрахунку використання гліфів родини шрифту. */
 typedef struct {
-    char name[96];
-    size_t glyphs;
+    char name[96];  /**< Назва родини. */
+    size_t glyphs;  /**< Кількість гліфів, відрендерених цією родиною. */
 } font_usage_entry_t;
 
-/**
- * @brief Агрегована статистика використання гарнітур під час рендерингу.
- */
+/** \brief Підсумкова статистика використання родин шрифтів. */
 typedef struct {
-    font_usage_entry_t *entries;
-    size_t count;
-    size_t cap;
+    font_usage_entry_t *entries; /**< Динамічний масив записів. */
+    size_t count;                /**< Кількість елементів. */
+    size_t cap;                  /**< Ємність масиву. */
 } font_usage_stats_t;
 
-/**
- * @brief Ініціалізувати порожню статистику шрифтів.
- *
- * @param stats Структура для обнулення.
- */
+/** \brief Ініціалізує структуру статистики. */
 static void font_usage_stats_init (font_usage_stats_t *stats) {
     if (!stats)
         return;
     memset (stats, 0, sizeof (*stats));
 }
 
-/**
- * @brief Звільнити ресурси, виділені для статистики шрифтів.
- *
- * @param stats Структура для очищення.
- */
+/** \brief Вивільняє ресурси статистики. */
 static void font_usage_stats_dispose (font_usage_stats_t *stats) {
     if (!stats)
         return;
@@ -163,13 +138,7 @@ static void font_usage_stats_dispose (font_usage_stats_t *stats) {
     stats->cap = 0;
 }
 
-/**
- * @brief Збільшити лічильник використання для конкретного шрифту.
- *
- * @param stats Структура статистики.
- * @param name  Назва шрифту.
- * @return 0 при успіху; -1 при помилці памʼяті.
- */
+/** \brief Збільшує лічильник використання для вказаної родини. */
 static int font_usage_stats_increment (font_usage_stats_t *stats, const char *name) {
     if (!stats || !name || !*name)
         return 0;
@@ -194,12 +163,7 @@ static int font_usage_stats_increment (font_usage_stats_t *stats, const char *na
     return 0;
 }
 
-/**
- * @brief Визначити шрифт, що використано найчастіше.
- *
- * @param stats Структура статистики.
- * @return Найпопулярніший запис або NULL, якщо даних немає.
- */
+/** \brief Повертає родину з найбільшою кількістю гліфів. */
 static const font_usage_entry_t *font_usage_stats_dominant (const font_usage_stats_t *stats) {
     if (!stats || stats->count == 0)
         return NULL;
@@ -214,12 +178,7 @@ static const font_usage_entry_t *font_usage_stats_dominant (const font_usage_sta
     return best;
 }
 
-/**
- * @brief Порахувати загальну кількість відрендерених гліфів.
- *
- * @param stats Структура статистики.
- * @return Сумарна кількість гліфів.
- */
+/** \brief Загальна кількість відрендерених гліфів у статистиці. */
 static size_t font_usage_stats_total (const font_usage_stats_t *stats) {
     if (!stats)
         return 0;
@@ -229,52 +188,47 @@ static size_t font_usage_stats_total (const font_usage_stats_t *stats) {
     return total;
 }
 
-/**
- * @brief Допоміжне представлення рядка під час компонування.
- */
+/** \brief Внутрішній рядок верстки. */
 typedef struct {
-    char *text;            /**< текст рядка у UTF-8 */
-    size_t len;            /**< довжина тексту у байтах */
-    size_t cap;            /**< розмір виділеного буфера */
-    double width_units;    /**< ширина рядка в одиницях полотна */
-    bool hyphenated;       /**< чи завершено рядок дефісом */
-    size_t start_index;    /**< позиція у вхідному тексті */
-    double offset_units;   /**< додатковий зсув X (вирівнювання) */
-    double baseline_units; /**< позиція базової лінії у вихідних одиницях */
+    char *text;
+    size_t len;
+    size_t cap;
+    double width_units;
+    bool hyphenated;
+    size_t start_index;
+    double offset_units;
+    double baseline_units;
 } layout_line_t;
 
-/**
- * @brief Опис одного гліфа при попередньому аналізі слова.
- */
+/** \brief Фрагмент гліфа з шириною та кодовою точкою. */
 typedef struct {
-    const char *ptr;      /**< вказівник на початок символу у вихідному слові */
-    size_t byte_len;      /**< довжина послідовності UTF-8 */
-    double advance_units; /**< advance у одиницях шрифту */
-    uint32_t codepoint;   /**< кодова точка */
-    bool missing;         /**< true, якщо гліф відсутній */
+    const char *ptr;
+    size_t byte_len;
+    double advance_units;
+    uint32_t codepoint;
+    bool missing;
 } glyph_segment_t;
 
-/* Впередні оголошення будуть додані після визначення split_result_t. */
-
-/* -------------------- Внутрішній IR для пайплайна розкладки -------------------- */
-
+/** \brief Тип токена простого токенізатора тексту. */
 typedef enum {
     TK_WORD = 1,
     TK_SPACE = 2,
     TK_NEWLINE = 3,
 } token_type_t;
 
+/** \brief Токен рядка: слово/пробіл/перенос. */
 typedef struct {
-    token_type_t type; /**< тип токена */
-    const char *ptr;   /**< вказівник у вихідному буфері (для WORD) */
-    size_t len;        /**< довжина у байтах (для WORD) */
-    /* Результат шейпінгу/вимірювання для WORD */
+    token_type_t type;
+    const char *ptr;
+    size_t len;
+
     glyph_segment_t *segs;
     size_t seg_count;
-    double width_units; /**< ширина слова у вихідних одиницях */
-    bool ascii_only;    /**< true якщо слово ASCII (для гіпенізації) */
+    double width_units;
+    bool ascii_only;
 } text_token_t;
 
+/** \brief Звільняє масив токенів разом із сегментами гліфів. */
 static void tokens_dispose (text_token_t *toks, size_t count) {
     if (!toks)
         return;
@@ -283,6 +237,7 @@ static void tokens_dispose (text_token_t *toks, size_t count) {
     free (toks);
 }
 
+/** \brief Токенізує вхідний текст на слова/пропуски/переноси. */
 static int tokenize_text (const char *input, text_token_t **out, size_t *out_count) {
     if (!out || !out_count)
         return -1;
@@ -298,12 +253,12 @@ static int tokenize_text (const char *input, text_token_t **out, size_t *out_cou
     while (*p) {
         unsigned char ch = (unsigned char)*p;
         if (ch == '\r') {
-            ++p; /* ігнорувати */
+            ++p;
             continue;
         }
         if (ch == '\n') {
             if (have_space_run)
-                have_space_run = false; /* пробіли не емінуються перед явним переносом */
+                have_space_run = false;
             if (count == cap) {
                 size_t nc = cap ? cap * 2 : 16;
                 text_token_t *nt = realloc (toks, nc * sizeof *nt);
@@ -323,7 +278,7 @@ static int tokenize_text (const char *input, text_token_t **out, size_t *out_cou
             ++p;
             continue;
         }
-        /* якщо був пробільний ран — вставити один SPACE */
+
         if (have_space_run) {
             if (count == cap) {
                 size_t nc = cap ? cap * 2 : 16;
@@ -338,7 +293,7 @@ static int tokenize_text (const char *input, text_token_t **out, size_t *out_cou
             toks[count++] = (text_token_t){ .type = TK_SPACE };
             have_space_run = false;
         }
-        /* WORD токен */
+
         const char *start = p;
         size_t len = 0;
         while (p[len]) {
@@ -364,13 +319,12 @@ static int tokenize_text (const char *input, text_token_t **out, size_t *out_cou
         toks[count++] = (text_token_t){ .type = TK_WORD, .ptr = start, .len = len };
         p += len;
     }
-    /* якщо рядок завершується пробілами — не емінуємо їх у SPACE, як і раніше */
+
     *out = toks;
     *out_count = count;
     return 0;
 }
 
-/* Прототип для шейпера слів, який використовує build_word_segments(). */
 static int build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
@@ -404,19 +358,15 @@ shape_measure_words (const font_render_context_t *ctx, text_token_t *toks, size_
     return 0;
 }
 
-/**
- * @brief Результат розбиття слова під час переносу.
- */
 typedef struct {
-    char *prefix;              /**< частина, що лишається в поточному рядку */
-    size_t prefix_len;         /**< її довжина у байтах */
-    double prefix_width_units; /**< ширина префікса у вихідних одиницях */
-    char *suffix;              /**< частина, що переноситься на наступний рядок */
-    size_t suffix_len;         /**< довжина суфікса у байтах */
-    bool inserted_hyphen;      /**< чи додано штучний дефіс */
+    char *prefix;
+    size_t prefix_len;
+    double prefix_width_units;
+    char *suffix;
+    size_t suffix_len;
+    bool inserted_hyphen;
 } split_result_t;
 
-/* Впередні оголошення внутрішніх хелперів, що використовуються у фазах пайплайна */
 static int build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
@@ -441,11 +391,6 @@ static int force_split_segments (
     const font_render_context_t *ctx,
     split_result_t *out);
 
-/**
- * @brief Звільнити масив внутрішніх рядків розкладки разом із буферами.
- * @param lines Масив рядків.
- * @param count Кількість елементів у масиві.
- */
 static void free_lines (layout_line_t *lines, size_t count) {
     if (!lines)
         return;
@@ -454,13 +399,6 @@ static void free_lines (layout_line_t *lines, size_t count) {
     free (lines);
 }
 
-/**
- * @brief Розширити буфер рядка за потреби.
- *
- * @param line   Рядок для розширення.
- * @param needed Мінімальний розмір (включно з NUL).
- * @return 0 якщо успішно; -1 при нестачі пам’яті.
- */
 static int line_reserve (layout_line_t *line, size_t needed) {
     if (!line)
         return -1;
@@ -477,13 +415,6 @@ static int line_reserve (layout_line_t *line, size_t needed) {
     return 0;
 }
 
-/**
- * @brief Додати один символ до рядка.
- *
- * @param line Рядок для модифікації.
- * @param c    Символ (байт) для додавання.
- * @return 0 при успіху; -1 при помилці.
- */
 static int line_append_char (layout_line_t *line, char c) {
     if (!line)
         return -1;
@@ -494,14 +425,6 @@ static int line_append_char (layout_line_t *line, char c) {
     return 0;
 }
 
-/**
- * @brief Додати послідовність байтів до рядка.
- *
- * @param line Рядок для модифікації.
- * @param data UTF-8 підрядок (може містити NUL усередині).
- * @param len  Довжина підрядка у байтах.
- * @return 0 при успіху; -1 при помилці.
- */
 static int line_append_bytes (layout_line_t *line, const char *data, size_t len) {
     if (!line)
         return -1;
@@ -515,15 +438,6 @@ static int line_append_bytes (layout_line_t *line, const char *data, size_t len)
     return 0;
 }
 
-/**
- * @brief Створити новий рядок та додати його до колекції.
- *
- * @param lines Масив рядків (може бути realloc).
- * @param count Поточна кількість рядків.
- * @param cap   Поточна місткість масиву.
- * @param start_index Індекс першого символу у вхідному тексті.
- * @return Вказівник на новий рядок або NULL при помилці.
- */
 static layout_line_t *
 add_new_line (layout_line_t **lines, size_t *count, size_t *cap, size_t start_index) {
     if (!lines || !count || !cap)
@@ -548,11 +462,6 @@ add_new_line (layout_line_t **lines, size_t *count, size_t *cap, size_t start_in
     return line;
 }
 
-/**
- * @brief Знищити буфери, створені split_segments().
- *
- * @param res Структура з префіксом/суфіксом, яку треба очистити.
- */
 static void split_result_dispose (split_result_t *res) {
     if (!res)
         return;
@@ -585,8 +494,6 @@ static void assign_layout_positions (
     }
 }
 
-/* -------------------- Розбиття на рядки з використанням токенів -------------------- */
-
 static int break_tokens_into_lines (
     const text_layout_opts_t *opts,
     const font_render_context_t *ctx,
@@ -599,7 +506,7 @@ static int break_tokens_into_lines (
 
     layout_line_t *lines = NULL;
     size_t line_count = 0, line_cap = 0;
-    size_t consumed_input_total = 0; /* як у попередній реалізації */
+    size_t consumed_input_total = 0;
     size_t assigned_input_current = 0;
     layout_line_t *current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
     if (!current)
@@ -612,7 +519,7 @@ static int break_tokens_into_lines (
     for (size_t i = 0; i < tok_count; ++i) {
         const text_token_t *tk = &toks[i];
         if (tk->type == TK_NEWLINE) {
-            consumed_input_total += assigned_input_current + 1; /* +1 за "\n" */
+            consumed_input_total += assigned_input_current + 1;
             assigned_input_current = 0;
             current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
             if (!current) {
@@ -628,15 +535,14 @@ static int break_tokens_into_lines (
             continue;
         }
 
-        /* WORD */
         const char *pending_word_ptr = tk->ptr;
         size_t pending_word_len = tk->len;
-        glyph_segment_t *pending_segments = tk->segs; /* не власність: не звільняти */
+        glyph_segment_t *pending_segments = tk->segs;
         size_t pending_seg_count = tk->seg_count;
         double pending_word_width = tk->width_units;
         bool pending_ascii_only = tk->ascii_only;
-        char *owned_ptr = NULL; /* коли створюємо суфікс */
-        int segments_owned = 0; /* 1 якщо потрібно free() */
+        char *owned_ptr = NULL;
+        int segments_owned = 0;
 
         while (pending_seg_count > 0) {
             double available_units = opts->frame_width - current->width_units;
@@ -670,7 +576,7 @@ static int break_tokens_into_lines (
                         return -1;
                     }
                     current->width_units += space_width_units;
-                    assigned_input_current += 1; /* один пробіл із входу */
+                    assigned_input_current += 1;
                 }
                 if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
                     if (segments_owned)
@@ -720,7 +626,6 @@ static int break_tokens_into_lines (
                 assigned_input_current += split.prefix_len;
                 current->hyphenated = true;
 
-                /* коригування індекса: штучний дефіс не належить вхідному тексту */
                 if (split.inserted_hyphen && assigned_input_current > 0)
                     consumed_input_total += assigned_input_current - 1;
                 else
@@ -917,22 +822,6 @@ static int break_tokens_into_lines (
     return 0;
 }
 
-/**
- * @brief Побудувати послідовність гліфів для одного слова.
- *
- * Також повертає сумарну ширину за повним словом, кількість відсутніх гліфів
- * та ознаку ASCII-only для подальшого рішення щодо гіпенізації.
- *
- * @param ctx              Попередньо ініціалізований контекст шрифту.
- * @param word             Початок слова у буфері тексту.
- * @param word_len         Довжина слова у байтах.
- * @param segments_out     Вихідний масив сегментів (malloc).
- * @param count_out        Кількість сегментів.
- * @param width_units_out  Сумарна ширина слова у вихідних одиницях.
- * @param missing_out      Кількість відсутніх гліфів (може бути NULL).
- * @param ascii_only_out   true, якщо слово містить лише ASCII (може бути NULL).
- * @return 0 у разі успіху; -1 при помилці.
- */
 static int build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
@@ -1005,21 +894,6 @@ static int build_word_segments (
     return 0;
 }
 
-/**
- * @brief Спробувати розбити слово, щоби воно вмістилося у доступну ширину.
- *
- * Спочатку шукає існуючий дефіс, в іншому випадку виконує найпростішу
- * гіпенізацію (ASCII) із додаванням дефіса. Повертає 1, якщо виконано розбиття.
- *
- * @param segments         Масив сегментів слова.
- * @param seg_count        Кількість сегментів.
- * @param available_units  Доступна ширина у вихідних одиницях.
- * @param ctx              Контекст шрифту.
- * @param ascii_only       true, якщо слово ASCII (інакше гіпенізація заборонена).
- * @param allow_hyphenation Чи дозволено вставляти дефіс.
- * @param out              Результат із частинами слова (очищати split_result_dispose()).
- * @return 1 якщо розбиття виконано; 0 якщо слово не розбивається; -1 при помилці.
- */
 static int split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
@@ -1117,13 +991,6 @@ static int split_segments (
     return 1;
 }
 
-/**
- * @brief Примусово розбити слово, щоб воно вмістилось у доступну ширину.
- *
- * Ігнорує обмеження ASCII/гіпенізації: відтинає на межі, за можливості додає
- * дефіс, якщо він поміщається. Повертає 1 при успіху, 0 якщо розбиття не
- * вдалося (напр., перший гліф уже більший за available_units).
- */
 static int force_split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
@@ -1147,7 +1014,7 @@ static int force_split_segments (
         }
     }
     if (idx < 0)
-        return 0; /* навіть перший символ не влазив */
+        return 0;
 
     size_t prefix_bytes = 0;
     for (size_t i = 0; i <= (size_t)idx; ++i)
@@ -1178,18 +1045,6 @@ static int force_split_segments (
     return 1;
 }
 
-/**
- * @brief Відмалювати один готовий рядок у `geom_paths_t`.
- *
- * @param ctx            Контекст шрифту.
- * @param line_text      UTF-8 текст рядка.
- * @param start_x_units  Зсув X у вихідних одиницях.
- * @param baseline_units Позиція базової лінії у вихідних одиницях.
- * @param out            Колекція шляхів для доповнення.
- * @param rendered_glyphs Лічильник успішно відрендерених гліфів.
- * @param missing_glyphs  Лічильник гліфів, яких бракує у шрифті.
- * @return 0 при успіху; -1 при помилці.
- */
 static int render_line_text (
     const font_render_context_t *ctx,
     font_fallback_t *fallbacks,
@@ -1201,7 +1056,7 @@ static int render_line_text (
     size_t *missing_glyphs) {
     if (!ctx || !line_text || !out)
         return -1;
-    double pen_x = start_x_units / ctx->scale; /* перехід у одиниці шрифту */
+    double pen_x = start_x_units / ctx->scale;
     double baseline = baseline_units / ctx->scale;
 
     const char *cursor = line_text;
@@ -1253,44 +1108,23 @@ static int render_line_text (
     return 0;
 }
 
-/* ---- Підтримка інлайнових стилів (спани на вході) ------------------------ */
-
-/**
- * @brief Проміжний опис спану стилів у межах одного рядка.
- */
 typedef struct {
-    size_t start;   /* байтовий індекс у рядку */
-    size_t length;  /* довжина в байтах */
-    unsigned flags; /* TEXT_STYLE_* | 0x100 для strikethrough */
+    size_t start;
+    size_t length;
+    unsigned flags;
 } span_run_t;
 
-/**
- * @brief Технічний стан для побудови лінійних декорацій (підкреслення/закреслення).
- */
-/**
- * @brief Технічний стан для побудови лінійних декорацій (підкреслення/закреслення).
- */
 typedef struct {
-    bool active;     /**< Поточний стан декорації (активна/ні). */
-    double y_mm;     /**< Вертикальна позиція лінії у мм. */
-    double start_mm; /**< Початок діапазону декорації. */
-    double last_mm;  /**< Останній зафіксований кінець діапазону. */
-    unsigned flag;   /**< Відповідний прапорець стилю (TEXT_STYLE_*). */
+    bool active;
+    double y_mm;
+    double start_mm;
+    double last_mm;
+    unsigned flag;
 } inline_decoration_t;
 
-/** для внутрішнього використання сумісно з text_span_t */
 #define STYLE_STRIKE TEXT_STYLE_STRIKE
 #define STYLE_UNDERLINE TEXT_STYLE_UNDERLINE
 
-/* Спани формує парсер Markdown у markdown.c */
-
-/**
- * @brief Обчислює сукупні прапорці стилів для заданої позиції у рядку.
- * @param runs      Масив інлайнових спанів.
- * @param run_count Кількість елементів у масиві.
- * @param pos       Позиція (байтовий індекс) у рядку.
- * @return Прапорці стилів, що покривають позицію `pos`.
- */
 static unsigned span_flags_at_position (const span_run_t *runs, size_t run_count, size_t pos) {
     unsigned flags = 0;
     if (!runs)
@@ -1301,9 +1135,6 @@ static unsigned span_flags_at_position (const span_run_t *runs, size_t run_count
     return flags;
 }
 
-/**
- * @brief Ініціалізує стан декорації.
- */
 static void inline_decoration_init (inline_decoration_t *dec, double y_mm, unsigned flag) {
     if (!dec)
         return;
@@ -1314,9 +1145,6 @@ static void inline_decoration_init (inline_decoration_t *dec, double y_mm, unsig
     dec->flag = flag;
 }
 
-/**
- * @brief Вмикає декорацію з зазначеної позиції, якщо вона неактивна.
- */
 static void inline_decoration_start (inline_decoration_t *dec, double start_mm) {
     if (!dec || dec->active)
         return;
@@ -1325,9 +1153,6 @@ static void inline_decoration_start (inline_decoration_t *dec, double start_mm) 
     dec->last_mm = start_mm;
 }
 
-/**
- * @brief Розширює діапазон декорації до нової позиції.
- */
 static void inline_decoration_extend (inline_decoration_t *dec, double end_mm) {
     if (!dec || !dec->active)
         return;
@@ -1335,9 +1160,6 @@ static void inline_decoration_extend (inline_decoration_t *dec, double end_mm) {
         dec->last_mm = end_mm;
 }
 
-/**
- * @brief Завершує декорацію та малює відповідну лінію.
- */
 static void inline_decoration_stop (inline_decoration_t *dec, geom_paths_t *out) {
     if (!dec || !dec->active)
         return;
@@ -1349,9 +1171,6 @@ static void inline_decoration_stop (inline_decoration_t *dec, geom_paths_t *out)
     dec->start_mm = dec->last_mm = 0.0;
 }
 
-/**
- * @brief Зупиняє декорацію, якщо у наступній позиції її прапор більше не встановлено.
- */
 static void inline_decoration_flush_if_needed (
     inline_decoration_t *dec, unsigned next_flags, geom_paths_t *out) {
     if (!dec)
@@ -1360,20 +1179,11 @@ static void inline_decoration_flush_if_needed (
         inline_decoration_stop (dec, out);
 }
 
-/**
- * @brief Стан двох декорацій для поточного рядка.
- */
 typedef struct {
     inline_decoration_t strike;
     inline_decoration_t underline;
 } decoration_state_t;
 
-/**
- * @brief Ініціалізувати стан декорацій для рядка.
- * @param state Структура стану.
- * @param strike_y Y позиція лінії закреслення (у вихідних одиницях).
- * @param underline_y Y позиція підкреслення (у вихідних одиницях).
- */
 static void decoration_state_init (decoration_state_t *state, double strike_y, double underline_y) {
     if (!state)
         return;
@@ -1381,12 +1191,6 @@ static void decoration_state_init (decoration_state_t *state, double strike_y, d
     inline_decoration_init (&state->underline, underline_y, STYLE_UNDERLINE);
 }
 
-/**
- * @brief Увімкнути декорації згідно з активними прапорцями.
- * @param state Стан декорацій.
- * @param flags Прапорці стилю на поточній позиції (TEXT_STYLE_*).
- * @param pen_mm Поточне X положення пера у мм.
- */
 static void decoration_state_start (decoration_state_t *state, unsigned flags, double pen_mm) {
     if (!state)
         return;
@@ -1396,9 +1200,6 @@ static void decoration_state_start (decoration_state_t *state, unsigned flags, d
         inline_decoration_start (&state->underline, pen_mm);
 }
 
-/**
- * @brief Розширити активні декорації до нової X позиції пера.
- */
 static void decoration_state_extend (decoration_state_t *state, double pen_mm) {
     if (!state)
         return;
@@ -1406,9 +1207,6 @@ static void decoration_state_extend (decoration_state_t *state, double pen_mm) {
     inline_decoration_extend (&state->underline, pen_mm);
 }
 
-/**
- * @brief Завершити декорації, якщо у наступній позиції прапорці зняті.
- */
 static void
 decoration_state_flush (decoration_state_t *state, unsigned next_flags, geom_paths_t *out) {
     if (!state)
@@ -1417,9 +1215,6 @@ decoration_state_flush (decoration_state_t *state, unsigned next_flags, geom_pat
     inline_decoration_flush_if_needed (&state->underline, next_flags, out);
 }
 
-/**
- * @brief Завершити всі активні декорації та домалювати лінії.
- */
 static void decoration_state_stop (decoration_state_t *state, geom_paths_t *out) {
     if (!state)
         return;
@@ -1465,9 +1260,6 @@ static int slice_spans_for_line (
     return 0;
 }
 
-/**
- * @brief Відмалювати рядок із урахуванням стилів (bold/italic/strike/underline).
- */
 static int render_line_text_spans (
     const font_render_context_t *ctx_regular,
     const font_render_context_t *ctx_bold,
@@ -1476,7 +1268,7 @@ static int render_line_text_spans (
     font_fallback_t *fb_regular,
     font_fallback_t *fb_bold,
     font_fallback_t *fb_italic,
-    font_fallback_t *fb_bold_italic /*unused*/,
+    font_fallback_t *fb_bold_italic,
     const char *line_text,
     const span_run_t *runs,
     size_t run_count,
@@ -1604,7 +1396,7 @@ int text_render_hershey (
     geom_units_t units,
     geom_paths_t *out,
     text_render_info_t *info) {
-    (void)style_flags; /* поки ігноруються — один набір Hershey */
+    (void)style_flags;
     if (!out)
         return -1;
 
@@ -1761,6 +1553,9 @@ int text_layout_render (
     return text_layout_render_spans (text, opts, NULL, 0, out, lines_out, lines_count, info);
 }
 
+/**
+ * @copydoc text_layout_render_spans
+ */
 int text_layout_render_spans (
     const char *text,
     const text_layout_opts_t *opts,
@@ -1829,27 +1624,25 @@ int text_layout_render_spans (
         info->line_height = ctx.line_height_units * ctx.scale;
     }
 
-    /* Підготуємо місце під майбутні лінії для LAYOUT_FAIL() */
     layout_line_t *lines = NULL;
     size_t line_count = 0;
 
-    /* 1) Токенізація */
     text_token_t *toks = NULL;
     size_t tok_count = 0;
     if (tokenize_text (input, &toks, &tok_count) != 0)
         LAYOUT_FAIL ();
-    /* 2) Шейпінг/вимірювання слів */
+
     if (shape_measure_words (&ctx, toks, tok_count) != 0) {
         tokens_dispose (toks, tok_count);
         LAYOUT_FAIL ();
     }
-    /* 3) Переноси рядків */
+
     if (break_tokens_into_lines (opts, &ctx, toks, tok_count, &lines, &line_count) != 0) {
         tokens_dispose (toks, tok_count);
         LAYOUT_FAIL ();
     }
     tokens_dispose (toks, tok_count);
-    /* 4) Базові лінії та X-зсуви */
+
     assign_layout_positions (opts, &ctx, lines, line_count);
 
     size_t rendered_glyphs = 0;
@@ -1858,13 +1651,12 @@ int text_layout_render_spans (
         layout_line_t *line = &lines[i];
         if (!line->text || line->len == 0)
             continue;
-        /* Підрядні спани, що перетинаються з рядком */
+
         span_run_t *line_runs = NULL;
         size_t line_run_count = 0;
         if (slice_spans_for_line (spans, span_count, line, &line_runs, &line_run_count) != 0)
             LAYOUT_FAIL ();
 
-        /* Підібрати контексти для стилів, якщо потрібно */
         const font_render_context_t *ctx_bold = NULL, *ctx_italic = NULL, *ctx_bold_italic = NULL;
         font_render_context_t bold_ctx, italic_ctx, bold_italic_ctx;
         font_fallback_t fb_bold, fb_italic, fb_bold_italic;
@@ -1881,7 +1673,7 @@ int text_layout_render_spans (
             font_face_t f;
             int have_bold = 0;
             if (fontreg_resolve (name, &f) == 0) {
-                /* Уникати ситуації, коли резолвер повертає ту ж саму гарнітуру */
+
                 if (strcmp (f.id, ctx.face.id) != 0
                     && font_render_context_init (&bold_ctx, &f, opts->size_pt, opts->units) == 0) {
                     ctx_bold = &bold_ctx;
@@ -1890,7 +1682,7 @@ int text_layout_render_spans (
                 }
             }
             if (!have_bold) {
-                /* Фолбек на наявний жирний шрифт із бандла */
+
                 if (fontreg_resolve ("Hershey Serif Bold", &f) == 0
                     && font_render_context_init (&bold_ctx, &f, opts->size_pt, opts->units) == 0) {
                     ctx_bold = &bold_ctx;
@@ -1899,7 +1691,7 @@ int text_layout_render_spans (
                 }
             }
             if (!have_bold) {
-                ctx_bold = NULL; /* використаємо імітацію товщини */
+                ctx_bold = NULL;
             }
         }
         if (need_italic) {
@@ -1928,7 +1720,7 @@ int text_layout_render_spans (
                 &ctx, &fallback, line->text, line->offset_units, line->baseline_units, out,
                 &rendered_glyphs, &missing_glyphs);
         } else {
-            /* Обрати впорядковано: bold+italic → italic → bold → regular. */
+
             const font_render_context_t *use_bold = ctx_bold;
             const font_render_context_t *use_italic = ctx_italic;
             const font_render_context_t *use_bold_italic = ctx_bold_italic;
@@ -1941,7 +1733,7 @@ int text_layout_render_spans (
                 &ctx, use_bold, use_italic, use_bold_italic, &fallback, fb_use_bold, fb_use_italic,
                 fb_use_bold_italic, line->text, line_runs, line_run_count, line->offset_units,
                 line->baseline_units, out, &rendered_glyphs, &missing_glyphs);
-            (void)use_bold_italic; /* currently not passed; see selection inside spans */
+            (void)use_bold_italic;
         }
         free (line_runs);
         if (need_bold && ctx_bold)

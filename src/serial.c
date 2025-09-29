@@ -1,6 +1,11 @@
 /**
  * @file serial.c
- * @brief Реалізація POSIX‑послідовного порту для EBB/AxiDraw.
+ * @brief Реалізація відкриття/читання/запису серійного порту.
+ * @ingroup serial
+ * @details
+ * Використовує POSIX `termios` для налаштування raw‑режиму, `poll(2)` для
+ * тайм‑аутів та неблокуючі операції `read(2)`/`write(2)`. Кодування і протокол
+ * вищого рівня (EBB) залишаються за викликачем.
  */
 #include "serial.h"
 
@@ -18,21 +23,17 @@
 #include <unistd.h>
 
 /**
- * Внутрішнє представлення дескриптора послідовного порту.
- *
- * @note Структура непрозора для користувачів модуля; оголошена як
- *       іменований тип у заголовку (opaque pointer).
+ * @brief Внутрішній стан відкритого порту.
  */
 struct serial_port_s {
-    int fd;
-    int default_timeout_ms;
+    int fd;                  /**< Файловий дескриптор порту. */
+    int default_timeout_ms;  /**< Тайм‑аут читання за замовчуванням, мс. */
 };
 
 /**
- * Перетворити ціле значення швидкості у відповідну константу termios.
- *
- * @param baud Цільова швидкість у бодах (напр., 115200).
- * @return Константа типу speed_t; за замовчуванням B115200 для невідомих значень.
+ * @brief Перетворює числову швидкість у константу termios.
+ * @param baud Швидкість у бодах (9600, 115200, ...).
+ * @return Значення `speed_t` для termios (B9600 тощо).
  */
 static speed_t baud_to_speed (int baud) {
     switch (baud) {
@@ -55,19 +56,12 @@ static speed_t baud_to_speed (int baud) {
         return B460800;
 #endif
     default:
-        return B115200; /* безпечне типове */
+        return B115200;
     }
 }
 
 /**
- * Див. опис у заголовку: відкрити і налаштувати послідовний порт (8N1, RAW).
- *
- * @param path Шлях до пристрою (наприклад, "/dev/tty.usbmodem*").
- * @param baud Швидкість у бодах.
- * @param read_timeout_ms Типовий тайм‑аут читання (мс) для операцій рядка.
- * @param errbuf Буфер для повідомлення про помилку (може бути NULL).
- * @param errlen Розмір буфера помилки (0, якщо errbuf == NULL).
- * @return Вказівник на відкритий порт або NULL у разі помилки.
+ * @copydoc serial_open
  */
 serial_port_t *
 serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size_t errlen) {
@@ -85,7 +79,6 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
         return NULL;
     }
 
-    /* Заборона перетворень терміналу */
     if (isatty (fd)) {
         struct termios tio;
         if (tcgetattr (fd, &tio) != 0) {
@@ -99,14 +92,13 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
         }
         cfmakeraw (&tio);
         tio.c_cflag |= (CLOCAL | CREAD);
-        tio.c_cflag &= ~CRTSCTS;                /* без апаратного flow control */
-        tio.c_iflag &= ~(IXON | IXOFF | IXANY); /* без програмного flow control */
+        tio.c_cflag &= ~CRTSCTS;
+        tio.c_iflag &= ~(IXON | IXOFF | IXANY);
 
         speed_t spd = baud_to_speed (baud);
         cfsetispeed (&tio, spd);
         cfsetospeed (&tio, spd);
 
-        /* Мінімальний тайм‑аут для read(2) на рівні драйвера не ставимо; використовуємо poll */
         tio.c_cc[VMIN] = 0;
         tio.c_cc[VTIME] = 0;
 
@@ -143,8 +135,7 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
 }
 
 /**
- * Закрити порт і звільнити пам’ять під дескриптор.
- * @param sp Порт або NULL.
+ * @copydoc serial_close
  */
 void serial_close (serial_port_t *sp) {
     if (!sp)
@@ -157,13 +148,7 @@ void serial_close (serial_port_t *sp) {
 }
 
 /**
- * Записати у порт з очікуванням готовності до запису через poll(2).
- *
- * @param sp Порт.
- * @param data Дані.
- * @param len Довжина даних.
- * @param timeout_ms Загальний тайм‑аут на запис (мс); частковий запис повертає кількість.
- * @return Кількість записаних байтів; -1 при помилці.
+ * @copydoc serial_write
  */
 ssize_t serial_write (serial_port_t *sp, const void *data, size_t len, int timeout_ms) {
     if (!sp || sp->fd < 0 || !data)
@@ -177,7 +162,7 @@ ssize_t serial_write (serial_port_t *sp, const void *data, size_t len, int timeo
         int pr = poll (&pfd, 1, tmo);
         if (pr <= 0) {
             if (pr == 0)
-                return (ssize_t)(len - left); /* тайм‑аут, частковий запис */
+                return (ssize_t)(len - left);
             if (errno == EINTR)
                 continue;
             return -1;
@@ -195,13 +180,7 @@ ssize_t serial_write (serial_port_t *sp, const void *data, size_t len, int timeo
 }
 
 /**
- * Прочитати з порту з тайм‑аутом готовності через poll(2).
- *
- * @param sp Порт.
- * @param buf Буфер призначення.
- * @param len Максимум байтів до читання.
- * @param timeout_ms Тайм‑аут (мс) на очікування даних.
- * @return Кількість прочитаних байтів (>0), 0 при тайм‑ауті, -1 при помилці.
+ * @copydoc serial_read
  */
 ssize_t serial_read (serial_port_t *sp, void *buf, size_t len, int timeout_ms) {
     if (!sp || sp->fd < 0 || !buf || len == 0)
@@ -214,7 +193,7 @@ ssize_t serial_read (serial_port_t *sp, void *buf, size_t len, int timeout_ms) {
         int pr = poll (&pfd, 1, tmo);
         if (pr <= 0) {
             if (pr == 0)
-                break; /* тайм‑аут */
+                break;
             if (errno == EINTR)
                 continue;
             return -1;
@@ -226,18 +205,16 @@ ssize_t serial_read (serial_port_t *sp, void *buf, size_t len, int timeout_ms) {
             return -1;
         }
         if (rd == 0)
-            break; /* EOF? */
+            break;
         got += (size_t)rd;
-        /* Одного poll достатньо для більшості застосувань; завершуємо одразу після прийому. */
+
         break;
     }
     return (ssize_t)got;
 }
 
 /**
- * Скинути/прочистити вхідний буфер порту.
- * @param sp Порт.
- * @return Кількість відкинутих байтів (>=0) або -1 при помилці.
+ * @copydoc serial_flush_input
  */
 int serial_flush_input (serial_port_t *sp) {
     if (!sp || sp->fd < 0)
@@ -263,10 +240,7 @@ int serial_flush_input (serial_port_t *sp) {
 }
 
 /**
- * Відправити рядок ASCII та завершити CR (\r), як очікує EBB.
- * @param sp Порт.
- * @param s Рядок без CR/LF.
- * @return 0 якщо весь рядок і CR надіслані; -1 інакше.
+ * @copydoc serial_write_line
  */
 int serial_write_line (serial_port_t *sp, const char *s) {
     if (!sp || !s)
@@ -281,19 +255,14 @@ int serial_write_line (serial_port_t *sp, const char *s) {
 }
 
 /**
- * Прочитати один рядок, завершений CR або LF. Термінаційний символ не включається.
- * @param sp Порт.
- * @param buf Буфер призначення (буде нуль‑термінований).
- * @param maxlen Максимальна довжина буфера (включно з нуль‑термінатором).
- * @param timeout_ms Загальний тайм‑аут (мс).
- * @return Довжина рядка (без термінатора); 0 при тайм‑ауті; -1 при помилці.
+ * @copydoc serial_read_line
  */
 ssize_t serial_read_line (serial_port_t *sp, char *buf, size_t maxlen, int timeout_ms) {
     if (!sp || !buf || maxlen == 0)
         return -1;
     size_t pos = 0;
     int elapsed = 0;
-    const int step = 20; /* мс */
+    const int step = 20;
     while (elapsed <= timeout_ms) {
         char ch;
         ssize_t rd = serial_read (sp, &ch, 1, step);
@@ -309,24 +278,20 @@ ssize_t serial_read_line (serial_port_t *sp, char *buf, size_t maxlen, int timeo
             return (ssize_t)pos;
         }
         if (pos + 1 < maxlen)
-            buf[pos++] = ch; /* +1 для нуля */
+            buf[pos++] = ch;
     }
-    return 0; /* тайм‑аут */
+    return 0;
 }
 
 /**
- * Надіслати команду "V" та прочитати відповідь версії від EBB.
- * @param sp Відкритий порт.
- * @param version_out Куди скопіювати відповідь (може бути NULL).
- * @param version_len Довжина буфера відповіді.
- * @return 0 при успіху; -1 при помилці/тайм‑ауті.
+ * @copydoc serial_probe_ebb
  */
 int serial_probe_ebb (serial_port_t *sp, char *version_out, size_t version_len) {
     if (!sp)
         return -1;
-    /* Очистити вхід */
+
     serial_flush_input (sp);
-    /* V — Version Query (див. docs/ebb.md) */
+
     if (serial_write_line (sp, "V") != 0)
         return -1;
     char line[128];
@@ -343,11 +308,9 @@ int serial_probe_ebb (serial_port_t *sp, char *version_out, size_t version_len) 
 
 #ifdef __APPLE__
 #include <dirent.h>
+
 /**
- * Спробувати знайти пристрій AxiDraw на macOS, шукаючи /dev/tty.usbmodem*.
- * @param out_path Буфер для запису повного шляху до пристрою.
- * @param out_len Розмір буфера.
- * @return 0 якщо знайдено; -1 якщо не знайдено або помилка.
+ * @copydoc serial_guess_axidraw_port
  */
 int serial_guess_axidraw_port (char *out_path, size_t out_len) {
     if (!out_path || out_len == 0)

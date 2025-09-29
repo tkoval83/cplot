@@ -1,11 +1,7 @@
 /**
  * @file args.c
- * @brief Реалізація розбору аргументів командного рядка для cplot.
- *
- * Модуль інкапсулює всю логіку розбору CLI: карту довгих/коротких опцій,
- * опис команд для довідки, валідацію значень і побудову структури `options_t`.
- * Публічний інтерфейс зводиться до `options_parser`, яким користується main(),
- * та допоміжних функцій для довідки (`argdefs_*`).
+ * @brief Реалізація розбору аргументів CLI.
+ * @ingroup args
  */
 #include <math.h>
 #include <pthread.h>
@@ -19,9 +15,8 @@
 #include "str.h"
 
 /**
- * @brief Створити "порожню" дію пристрою.
- *
- * @return Структура з типом `DEVICE_ACTION_NONE` і скинутими полями.
+ * @brief Створює значення дії пристрою без вибраної дії.
+ * @return Обʼєкт дії з kind=DEVICE_ACTION_NONE.
  */
 static device_action_t device_action_make_none (void) {
     device_action_t action
@@ -30,10 +25,9 @@ static device_action_t device_action_make_none (void) {
 }
 
 /**
- * @brief Створити дію пристрою без додаткових параметрів.
- *
- * @param kind Тип дії, яку слід підготувати.
- * @return Структура дії із заданим `kind`.
+ * @brief Створює просту дію пристрою за типом.
+ * @param kind Тип дії (list, abort, home, ...).
+ * @return Обʼєкт дії із заданим типом.
  */
 static device_action_t device_action_make_simple (device_action_kind_t kind) {
     device_action_t action = device_action_make_none ();
@@ -42,10 +36,9 @@ static device_action_t device_action_make_simple (device_action_kind_t kind) {
 }
 
 /**
- * @brief Створити дію, що стосується пера.
- *
- * @param pen Параметр руху пера (підняти, опустити тощо).
- * @return Структура дії з типом `DEVICE_ACTION_PEN`.
+ * @brief Створює дію для пера (up/down/toggle).
+ * @param pen Вказана піддія пера.
+ * @return Обʼєкт дії типу DEVICE_ACTION_PEN.
  */
 static device_action_t device_action_make_pen (device_pen_action_t pen) {
     device_action_t action = device_action_make_simple (DEVICE_ACTION_PEN);
@@ -54,10 +47,9 @@ static device_action_t device_action_make_pen (device_pen_action_t pen) {
 }
 
 /**
- * @brief Створити дію, що стосується моторів.
- *
- * @param motor Опис руху моторів (увімкнути/вимкнути).
- * @return Структура дії з типом `DEVICE_ACTION_MOTORS`.
+ * @brief Створює дію для моторів (on/off).
+ * @param motor Бажаний стан моторів.
+ * @return Обʼєкт дії типу DEVICE_ACTION_MOTORS.
  */
 static device_action_t device_action_make_motor (device_motor_action_t motor) {
     device_action_t action = device_action_make_simple (DEVICE_ACTION_MOTORS);
@@ -66,20 +58,18 @@ static device_action_t device_action_make_motor (device_motor_action_t motor) {
 }
 
 /**
- * @brief Перевірити, що дія встановлена.
- *
- * @param action Вказівник на дію, яку перевіряємо (може бути NULL).
- * @return `true`, якщо дія відмінна від `DEVICE_ACTION_NONE`.
+ * @brief Перевіряє, чи встановлено якусь дію пристрою.
+ * @param action Вказівник на дію.
+ * @return true — дію встановлено, false — відсутня.
  */
 static bool device_action_is_set (const device_action_t *action) {
     return action && action->kind != DEVICE_ACTION_NONE;
 }
 
 /**
- * @brief Перетворити назву підкоманди CLI на внутрішній код.
- *
- * @param name Рядок із назвою підкоманди (`print`, `device`, `config` тощо).
- * @return Відповідне значення `cmd_t` або `CMD_NONE`, якщо назва не підтримується.
+ * @brief Розпізнає підкоманду за її назвою.
+ * @param name Токен назви підкоманди.
+ * @return Код підкоманди або CMD_NONE.
  */
 static cmd_t parse_command_name (const char *name) {
     if (!name)
@@ -98,10 +88,9 @@ static cmd_t parse_command_name (const char *name) {
 }
 
 /**
- * @brief Перетворити текстовий токен на структуру дії пристрою.
- *
- * @param token Рядок позиційного аргументу (`list`, `pen-up`, `motors-off` тощо).
- * @return Відповідна структура `device_action_t` або `DEVICE_ACTION_NONE`, якщо токен невідомий.
+ * @brief Перетворює рядок-токен у дію пристрою.
+ * @param token Рядок (напр., "pen", "motors-on", "status").
+ * @return Визначена дія або відсутня.
  */
 static device_action_t device_action_from_token (const char *token) {
     if (!token)
@@ -141,9 +130,6 @@ static device_action_t device_action_from_token (const char *token) {
     return device_action_make_none ();
 }
 
-/**
- * @brief Проміжні результати розбору позиційних аргументів підкоманди device.
- */
 typedef struct {
     device_action_t action;
     bool action_set;
@@ -153,16 +139,15 @@ typedef struct {
     bool dy_set;
 } device_parse_result_t;
 
-/**
- * @brief Розібрати позиційні токени підкоманди `device`.
- *
- * @param argc           Кількість аргументів у масиві `argv`.
- * @param argv           Масив аргументів, переданий у парсер.
- * @param current_optind Значення `optind`, з якого слід починати обробку позиційних токенів.
- * @param initial_action Початкова дія, виставлена опціями (`--list`, `--dx` тощо).
- * @return Структура з виявленою дією та параметрами `jog`.
- */
 static device_parse_result_t
+/**
+ * @brief Розбір токенів підкоманди device після основних опцій.
+ * @param argc Загальна кількість аргументів.
+ * @param argv Масив аргументів.
+ * @param current_optind Поточний індекс getopt після обробки опцій.
+ * @param initial_action Початкова дія (якщо задано прапорцями).
+ * @return Результат з вибраною дією та параметрами jog.
+ */
 parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t initial_action) {
     device_parse_result_t result = { .action = initial_action,
                                      .action_set = device_action_is_set (&initial_action),
@@ -171,35 +156,31 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
                                      .jog_dy_mm = 0.0,
                                      .dy_set = false };
 
-    /* Послідовно обходимо всі позиційні токени, починаючи з current_optind (де getopt зупинився).
-     * Це усуває попередню помилку, коли цикл починався з 1 і дублював аналіз ранніх аргументів. */
     for (int i = current_optind; i < argc; ++i) {
         const char *token = argv[i];
         if (!token || !*token)
             continue;
 
-        /* Підтримка синтаксису з двох слів: "motors on|off" (як "pen up"). */
         if (strcmp (token, "motors") == 0) {
             const char *next = (i + 1 < argc) ? argv[i + 1] : NULL;
             if (next && next[0] != '-') {
                 if (strcmp (next, "on") == 0) {
                     result.action = device_action_make_motor (DEVICE_MOTOR_ON);
                     result.action_set = true;
-                    ++i; /* пропустити 'on' */
+                    ++i;
                     continue;
                 }
                 if (strcmp (next, "off") == 0) {
                     result.action = device_action_make_motor (DEVICE_MOTOR_OFF);
                     result.action_set = true;
-                    ++i; /* пропустити 'off' */
+                    ++i;
                     continue;
                 }
             }
-            /* Якщо після 'motors' не йде on/off — продовжуємо розбір інших токенів. */
         }
 
         if (token[0] == '-') {
-            /* Аналіз параметрів типу --dx VALUE / --dy VALUE (ігноруємо, якщо VALUE відсутнє). */
+
             if ((strcmp (token, "--dx") == 0) && i + 1 < argc) {
                 const char *val = argv[i + 1];
                 char *end = NULL;
@@ -226,7 +207,6 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
             continue;
         }
 
-        /* Якщо дія ще не встановлена опцією або попереднім токеном — спробувати розпізнати. */
         if (!result.action_set) {
             device_action_t candidate = device_action_from_token (token);
             if (device_action_is_set (&candidate)) {
@@ -242,19 +222,6 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
     return result;
 }
 
-/**
- * @brief Скинути структуру `options_t` до типових значень.
- *
- * @param[out] options Структура, яку потрібно ініціалізувати (не NULL).
- */
-/* Жодних значень за замовчуванням у парсері — лише нульове очищення для безпеки. */
-
-/**
- * @brief Централізовані визначення довгих опцій для getopt_long().
- *
- * Частка аргументів використовується одночасно парсером і модулем help.c, тож
- * таблиця зберігається в одному місці, щоб уникнути розсинхронізації.
- */
 static const struct option k_long_options[] = {
     { "help", no_argument, 0, 'h' },
     { "version", no_argument, 0, 'v' },
@@ -285,18 +252,11 @@ static const struct option k_long_options[] = {
 };
 
 /**
- * @brief Надати масив довгих опцій для зовнішніх користувачів (help.c).
- *
- * @return Статично розміщений масив `struct option`, життєвий цикл якого дорівнює програмі.
+ * @brief Повертає масив довгих опцій для getopt_long.
+ * @return Вказівник на статичний масив опцій.
  */
 const struct option *argdefs_long_options (void) { return k_long_options; }
 
-/**
- * @brief Опис опцій з метаданими для довідкових таблиць.
- *
- * Використовується help.c та іншими компонентами для генерації читабельних
- * списків із категоріями, псевдонімами та прикладами значень.
- */
 static const cli_option_desc_t k_option_descs[] = {
     { "help", no_argument, 'h', 'h', NULL, "global", "Показати довідку" },
     { "version", no_argument, 'v', 'v', NULL, "global", "Показати версію" },
@@ -341,12 +301,9 @@ static const cli_option_desc_t k_option_descs[] = {
       "Задати ключі конфігурації" },
 };
 
-/* Підкоманда shape у CLI не підтримується. */
-
 /**
- * @brief Повернути масив описів CLI-опцій разом із кількістю елементів.
- *
- * @param out_count Необов'язковий вихід: кількість елементів у масиві.
+ * @brief Повертає внутрішній опис опцій для побудови хелпу.
+ * @param out_count [out] Кількість елементів у масиві.
  * @return Вказівник на статичний масив описів.
  */
 const cli_option_desc_t *argdefs_options (size_t *out_count) {
@@ -355,9 +312,6 @@ const cli_option_desc_t *argdefs_options (size_t *out_count) {
     return k_option_descs;
 }
 
-/**
- * @brief Перелік підтримуваних підкоманд верхнього рівня.
- */
 static const cli_command_desc_t k_commands[] = {
     { "print",
       "Плотинг із параметрами розкладки (для прев’ю використовуйте --preview, SVG/PNG у stdout)" },
@@ -368,10 +322,8 @@ static const cli_command_desc_t k_commands[] = {
 };
 
 /**
- * @brief Надати інформацію про доступні підкоманди.
- *
- * @param out_count Необов'язковий вихід: кількість записів.
- * @return Статичний масив описів підкоманд.
+ * @brief Повертає список підтримуваних підкоманд.
+ * @param out_count [out] Кількість елементів.
  */
 const cli_command_desc_t *argdefs_commands (size_t *out_count) {
     if (out_count)
@@ -379,12 +331,6 @@ const cli_command_desc_t *argdefs_commands (size_t *out_count) {
     return k_commands;
 }
 
-/* ---- Конфігураційні ключі (для секції help і валідації) ---- */
-/**
- * @brief Опис ключів конфігурації, з якими працює CLI.
- *
- * Визначає тип значення, одиниці вимірювання та формат друку для help/config-модулів.
- */
 static const cli_config_desc_t k_cfg_keys[] = {
     { "margin", CFGK_DOUBLE, offsetof (config_t, margin_top_mm), "мм", NULL,
       "Поля для всіх сторін (скорочення)", "%.1f" },
@@ -415,10 +361,8 @@ static const cli_config_desc_t k_cfg_keys[] = {
 };
 
 /**
- * @brief Отримати перелік доступних ключів конфігурації.
- *
- * @param out_count Необов'язковий вихід: кількість ключів.
- * @return Статичний масив із метаданими конфігураційних параметрів.
+ * @brief Повертає опис підтримуваних ключів конфігурації (для help/config).
+ * @param out_count [out] Кількість елементів.
  */
 const cli_config_desc_t *argdefs_config_keys (size_t *out_count) {
     if (out_count)
@@ -427,10 +371,9 @@ const cli_config_desc_t *argdefs_config_keys (size_t *out_count) {
 }
 
 /**
- * @brief Обробити коротку або довгу опцію, повернену `getopt_long`.
- *
- * @param arg     Код опції від `getopt_long` (включаючи штучні коди для long-опцій).
- * @param options Структура опцій, яку необхідно оновити (не NULL).
+ * @brief Обробляє глобальні короткі опції (-h, -v) та перемикає прапорці.
+ * @param arg Код опції з getopt_long.
+ * @param options Структура для заповнення.
  */
 void switch_options (int arg, options_t *options) {
     switch (arg) {
@@ -444,10 +387,8 @@ void switch_options (int arg, options_t *options) {
         LOGD ("отримано прапорець версії");
         break;
 
-        /* long-опції обробляються вище у циклі; сюди вони не потрапляють */
-
     case '?':
-        /* getopt уже вивів повідомлення про помилку */
+
         break;
 
     default:
@@ -457,10 +398,9 @@ void switch_options (int arg, options_t *options) {
 }
 
 /**
- * @brief Розібрати аргумент `--margins` та оновити відповідні поля.
- *
- * @param value   Рядок аргументу у форматі `T[,R,B,L]` (міліметри).
- * @param options Структура опцій, у яку буде записано значення (не NULL).
+ * @brief Розбирає аргумент полів у форматі T[,R,B,L] (мм).
+ * @param value Рядок значення.
+ * @param options Структура CLI для заповнення.
  */
 static void parse_margins_argument (const char *value, options_t *options) {
     if (!value || !options)
@@ -499,12 +439,11 @@ static void parse_margins_argument (const char *value, options_t *options) {
 }
 
 /**
- * @brief Обробити опції, що стосуються розкладки сторінки.
- *
- * @param arg     Код опції (значення з `ARG_*`).
- * @param value   Значення опції, якщо вимагається (`NULL` для прапорців).
- * @param options Структура опцій для оновлення (не NULL).
- * @return `true`, якщо опція розпізнана та оброблена; `false` інакше.
+ * @brief Обробляє опції розкладки/сторінки.
+ * @param arg Код опції.
+ * @param value Значення (якщо є).
+ * @param options [in,out] Параметри CLI.
+ * @return true — опцію оброблено, false — ні.
  */
 static bool handle_layout_option (int arg, const char *value, options_t *options) {
     switch (arg) {
@@ -554,11 +493,10 @@ static bool handle_layout_option (int arg, const char *value, options_t *options
 }
 
 /**
- * @brief Обробити опції, що впливають на режим друку/прев'ю.
- *
- * @param arg     Код опції (значення з `ARG_*`).
- * @param options Структура опцій для оновлення (не NULL).
- * @return `true`, якщо опція успішно оброблена.
+ * @brief Обробляє опції виводу/превʼю.
+ * @param arg Код опції.
+ * @param options [in,out] Параметри CLI.
+ * @return true — оброблено, false — ні.
  */
 static bool handle_output_option (int arg, options_t *options) {
     switch (arg) {
@@ -589,10 +527,11 @@ static bool handle_output_option (int arg, options_t *options) {
     }
 }
 
-/* Вхідні текстові опції відсутні. */
-
 /**
- * @brief Обробити опції підкоманди `font`/`fonts`.
+ * @brief Обробляє опції вибору шрифту та форматування вводу.
+ * @param arg Код опції.
+ * @param options [in,out] Параметри CLI.
+ * @return true — оброблено, false — ні.
  */
 static bool handle_font_option (int arg, options_t *options) {
     if (!options)
@@ -614,12 +553,11 @@ static bool handle_font_option (int arg, options_t *options) {
 }
 
 /**
- * @brief Обробити опції, специфічні для підкоманди `device`.
- *
- * @param arg     Код опції (`ARG_DEVICE_NAME`, `ARG_DX`, `ARG_DY`, ...).
- * @param value   Значення опції або `NULL` для прапорців.
- * @param options Структура опцій для оновлення (не NULL).
- * @return `true`, якщо опція належить підкоманді `device` і оброблена.
+ * @brief Обробляє опції, повʼязані з пристроєм (device-name, dx, dy).
+ * @param arg Код опції.
+ * @param value Значення (якщо є).
+ * @param options [in,out] Параметри CLI.
+ * @return true — оброблено, false — ні.
  */
 static bool handle_device_option (int arg, const char *value, options_t *options) {
     switch (arg) {
@@ -643,12 +581,11 @@ static bool handle_device_option (int arg, const char *value, options_t *options
 }
 
 /**
- * @brief Обробити опції, пов'язані з конфігурацією.
- *
- * @param arg     Код опції (`ARG_SHOW`, `ARG_RESET`, `ARG_SET`).
- * @param value   Значення аргументу (`key=value`), використовується для `--set`.
- * @param options Структура опцій для оновлення (не NULL).
- * @return `true`, якщо опція оброблена; `false` інакше.
+ * @brief Обробляє опції підкоманди config (--show/--reset/--set key=val,...).
+ * @param arg Код опції.
+ * @param value Значення (для --set).
+ * @param options [in,out] Параметри CLI.
+ * @return true — оброблено, false — ні.
  */
 static bool handle_config_option (int arg, const char *value, options_t *options) {
     switch (arg) {
@@ -671,17 +608,13 @@ static bool handle_config_option (int arg, const char *value, options_t *options
 }
 
 /**
- * @brief Встановити ім'я вхідного файлу з позиційного аргументу.
- *
- * Якщо після обробки опцій у `argv` лишився позиційний аргумент, він вважається
- * шляхом до вхідного файлу; інакше поле `file_name` очищується.
- *
- * @param argc         Кількість аргументів командного рядка.
- * @param argv         Масив аргументів командного рядка.
- * @param[in,out] options Структура опцій, поле `file_name` якої потрібно оновити.
+ * @brief Зчитує позиційний аргумент — імʼя вхідного файлу, якщо присутній.
+ * @param argc Кількість аргументів.
+ * @param argv Масив аргументів.
+ * @param options [out] Для запису `file_name` або порожньо.
  */
 void get_file_name (int argc, char *argv[], options_t *options) {
-    // Якщо є ще один аргумент — вважати його шляхом до вхідного файлу
+
     if (optind < argc) {
         string_copy (options->file_name, sizeof (options->file_name), argv[optind++]);
         LOGD ("вхідний файл: %s", options->file_name);
@@ -692,40 +625,34 @@ void get_file_name (int argc, char *argv[], options_t *options) {
 }
 
 /**
- * @brief Розібрати аргументи командного рядка у структуру `options_t`.
- *
- * Підтримує підкоманди (`print`, `device`, `fonts`, `config`, `version`) та
- * відповідні короткі/довгі опції. Функція є потокобезпечною завдяки внутрішньому mutex'у.
- *
- * @param argc    Кількість аргументів командного рядка.
- * @param argv    Масив аргументів командного рядка.
- * @param[out] options Структура, куди буде записано результат розбору (не NULL).
+ * @brief Повний розбір аргументів командного рядка у потокобезпечному блоці.
+ * @param argc Кількість аргументів.
+ * @param argv Масив аргументів.
+ * @param options [out] Структура результатів розбору.
  */
 void options_parser (int argc, char *argv[], options_t *options) {
     static pthread_mutex_t parser_mutex = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_lock (&parser_mutex);
 
     memset (options, 0, sizeof (*options));
-    /* Позначаємо відсутні значення як NaN, щоб cmd самостійно вирішував дефолти. */
+
     options->paper_w_mm = NAN;
     options->paper_h_mm = NAN;
-    options->fit_page = true; /* default: single-page fit */
+    options->fit_page = true;
     options->margin_top_mm = NAN;
     options->margin_right_mm = NAN;
     options->margin_bottom_mm = NAN;
     options->margin_left_mm = NAN;
     options->font_size_pt = NAN;
 
-    int arg; /* Поточна опція */
+    int arg;
 
-// Скинути стан getopt для повторних викликів (тести викликають парсер багаторазово)
 #ifdef __APPLE__
     extern int optreset;
     optreset = 1;
 #endif
     optind = 1;
 
-    // Розібрати підкоманду, якщо присутня (argv[1])
     if (argc >= 2 && argv[1][0] != '-') {
         cmd_t parsed = parse_command_name (argv[1]);
         if (parsed != CMD_NONE) {
@@ -736,7 +663,6 @@ void options_parser (int argc, char *argv[], options_t *options) {
         }
     }
 
-    // Дозволені опції для getopt (централізовано в argdefs)
     const struct option *long_options = argdefs_long_options ();
 
     while (true) {
@@ -744,7 +670,6 @@ void options_parser (int argc, char *argv[], options_t *options) {
         int option_index = 0;
         arg = getopt_long (argc, argv, "hv", long_options, &option_index);
 
-        // Кінець списку опцій?
         if (arg == -1)
             break;
 
@@ -757,32 +682,26 @@ void options_parser (int argc, char *argv[], options_t *options) {
             continue;
         if (handle_output_option (arg, options))
             continue;
-        /* Опція --text не підтримується */
+
         if (handle_font_option (arg, options))
             continue;
         if (handle_device_option (arg, optarg, options))
             continue;
         if (handle_config_option (arg, optarg, options))
             continue;
-        /* shape-опції не підтримуються у CLI */
 
         switch_options (arg, options);
     }
 
-    /* Якщо підкоманду ще не визначено (наприклад, коли глобальні опції були перед командою),
-     * спробувати розпізнати її у першому позиційному токені після getopt. */
     if (options->cmd == CMD_NONE && optind < argc) {
         cmd_t parsed_tail = parse_command_name (argv[optind]);
         if (parsed_tail != CMD_NONE) {
             options->cmd = parsed_tail;
             LOGD ("виявлено підкоманду після опцій: %d", options->cmd);
-            ++optind; /* зсунутись повз назву підкоманди */
+            ++optind;
         }
     }
 
-    /* Handle device positional action (e.g., up, down, jog). On some libc
-     * (e.g., macOS), getopt_long stops at the first non-option token, so make a
-     * robust pass to capture positional action and any dx/dy that follow it. */
     if (options->cmd == CMD_DEVICE) {
         device_parse_result_t parsed
             = parse_device_tokens (argc, argv, optind, options->device_action);
@@ -802,12 +721,9 @@ void options_parser (int argc, char *argv[], options_t *options) {
         }
     }
 
-    // Отримати шлях до файлу; тільки для команд, що очікують файл
     if (options->cmd == CMD_PRINT) {
         get_file_name (argc, argv, options);
     }
-
-    /* shape-підкоманда вилучена */
 
     pthread_mutex_unlock (&parser_mutex);
 }

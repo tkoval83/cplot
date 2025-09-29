@@ -1,6 +1,7 @@
 /**
  * @file font.c
- * @brief Реалізація базового контейнера SVG-шрифтів.
+ * @brief Реалізація операцій зі шрифтами Hershey.
+ * @ingroup font
  */
 
 #include "font.h"
@@ -15,12 +16,11 @@
 #include <stdbool.h>
 
 /**
- * @brief Забезпечити достатню місткість буфера точок.
- *
- * @param pts   Вказівник на масив точок (може бути перевиділений).
- * @param cap   Поточна місткість масиву (оновлюється).
- * @param needed Кількість елементів, яка має поміститись.
- * @return 0 при успіху; -1, якщо не вдалося виділити пам'ять або аргументи некоректні.
+ * @brief Гарантує ємність масиву точок для додавання елементів.
+ * @param pts [in,out] Масив точок (realloc за потреби).
+ * @param cap [in,out] Поточна ємність масиву.
+ * @param needed Потрібна загальна кількість елементів.
+ * @return 0 — успіх, -1 — помилка виділення/аргументи.
  */
 static int ensure_point_capacity (geom_point_t **pts, size_t *cap, size_t needed) {
     if (!pts || !cap)
@@ -39,14 +39,13 @@ static int ensure_point_capacity (geom_point_t **pts, size_t *cap, size_t needed
 }
 
 /**
- * @brief Додати точку у тимчасовий буфер шляху.
- *
- * @param pts  Буфер точок (розширюється за потреби).
- * @param len  Поточна кількість точок (збільшується на 1).
- * @param cap  Поточна місткість буфера.
- * @param x    Координата X у мм.
- * @param y    Координата Y у мм.
- * @return 0 при успіху; -1 при помилці пам'яті.
+ * @brief Додає точку у кінець масиву (із розширенням за потреби).
+ * @param pts [in,out] Масив точок.
+ * @param len [in,out] Поточна довжина масиву.
+ * @param cap [in,out] Поточна ємність масиву.
+ * @param x Координата X.
+ * @param y Координата Y.
+ * @return 0 — успіх, -1 — помилка.
  */
 static int append_point (geom_point_t **pts, size_t *len, size_t *cap, double x, double y) {
     if (ensure_point_capacity (pts, cap, *len + 1) != 0)
@@ -58,22 +57,18 @@ static int append_point (geom_point_t **pts, size_t *len, size_t *cap, double x,
 }
 
 /**
- * @brief Розпарсити SVG `d`-атрибут гліфа та додати шляхи у колекцію.
- *
- * Підтримує команди M/L/Z (прямолінійні сегменти), переводить координати у мм з урахуванням
- * походження та масштабу.
- *
- * @param d          Рядок `d` з SVG.
- * @param origin_x   Початок координат гліфа (у внутрішніх одиницях).
- * @param baseline_y Базова лінія гліфа (у внутрішніх одиницях).
- * @param scale      Масштаб перетворення у мм.
- * @param out        Колекція, куди додаються шляхи.
- * @return 0 при успіху; -1 якщо не вдалося додати шлях (помилка пам'яті).
+ * @brief Розбирає SVG path data (M/L/Z) у полілінії та додає до вихідних шляхів.
+ * @param d Рядок атрибута 'd' SVG.
+ * @param origin_x Початковий X у одиницях шрифту.
+ * @param baseline_y Базова лінія в мм.
+ * @param scale Масштаб одиниць шрифту до мм.
+ * @param out [out] Вихідні шляхи (GEOM_UNITS_MM).
+ * @return 0 — успіх, -1 — помилка розбору.
  */
 static int emit_path_data (
     const char *d, double origin_x, double baseline_y, double scale, geom_paths_t *out) {
     if (!d || !out)
-        return 0; /* пробіл або порожній контур */
+        return 0;
 
     geom_point_t *pts = NULL;
     size_t len = 0;
@@ -156,6 +151,9 @@ static int emit_path_data (
     return rc;
 }
 
+/**
+ * @brief Внутрішнє представлення шрифту Hershey (SVG-файл + кеш гліфів).
+ */
 struct font {
     char *svg_data;
     size_t svg_len;
@@ -169,7 +167,9 @@ struct font {
 };
 
 /**
- * @brief Коефіцієнт переведення 1 pt у задані геометричні одиниці.
+ * @brief Коефіцієнт переведення пунктів (pt) у задані одиниці (мм/дюйми).
+ * @param units Цільові одиниці геометрії.
+ * @return Кількість цільових одиниць у одному пункті.
  */
 static double units_per_point (geom_units_t units) {
     if (units == GEOM_UNITS_MM)
@@ -177,19 +177,16 @@ static double units_per_point (geom_units_t units) {
     return 1.0 / 72.0;
 }
 
+/**
+ * @brief Копіює рядок у буфер із обрізанням, повертаючи довжину джерела.
+ * @param source Початковий рядок (може бути NULL).
+ * @param buffer [out] Буфер призначення (може бути NULL, щоб отримати довжину).
+ * @param buflen Розмір буфера призначення.
+ * @return Довжина джерела (без NUL).
+ */
 static int copy_string_field (const char *source, char *buffer, size_t buflen);
 
-/**
- * @brief Підготувати контекст рендерингу для конкретного SVG-шрифту.
- *
- * Завантажує файл шрифту, читає метрики та обчислює масштаб у вибраних одиницях.
- *
- * @param[out] ctx   Контекст для ініціалізації.
- * @param face       Опис шрифту (шлях/ідентифікатори).
- * @param size_pt    Розмір у пунктах (<=0 → 14 pt).
- * @param units      Геометричні одиниці для виводу (мм або "font units").
- * @return 0 при успіху; -1 у разі помилки.
- */
+/** @copydoc font_render_context_init */
 int font_render_context_init (
     font_render_context_t *ctx, const font_face_t *face, double size_pt, geom_units_t units) {
     if (!ctx || !face)
@@ -236,7 +233,8 @@ int font_render_context_init (
 }
 
 /**
- * @brief Звільнити ресурси контексту рендерингу.
+ * @brief Звільняє ресурси контексту рендерингу.
+ * @param ctx Контекст для очищення.
  */
 void font_render_context_dispose (font_render_context_t *ctx) {
     if (!ctx)
@@ -247,7 +245,11 @@ void font_render_context_dispose (font_render_context_t *ctx) {
 }
 
 /**
- * @brief Зберегти інформацію про зіставлення кодової точки до fallback-шрифту.
+ * @brief Кешує відповідність кодової точки обличчю у fallback-мапі.
+ * @param fallback Стан fallback.
+ * @param cp Кодова точка.
+ * @param face_index Індекс обличчя у масиві faces або SIZE_MAX.
+ * @return 0 — успіх, -1 — помилка памʼяті.
  */
 static int fallback_store_map (font_fallback_t *fallback, uint32_t cp, size_t face_index) {
     if (fallback->map_count == fallback->map_cap) {
@@ -265,15 +267,7 @@ static int fallback_store_map (font_fallback_t *fallback, uint32_t cp, size_t fa
     return 0;
 }
 
-/**
- * @brief Ініціалізувати структуру fallback-шрифтів.
- *
- * @param[out] fallback        Структура для заповнення.
- * @param preferred_family     Бажана родина (може бути NULL).
- * @param size_pt              Базовий розмір у пунктах.
- * @param units                Геометричні одиниці для рендерингу.
- * @return 0 при успіху; -1 у разі помилки.
- */
+/** @copydoc font_fallback_init */
 int font_fallback_init (
     font_fallback_t *fallback, const char *preferred_family, double size_pt, geom_units_t units) {
     if (!fallback)
@@ -286,9 +280,7 @@ int font_fallback_init (
     return 0;
 }
 
-/**
- * @brief Звільнити всі ресурси, пов'язані з fallback-шрифтами.
- */
+/** @copydoc font_fallback_dispose */
 void font_fallback_dispose (font_fallback_t *fallback) {
     if (!fallback)
         return;
@@ -300,12 +292,11 @@ void font_fallback_dispose (font_fallback_t *fallback) {
 }
 
 /**
- * @brief Підібрати контекст шрифту, здатний відрендерити кодову точку.
- *
- * @param fallback   Набір fallback-шрифтів.
- * @param primary_ctx Основний контекст (щоб уникати дублікатів).
- * @param cp         Кодова точка Unicode.
- * @return Контекст шрифту або NULL, якщо відповідний гліф не знайдено.
+ * @brief Знаходить або створює контекст обличчя, що підтримує вказаний код символу.
+ * @param fallback Стан fallback.
+ * @param primary_ctx Первинний контекст (щоб не дублювати те саме обличчя).
+ * @param cp Кодова точка.
+ * @return Контекст або NULL, якщо не знайдено/помилка.
  */
 static const font_render_context_t *fallback_get_context (
     font_fallback_t *fallback, const font_render_context_t *primary_ctx, uint32_t cp) {
@@ -365,19 +356,7 @@ static const font_render_context_t *fallback_get_context (
     return &fallback->faces[face_index].ctx;
 }
 
-/**
- * @brief Відрендерити кодову точку через систему fallback-шрифтів.
- *
- * @param fallback     Структура fallback.
- * @param primary_ctx  Основний контекст шрифту.
- * @param codepoint    Кодова точка Unicode.
- * @param pen_x_units  Поточна позиція пера в одиницях основного шрифту.
- * @param baseline_mm  Базова лінія в мм.
- * @param out          Колекція для шляхів.
- * @param advance_units Повертає advance у одиницях основного шрифту (може бути NULL).
- * @param used_family  Повертає назву використаної родини (може бути NULL).
- * @return 0 успіх; 1 якщо гліф не знайдено; -1 при помилці.
- */
+/** @copydoc font_fallback_emit */
 int font_fallback_emit (
     font_fallback_t *fallback,
     const font_render_context_t *primary_ctx,
@@ -425,12 +404,11 @@ int font_fallback_emit (
 }
 
 /**
- * @brief Прочитати файл цілком у пам'ять.
- *
- * @param path     Шлях до файлу.
- * @param out_data Вихідний буфер (malloc), який згодом звільняє викликач.
- * @param out_len  Довжина прочитаних байтів (може бути NULL).
- * @return 0 при успіху; -1 при помилці I/O або пам'яті; -2 при некоректних аргументах.
+ * @brief Зчитує весь файл у памʼять.
+ * @param path Шлях до файлу.
+ * @param out_data [out] Вміст (mallocʼиться).
+ * @param out_len [out] Довжина, байт (може бути NULL).
+ * @return 0 — успіх; <0 — помилка.
  */
 static int read_entire_file (const char *path, char **out_data, size_t *out_len) {
     if (!path || !out_data)
@@ -470,16 +448,14 @@ static int read_entire_file (const char *path, char **out_data, size_t *out_len)
 }
 
 /**
- * @brief Знайти сегмент тегу в тексті SVG.
- *
- * @param data      Повний вміст SVG.
- * @param tag       Пошуковий префікс тегу (наприклад, "<font ").
- * @param out_start Повертає вказівник на початок сегмента (у data).
- * @param out_len   Довжина сегмента з урахуванням символа '>'.
- * @return 0 при успіху; 1 якщо тег не знайдено; від'ємний код при помилці.
+ * @brief Знаходить сегмент тегу <tag ...> у SVG-даних.
+ * @param data Вміст SVG.
+ * @param tag Послідовність початку тегу (напр., "<font ").
+ * @param out_start [out] Початок сегмента.
+ * @param out_len [out] Довжина сегмента.
+ * @return 0 — знайдено; 1 — не знайдено; <0 — помилка.
  */
-static int
-find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
+static int find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
     if (!data || !tag || !out_start || !out_len)
         return -2;
     const char *start = strstr (data, tag);
@@ -490,23 +466,21 @@ find_tag_segment (const char *data, const char *tag, const char **out_start, siz
         cursor++;
     if (*cursor != '>')
         return -1;
-    ++cursor; /* включити '>' */
+    ++cursor;
     *out_start = start;
     *out_len = (size_t)(cursor - start);
     return 0;
 }
 
 /**
- * @brief Виділити значення атрибуту з сегмента тегу.
- *
- * @param segment   Сегмент тегу.
- * @param seg_len   Розмір сегмента.
- * @param attr      Назва атрибуту з символом '=' (напр., "id=").
- * @param out_value Результат (malloc), належить викликачеві.
- * @return 0 при успіху; 1 якщо не знайдено; -1 при помилці, -2 при некоректних аргументах.
+ * @brief Витягує значення атрибута attr="..." з фрагмента тегу.
+ * @param segment Початок тегу.
+ * @param seg_len Довжина сегмента.
+ * @param attr Назва атрибута з '=' (напр., "font-family=").
+ * @param out_value [out] Скопійоване значення (mallocʼиться) або NULL, якщо відсутній.
+ * @return 0 — знайдено; 1 — відсутній; <0 — помилка.
  */
-static int
-extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
+static int extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
     if (!segment || !attr || !out_value)
         return -2;
     size_t attr_len = strlen (attr);
@@ -542,10 +516,10 @@ extract_attribute (const char *segment, size_t seg_len, const char *attr, char *
 }
 
 /**
- * @brief Розібрати числовий атрибут або повернути fallback.
+ * @brief Зчитує число подвійної точності з атрибута або повертає запасне значення.
  */
-static double
-parse_double_with_default (const char *segment, size_t seg_len, const char *attr, double fallback) {
+static double parse_double_with_default (
+    const char *segment, size_t seg_len, const char *attr, double fallback) {
     char *value = NULL;
     double result = fallback;
     int rc = extract_attribute (segment, seg_len, attr, &value);
@@ -561,13 +535,8 @@ parse_double_with_default (const char *segment, size_t seg_len, const char *attr
 }
 
 /**
- * @brief Записати значення строкового атрибуту у поле структури.
- *
- * @param field    Поле, яке потрібно заповнити (malloc відбувається всередині).
- * @param segment  Сегмент тегу.
- * @param seg_len  Його довжина.
- * @param attr     Назва атрибуту (наприклад, "id=").
- * @return 0 при успіху; 1 якщо атрибут відсутній; -1 при помилці/пам'яті; -2 якщо field==NULL.
+ * @brief Копіює значення рядкового атрибута у виділену памʼять.
+ * @return 0 — успіх; 1 — відсутній атрибут; -1 — помилка.
  */
 static int set_string_field (char **field, const char *segment, size_t seg_len, const char *attr) {
     if (!field)
@@ -585,12 +554,11 @@ static int set_string_field (char **field, const char *segment, size_t seg_len, 
 }
 
 /**
- * @brief Декодувати один символ UTF-8.
- *
- * @param input   Початок UTF-8 послідовності.
- * @param[out] out_cp  Результуюча кодова точка.
- * @param[out] out_len Кількість використаних байтів (може бути NULL).
- * @return 0 при успіху; від'ємний код при помилці/некоректних даних.
+ * @brief Декодує одну UTF-8 кодову точку.
+ * @param input Вхідний байтовий рядок.
+ * @param out_cp [out] Декодована кодова точка.
+ * @param out_len [out] Спожита кількість байтів.
+ * @return 0 — успіх; -1 — недійсна послідовність; -2 — некоректні аргументи.
  */
 static int decode_utf8_char (const char *input, uint32_t *out_cp, size_t *out_len) {
     if (!input || !out_cp)
@@ -636,7 +604,10 @@ static int decode_utf8_char (const char *input, uint32_t *out_cp, size_t *out_le
 }
 
 /**
- * @brief Розпарсити значення Unicode з атрибуту `unicode` (UTF-8 або `&#x...;`).
+ * @brief Парсить кодову точку з HTML entity або UTF-8 символу.
+ * @param value Рядок значення (напр., "&#x2014;" або "—").
+ * @param out_cp [out] Кодова точка.
+ * @return 0 — успіх; -1 — помилка синтаксису; -2 — некоректні аргументи.
  */
 static int parse_codepoint (const char *value, uint32_t *out_cp) {
     if (!value || !out_cp)
@@ -675,7 +646,8 @@ static int parse_codepoint (const char *value, uint32_t *out_cp) {
 }
 
 /**
- * @brief Додати гліф у масив шрифту, розширюючи його.
+ * @brief Додає гліф і кодову точку до таблиці шрифту.
+ * @return 0 — успіх; -1 — помилка памʼяті.
  */
 static int append_glyph_entry (font_t *font, glyph_t *glyph, uint32_t codepoint) {
     size_t new_count = font->glyph_count + 1;
@@ -702,7 +674,9 @@ static int append_glyph_entry (font_t *font, glyph_t *glyph, uint32_t codepoint)
 }
 
 /**
- * @brief Лениво прочитати всі `<glyph>` з SVG у внутрішні структури.
+ * @brief Ліниво завантажує гліфи з SVG у внутрішні структури.
+ * @param font Обʼєкт шрифту.
+ * @return 0 — успіх; -1 — помилка.
  */
 static int ensure_glyphs_loaded (font_t *font) {
     if (font->glyphs_loaded)
@@ -764,9 +738,7 @@ static int ensure_glyphs_loaded (font_t *font) {
     return 0;
 }
 
-/**
- * @copydoc font_load_from_file
- */
+/** @copydoc font_load_from_file */
 int font_load_from_file (const char *path, font_t **out_font) {
     if (!path || !out_font)
         return -2;
@@ -814,7 +786,7 @@ int font_load_from_file (const char *path, font_t **out_font) {
 }
 
 /**
- * @brief Скопіювати рядок у буфер користувача.
+ * @brief Копіює рядок у буфер із обрізанням, повертаючи довжину джерела.
  */
 static int copy_string_field (const char *source, char *buffer, size_t buflen) {
     if (!source)
@@ -829,27 +801,21 @@ static int copy_string_field (const char *source, char *buffer, size_t buflen) {
     return (int)strlen (source);
 }
 
-/**
- * @copydoc font_get_id
- */
+/** @copydoc font_get_id */
 int font_get_id (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
     return copy_string_field (font->id, buffer, buflen);
 }
 
-/**
- * @copydoc font_get_family_name
- */
+/** @copydoc font_get_family_name */
 int font_get_family_name (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
     return copy_string_field (font->family, buffer, buflen);
 }
 
-/**
- * @copydoc font_get_metrics
- */
+/** @copydoc font_get_metrics */
 int font_get_metrics (const font_t *font, font_metrics_t *out) {
     if (!font || !out)
         return -1;
@@ -857,9 +823,7 @@ int font_get_metrics (const font_t *font, font_metrics_t *out) {
     return 0;
 }
 
-/**
- * @copydoc font_find_glyph
- */
+/** @copydoc font_find_glyph */
 int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out_glyph) {
     if (!font || !out_glyph)
         return -1;
@@ -875,6 +839,7 @@ int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out
     return 1;
 }
 
+/** @copydoc font_emit_glyph_paths */
 int font_emit_glyph_paths (
     const font_t *font,
     uint32_t codepoint,
@@ -904,6 +869,7 @@ int font_emit_glyph_paths (
     return 0;
 }
 
+/** @copydoc font_list_codepoints */
 int font_list_codepoints (const font_t *font, uint32_t **out_codes, size_t *out_count) {
     if (!font || !out_codes || !out_count)
         return -1;
@@ -923,9 +889,7 @@ int font_list_codepoints (const font_t *font, uint32_t **out_codes, size_t *out_
     return 0;
 }
 
-/**
- * @copydoc font_release
- */
+/** @copydoc font_release */
 int font_release (font_t *font) {
     if (!font)
         return 0;
@@ -942,6 +906,7 @@ int font_release (font_t *font) {
     return 0;
 }
 
+/** @copydoc font_style_context_resolve */
 int font_style_context_resolve (
     const char *preferred_family,
     double size_pt,

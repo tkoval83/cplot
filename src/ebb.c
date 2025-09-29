@@ -1,6 +1,7 @@
 /**
  * @file ebb.c
- * @brief Реалізація високорівневих команд EBB (рух, мотори, перо).
+ * @brief Реалізація команд протоколу EBB.
+ * @ingroup ebb
  */
 
 #include "ebb.h"
@@ -14,19 +15,19 @@
 
 #include "log.h"
 
-/** Максимальна довжина рядка команди EBB. */
+/** Максимальна довжина форматованої команди. */
 #define EBB_CMD_MAX 128
+
 /** Максимальна довжина рядка відповіді. */
 #define EBB_RESP_MAX 128
 
 /**
- * Надіслати команду у форматі printf і прочитати підтвердження OK.
- *
- * @param sp         Відкритий послідовний порт.
- * @param timeout_ms Тайм-аут очікування відповіді.
- * @param fmt        Формат команди без завершального CR.
- * @param ap         Аргументи формату.
- * @return 0 при успіху; -1 при помилці запису/читання або відповіді ≠ OK.
+ * @brief Форматує та надсилає команду без очікування корисних даних (OK/ERR).
+ * @param sp Відкритий серійний порт.
+ * @param timeout_ms Тайм-аут читання відповіді (мс).
+ * @param fmt Формат керуючої команди EBB.
+ * @param ap Аргументи формату (va_list).
+ * @return 0 — отримано OK, -1 — помилка.
  */
 static int ebb_send_vcommand (serial_port_t *sp, int timeout_ms, const char *fmt, va_list ap) {
     if (!sp || !fmt)
@@ -76,7 +77,6 @@ static int ebb_send_vcommand (serial_port_t *sp, int timeout_ms, const char *fmt
             log_print (LOG_ERROR, "контролер: помилка відповіді '%s'", resp);
             return -1;
         }
-        /* Інформаційні рядки ігноруємо й читаємо наступний. */
     }
 
     LOGE ("Контролер не надіслав підтвердження ОК після команди");
@@ -85,12 +85,7 @@ static int ebb_send_vcommand (serial_port_t *sp, int timeout_ms, const char *fmt
 }
 
 /**
- * @brief Надіслати printf-команду та дочекатися підтвердження `OK`.
- *
- * @param sp         Послідовний порт.
- * @param timeout_ms Тайм-аут відповіді.
- * @param fmt        Формат командного рядка без `CR`.
- * @return 0 при успіху, -1 при помилці.
+ * @brief Зручна обгортка над ebb_send_vcommand з variadic-аргументами.
  */
 static int ebb_send_command (serial_port_t *sp, int timeout_ms, const char *fmt, ...) {
     va_list ap;
@@ -101,10 +96,14 @@ static int ebb_send_command (serial_port_t *sp, int timeout_ms, const char *fmt,
 }
 
 /**
- * @brief Надіслати printf-запит і повернути перший рядок відповіді.
- *
- * Відповідно до документації EBB (docs/ebb.md) більшість команд повертають один рядок
- * даних перед `OK`. Ігнорує додаткові інформаційні рядки.
+ * @brief Форматує та надсилає запит з очікуванням даних + OK.
+ * @param sp Серійний порт.
+ * @param timeout_ms Тайм-аут (мс).
+ * @param resp_out [out] Буфер для даних відповіді (може бути NULL).
+ * @param resp_len Розмір буфера відповіді.
+ * @param fmt Формат запиту.
+ * @param ap va_list аргументів.
+ * @return 0 — успіх, -1 — помилка.
  */
 static int ebb_send_vquery (
     serial_port_t *sp,
@@ -174,7 +173,6 @@ static int ebb_send_vquery (
             data_received = true;
             log_print (LOG_DEBUG, "дані контролера: %s", resp_out);
         }
-        /* Отримані додаткові рядки ігноруємо. */
     }
 
     LOGE ("Контролер не надіслав підтвердження ОК після запиту");
@@ -183,14 +181,7 @@ static int ebb_send_vquery (
 }
 
 /**
- * @brief Надіслати запит і отримати перший рядок відповіді до `OK`.
- *
- * @param sp         Послідовний порт.
- * @param timeout_ms Тайм-аут.
- * @param resp_out   Буфер для відповіді (може бути NULL).
- * @param resp_len   Розмір буфера.
- * @param fmt        Формат команди.
- * @return 0 успіх; -1 помилка.
+ * @brief Зручна обгортка над ebb_send_vquery з variadic-аргументами.
  */
 static int ebb_send_query (
     serial_port_t *sp, int timeout_ms, char *resp_out, size_t resp_len, const char *fmt, ...) {
@@ -201,18 +192,7 @@ static int ebb_send_query (
     return rc;
 }
 
-/**
- * @brief Виклик команди `EM` (Enable Motors).
- *
- * Див. розділ "Motor Control" у docs/ebb.md. Дозволяє встановити мікрошаг для
- * кожного мотору або вимкнути драйвер.
- *
- * @param sp      Послідовний порт EBB.
- * @param motor1  Режим для каналу 1.
- * @param motor2  Режим для каналу 2.
- * @param timeout_ms Тайм-аут очікування `OK`.
- * @return 0 при успіху, -1 при помилці/некоректних аргументах.
- */
+/** @copydoc ebb_enable_motors */
 int ebb_enable_motors (
     serial_port_t *sp, ebb_motor_mode_t motor1, ebb_motor_mode_t motor2, int timeout_ms) {
     if (!sp)
@@ -225,23 +205,12 @@ int ebb_enable_motors (
     return ebb_send_command (sp, timeout_ms, "EM,%d,%d", (int)motor1, (int)motor2);
 }
 
-/**
- * @brief Вимкнути обидва мотори (EM,0,0).
- */
+/** @copydoc ebb_disable_motors */
 int ebb_disable_motors (serial_port_t *sp, int timeout_ms) {
     return ebb_enable_motors (sp, EBB_MOTOR_DISABLED, EBB_MOTOR_DISABLED, timeout_ms);
 }
 
-/**
- * @brief Виконати команду `SM` (Straight Move) у координатах двигунів.
- *
- * @param sp          Послідовний порт.
- * @param duration_ms Тривалість руху у мс.
- * @param steps1      Кроки для мотору 1.
- * @param steps2      Кроки для мотору 2.
- * @param timeout_ms  Тайм-аут відповіді.
- * @return 0 при успіху; -1 при некоректних параметрах або збоях I/O.
- */
+/** @copydoc ebb_move_steps */
 int ebb_move_steps (
     serial_port_t *sp, uint32_t duration_ms, int32_t steps1, int32_t steps2, int timeout_ms) {
     if (!sp)
@@ -257,16 +226,7 @@ int ebb_move_steps (
     return ebb_send_command (sp, timeout_ms, "SM,%u,%d,%d", duration_ms, steps1, steps2);
 }
 
-/**
- * @brief Виклик команди `SP` (Servo Pen).
- *
- * @param sp         Послідовний порт.
- * @param pen_up     `true` → підняти перо; `false` → опустити.
- * @param settle_ms  Затримка після руху сервоприводу (0..65535).
- * @param portb_pin  Додатковий порт B (0..7) або -1, якщо не використовується.
- * @param timeout_ms Тайм-аут відповіді.
- * @return 0 при успіху; -1 при помилці.
- */
+/** @copydoc ebb_pen_set */
 int ebb_pen_set (serial_port_t *sp, bool pen_up, int settle_ms, int portb_pin, int timeout_ms) {
     if (!sp)
         return -1;
@@ -287,15 +247,7 @@ int ebb_pen_set (serial_port_t *sp, bool pen_up, int settle_ms, int portb_pin, i
     return ebb_send_command (sp, timeout_ms, "SP,%d", pen_up ? 1 : 0);
 }
 
-/**
- * @brief Виклик команди `XM` для змішаних координат A/B (CoreXY).
- *
- * @param sp          Послідовний порт EBB.
- * @param duration_ms Тривалість руху у мс.
- * @param steps_a     Кроки для каналу A.
- * @param steps_b     Кроки для каналу B.
- * @param timeout_ms  Тайм-аут очікування `OK`.
- */
+/** @copydoc ebb_move_mixed */
 int ebb_move_mixed (
     serial_port_t *sp, uint32_t duration_ms, int32_t steps_a, int32_t steps_b, int timeout_ms) {
     if (!sp)
@@ -312,24 +264,12 @@ int ebb_move_mixed (
         sp, timeout_ms, "XM,%" PRIu32 ",%" PRId32 ",%" PRId32, duration_ms, steps_a, steps_b);
 }
 
-/** @brief Перевірити допустимість прапорів очищення LM/LT. */
+/** Перевіряє допустимість прапорців очищення. */
 static int ebb_validate_clear_flags (int clear_flags) {
     return (clear_flags == -1) || (clear_flags >= EBB_CLEAR_NONE && clear_flags <= EBB_CLEAR_BOTH);
 }
 
-/**
- * @brief Виклик `LM` (Low-level Move, step-limited).
- *
- * @param sp         Послідовний порт.
- * @param rate1      Швидкість мотору 1 (кроки/сек * 256).
- * @param steps1     Цільові кроки мотору 1.
- * @param accel1     Прискорення мотору 1.
- * @param rate2      Швидкість мотору 2.
- * @param steps2     Цільові кроки мотору 2.
- * @param accel2     Прискорення мотору 2.
- * @param clear_flags Прапори очищення FIFO (`EBB_CLEAR_*` або -1).
- * @param timeout_ms Тайм-аут відповіді.
- */
+/** @copydoc ebb_move_lowlevel_steps */
 int ebb_move_lowlevel_steps (
     serial_port_t *sp,
     uint32_t rate1,
@@ -366,18 +306,7 @@ int ebb_move_lowlevel_steps (
         rate1, steps1, accel1, rate2, steps2, accel2);
 }
 
-/**
- * @brief Виклик `LT` (Low-level Move, time-limited).
- *
- * @param sp         Послідовний порт.
- * @param intervals  Кількість інтервалів (1/37500 с).
- * @param rate1      Стартовий rate мотору 1.
- * @param accel1     Прискорення мотору 1.
- * @param rate2      Стартовий rate мотору 2.
- * @param accel2     Прискорення мотору 2.
- * @param clear_flags Прапори очищення FIFO або -1.
- * @param timeout_ms Тайм-аут відповіді.
- */
+/** @copydoc ebb_move_lowlevel_time */
 int ebb_move_lowlevel_time (
     serial_port_t *sp,
     uint32_t intervals,
@@ -412,17 +341,10 @@ int ebb_move_lowlevel_time (
         rate1, accel1, rate2, accel2);
 }
 
+/** Максимальна абсолютна позиція для HM (запобігає переповненню). */
 #define EBB_HOME_MAX_POSITION 4294967
 
-/**
- * @brief Виклик `HM` (Home Move) для повернення у задану позицію/нуль.
- *
- * @param sp        Послідовний порт.
- * @param step_rate Базова швидкість мікрошагів (2..25000).
- * @param pos1      Абсолютна позиція мотору 1 або NULL.
- * @param pos2      Абсолютна позиція мотору 2 або NULL.
- * @param timeout_ms Тайм-аут відповіді.
- */
+/** @copydoc ebb_home_move */
 int ebb_home_move (
     serial_port_t *sp,
     uint32_t step_rate,
@@ -453,14 +375,7 @@ int ebb_home_move (
     return ebb_send_command (sp, timeout_ms, "HM,%" PRIu32, step_rate);
 }
 
-/**
- * @brief Виклик `QS` (Query Steps).
- *
- * @param sp          Послідовний порт.
- * @param[out] steps1_out Кроки мотору 1.
- * @param[out] steps2_out Кроки мотору 2.
- * @param timeout_ms  Тайм-аут відповіді.
- */
+/** @copydoc ebb_query_steps */
 int ebb_query_steps (serial_port_t *sp, int32_t *steps1_out, int32_t *steps2_out, int timeout_ms) {
     if (!sp || !steps1_out || !steps2_out)
         return -1;
@@ -496,22 +411,14 @@ parse_error:
     return -1;
 }
 
-/**
- * @brief Скинути лічильники кроків (`CS`).
- */
+/** @copydoc ebb_clear_steps */
 int ebb_clear_steps (serial_port_t *sp, int timeout_ms) {
     if (!sp)
         return -1;
     return ebb_send_command (sp, timeout_ms, "CS");
 }
 
-/**
- * @brief Виклик `QM` для отримання стану FIFO та моторів.
- *
- * @param sp          Послідовний порт.
- * @param[out] status_out Структура для заповнення прапорів активності.
- * @param timeout_ms Тайм-аут відповіді.
- */
+/** @copydoc ebb_query_motion */
 int ebb_query_motion (serial_port_t *sp, ebb_motion_status_t *status_out, int timeout_ms) {
     if (!sp || !status_out)
         return -1;
@@ -553,13 +460,7 @@ int ebb_query_motion (serial_port_t *sp, ebb_motion_status_t *status_out, int ti
     return 0;
 }
 
-/**
- * @brief Виклик `QP` (Query Pen).
- *
- * @param sp          Послідовний порт.
- * @param[out] pen_up_out Прапор стану пера.
- * @param timeout_ms Тайм-аут відповіді.
- */
+/** @copydoc ebb_query_pen */
 int ebb_query_pen (serial_port_t *sp, bool *pen_up_out, int timeout_ms) {
     if (!sp || !pen_up_out)
         return -1;
@@ -579,13 +480,7 @@ int ebb_query_pen (serial_port_t *sp, bool *pen_up_out, int timeout_ms) {
     return 0;
 }
 
-/**
- * @brief Виклик `QR` (Query Servo Power).
- *
- * @param sp             Послідовний порт.
- * @param[out] power_on_out Прапор живлення серво.
- * @param timeout_ms     Тайм-аут відповіді.
- */
+/** @copydoc ebb_query_servo_power */
 int ebb_query_servo_power (serial_port_t *sp, bool *power_on_out, int timeout_ms) {
     if (!sp || !power_on_out)
         return -1;
@@ -605,14 +500,7 @@ int ebb_query_servo_power (serial_port_t *sp, bool *power_on_out, int timeout_ms
     return 0;
 }
 
-/**
- * @brief Отримати версію прошивки (`V`).
- *
- * @param sp          Послідовний порт.
- * @param[out] version_buf Буфер для тексту версії.
- * @param version_len Розмір буфера.
- * @param timeout_ms  Тайм-аут відповіді.
- */
+/** @copydoc ebb_query_version */
 int ebb_query_version (serial_port_t *sp, char *version_buf, size_t version_len, int timeout_ms) {
     if (!sp || !version_buf || version_len == 0)
         return -1;
@@ -625,30 +513,14 @@ int ebb_query_version (serial_port_t *sp, char *version_buf, size_t version_len,
     return 0;
 }
 
-/* ebb_collect_status() вилучено: викликайте ebb_query_motion/steps/pen/servo/version окремо. */
-
-/**
- * @brief Виконати аварійну зупинку (команда `ES`).
- *
- * @param sp         Послідовний порт.
- * @param timeout_ms Тайм-аут відповіді.
- * @return 0 при успіху; -1 у разі збою.
- */
+/** @copydoc ebb_emergency_stop */
 int ebb_emergency_stop (serial_port_t *sp, int timeout_ms) {
     if (!sp)
         return -1;
     return ebb_send_command (sp, timeout_ms, "ES");
 }
 
-/**
- * @brief Реалізація команди SC (Stepper/Servo configure).
- *
- * @param sp         Відкритий послідовний порт.
- * @param param_id   Ідентифікатор параметра (0..255).
- * @param value      Значення параметра (0..65535).
- * @param timeout_ms Тайм-аут очікування відповіді OK.
- * @return 0 при успіху; -1 при помилці або некоректних аргументах.
- */
+/** @copydoc ebb_configure_mode */
 int ebb_configure_mode (serial_port_t *sp, int param_id, int value, int timeout_ms) {
     if (!sp)
         return -1;
@@ -663,15 +535,7 @@ int ebb_configure_mode (serial_port_t *sp, int param_id, int value, int timeout_
     return ebb_send_command (sp, timeout_ms, "SC,%d,%d", param_id, value);
 }
 
-/**
- * @brief Реалізація команди SR (servo power timeout).
- *
- * @param sp             Відкритий послідовний порт.
- * @param timeout_ms     Тайм-аут у мілісекундах (0 → вимкнути авто-відключення).
- * @param power_state    -1 → не змінювати; 0 → вимкнути; 1 → увімкнути живлення сервоприводу.
- * @param cmd_timeout_ms Тайм-аут очікування відповіді OK.
- * @return 0 при успіху; -1 при помилці/некоректних аргументах.
- */
+/** @copydoc ebb_set_servo_power_timeout */
 int ebb_set_servo_power_timeout (
     serial_port_t *sp, uint32_t timeout_ms, int power_state, int cmd_timeout_ms) {
     if (!sp)

@@ -1,6 +1,11 @@
 /**
  * @file planner.c
- * @brief Побудова профілю руху для повної траєкторії без черги.
+ * @brief Реалізація планувальника траєкторій і профілів швидкості.
+ * @ingroup planner
+ * @details
+ * Формує безпечні швидкісні профілі (трапецієвидні/трикутні) для послідовності
+ * векторних сегментів з урахуванням обмежень швидкості, прискорення і заокруглень
+ * на стиках (cornering). Виконує обʼєднання дуже коротких колінеарних сегментів.
  */
 
 #include "planner.h"
@@ -11,32 +16,32 @@
 
 #include "log.h"
 
+/** \brief Допуск довжини для нульового сегмента, у мм. */
 #define EPSILON_MM 1e-6
 
 /**
- * @brief Внутрішній представник сегмента після попередньої обробки.
+ * @brief Внутрішній вузол планування (один сегмент із розрахованими межами швидкостей).
  */
 typedef struct {
-    double target[2];
-    double delta[2];
-    double unit_vec[2];
-    double length_mm;
-    double nominal_speed;
-    double max_entry_speed; /* Максимально допустима швидкість входу (GRBL junction limit). */
-    double entry_speed;
-    double exit_speed;
-    bool pen_down;
-    unsigned long seq;
+    double target[2];        /**< Кінцева точка сегмента (мм). */
+    double delta[2];         /**< Вектор зміщення (мм). */
+    double unit_vec[2];      /**< Одиничний напрямний вектор. */
+    double length_mm;        /**< Довжина сегмента, мм. */
+    double nominal_speed;    /**< Номінальна швидкість (обмежена feed/лімітами), мм/с. */
+    double max_entry_speed;  /**< Максимальна дозволена швидкість входу, мм/с. */
+    double entry_speed;      /**< Обрана швидкість входу, мм/с. */
+    double exit_speed;       /**< Обрана швидкість виходу, мм/с. */
+    bool pen_down;           /**< Стан пера. */
+    unsigned long seq;       /**< Порядковий номер. */
 } planner_node_t;
 
+/** \brief Поточні глобальні ліміти, що застосовуються при розрахунках. */
 static planner_limits_t g_limits;
 
 /**
- * @brief Повернути додатне значення або запасний варіант.
- *
- * @param value Перевірюване значення.
- * @param fallback Запасний результат, якщо value не є коректним додатним числом.
- * @return Нормалізоване додатне значення.
+ * @brief Повертає додатне скінченне значення або запасне.
+ * @param value Вхідне значення.
+ * @param fallback Запасне значення, якщо `value` не придатне.
  */
 static double clamp_positive (double value, double fallback) {
     if (!(value > 0.0) || isinf (value) || isnan (value))
@@ -45,11 +50,10 @@ static double clamp_positive (double value, double fallback) {
 }
 
 /**
- * @brief Обчислити максимально дозволену швидкість у точці стику сегментів.
- *
- * @param prev Попередній вузол траєкторії.
- * @param curr Поточний вузол траєкторії.
- * @return Обмеження швидкості на стику у мм/с.
+ * @brief Обчислює ліміт швидкості на стику двох сегментів.
+ * @param prev Попередній вузол.
+ * @param curr Поточний вузол.
+ * @return Максимальна швидкість входу згідно з `cornering_distance_mm` і кутом між векторами.
  */
 static double compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
     if (!prev || !curr)
@@ -79,10 +83,9 @@ static double compute_junction_speed (const planner_node_t *prev, const planner_
 }
 
 /**
- * @brief Розкласти сегмент на трапецієподібний профіль розгону/гальмування.
- *
- * @param node Внутрішній вузол із параметрами сегмента.
- * @param out  Вихідний блок, що буде доповнений розрахованими ділянками.
+ * @brief Обчислює параметри трапецієвидного профілю для сегмента.
+ * @param node Джерельний вузол з довжиною та граничними швидкостями.
+ * @param out [out] Блок для заповнення відстаней/швидкостей/прискорення.
  */
 static void compute_trapezoid_profile (const planner_node_t *node, plan_block_t *out) {
     const double length = node->length_mm;
@@ -160,12 +163,7 @@ static void compute_trapezoid_profile (const planner_node_t *node, plan_block_t 
 }
 
 /**
- * @brief Попередньо обчислити обмеження швидкості на стиках (junction) для всіх вузлів.
- *
- * Встановлює для кожного вузла максимальну швидкість входу як мінімум із:
- *  - швидкістю на стику за алгоритмом GRBL (із docs/grbl.md),
- *  - номінальними швидкостями поточного та попереднього вузлів.
- * Для першого вузла обмеженням вважається його номінальна швидкість.
+ * @brief Обчислює межі швидкості входу для кожного стику.
  */
 static void compute_all_junction_limits (planner_node_t *nodes, size_t count) {
     if (!nodes || count == 0)
@@ -176,7 +174,7 @@ static void compute_all_junction_limits (planner_node_t *nodes, size_t count) {
         double lim = junction;
         if (!(lim > 0.0))
             lim = 0.0;
-        /* Обмежуємо номінальними швидкостями сусідніх сегментів та глобальним максимумом */
+
         lim = fmin (lim, nodes[i - 1].nominal_speed);
         lim = fmin (lim, nodes[i].nominal_speed);
         lim = fmin (lim, g_limits.max_speed_mm_s);
@@ -187,10 +185,7 @@ static void compute_all_junction_limits (planner_node_t *nodes, size_t count) {
 }
 
 /**
- * @brief Дворівневий перерахунок швидкостей (reverse+forward pass), як у GRBL.
- *
- * - Зворотний прохід: гарантує можливість загальмувати до дозволеної швидкості наступного сегмента.
- * - Прямий прохід: гарантує, що розгін не перевищує обмеження прискорення на довжині сегмента.
+ * @brief Виконує двонапрямну корекцію швидкостей входу/виходу згідно з прискоренням.
  */
 static void recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
     if (!nodes || count == 0)
@@ -198,9 +193,8 @@ static void recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
 
     const double accel = (g_limits.max_accel_mm_s2 > 0.0) ? g_limits.max_accel_mm_s2 : 1000.0;
 
-    /* Зворотний прохід: від останнього до першого */
-    nodes[count - 1].exit_speed = 0.0; /* Завжди повна зупинка в кінці траєкторії */
-    /* entry для останнього сегмента обмежено довжиною сегмента (гальмуванням до 0) та junction */
+    nodes[count - 1].exit_speed = 0.0;
+
     double v_allow = sqrt (fmax (0.0, 2.0 * accel * nodes[count - 1].length_mm));
     double v_entry = fmin (nodes[count - 1].max_entry_speed, v_allow);
     if (v_entry < 0.0)
@@ -208,9 +202,9 @@ static void recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
     nodes[count - 1].entry_speed = v_entry;
 
     for (size_t idx = count - 1; idx-- > 0;) {
-        /* exit поточного = entry наступного */
+
         nodes[idx].exit_speed = nodes[idx + 1].entry_speed;
-        /* Максимально дозволений вхід з урахуванням гальмування на довжині сегмента */
+
         double v_next = nodes[idx].exit_speed;
         double v_max_by_decel
             = sqrt (fmax (0.0, v_next * v_next + 2.0 * accel * nodes[idx].length_mm));
@@ -220,52 +214,34 @@ static void recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
         nodes[idx].entry_speed = v_cap;
     }
 
-    /* Прямий прохід: не дозволяти прискоренням перевищити межі на довжині сегмента */
     for (size_t i = 0; i + 1 < count; ++i) {
         double v_curr = nodes[i].entry_speed;
-        /* Скільки максимум можемо розігнатися на сегменті i */
+
         double v_allow_fwd = sqrt (fmax (0.0, v_curr * v_curr + 2.0 * accel * nodes[i].length_mm));
         if (nodes[i + 1].entry_speed > v_allow_fwd) {
             nodes[i + 1].entry_speed = v_allow_fwd;
         }
-        /* Узгодити вихідну швидкість поточного сегмента */
+
         nodes[i].exit_speed = nodes[i + 1].entry_speed;
-        /* Обмежити обидві швидкості номіналом сегмента */
+
         if (nodes[i].entry_speed > nodes[i].nominal_speed)
             nodes[i].entry_speed = nodes[i].nominal_speed;
         if (nodes[i].exit_speed > nodes[i].nominal_speed)
             nodes[i].exit_speed = nodes[i].nominal_speed;
     }
 
-    /* Після зсувів упевнитися, що останній сегмент не перевищує свій номінал */
     if (nodes[count - 1].entry_speed > nodes[count - 1].nominal_speed)
         nodes[count - 1].entry_speed = nodes[count - 1].nominal_speed;
 }
 
-/**
- * @brief Додати новий вузол у масив.
- *
- * @param nodes      Масив вузлів для заповнення.
- * @param node_count Поточна кількість вузлів (модифікується функцією).
- * @param node       Новий вузол для додавання.
- */
+/** \brief Додає вузол до масиву та збільшує лічильник. */
 static void store_node (planner_node_t *nodes, size_t *node_count, planner_node_t node) {
     nodes[*node_count] = node;
     ++(*node_count);
 }
 
 /**
- * @brief Побудувати повний план руху для переданого шляху.
- *
- * @param limits            Обмеження на рух (не NULL).
- * @param start_position_mm Початкова позиція X/Y у мм (NULL → {0,0}).
- * @param segments          Масив сегментів траєкторії (не NULL).
- * @param segment_count     Кількість сегментів у масиві.
- * @param out_blocks        Вихід: масив блоків (виділяється функцією, caller звільняє через
- * free()).
- * @param out_count         Вихід: кількість блоків у масиві out_blocks.
- *
- * @return true при успіху; false у разі некоректних параметрів або помилки пам’яті.
+ * @copydoc planner_plan
  */
 bool planner_plan (
     const planner_limits_t *limits,
@@ -387,7 +363,7 @@ bool planner_plan (
                         new_nominal = g_limits.max_speed_mm_s;
                     if (last_node->nominal_speed <= 0.0 || new_nominal < last_node->nominal_speed)
                         last_node->nominal_speed = new_nominal;
-                    /* Швидкості будуть перераховані двопрохідним алгоритмом наприкінці. */
+
                     merged = true;
                 }
             }
@@ -434,7 +410,6 @@ bool planner_plan (
         return false;
     }
 
-    /* Обчислюємо ліміти на стиках та кінцеві швидкості за двопрохідною схемою */
     compute_all_junction_limits (nodes, node_count);
     recompute_entry_exit_speeds (nodes, node_count);
 

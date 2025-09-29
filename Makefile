@@ -132,6 +132,7 @@ OBJECTS_NO_MAIN := $(filter-out $(LIBDIR)/main.o,$(OBJECTS))
 
 .PHONY: default all help start valgrind tests clean install uninstall release dist
 .PHONY: fmt format
+.PHONY: docs doxygen
 
 default: all
 
@@ -235,3 +236,13 @@ fmt format:
 	@echo "Formatting C sources with clang-format..."
 	clang-format -i -style=file $(SRCDIR)/*.$(SRCEXT) $(SRCDIR)/*.h
 	@echo "Done."
+
+# Generate API documentation with Doxygen (if installed)
+docs doxygen:
+	@command -v doxygen >/dev/null 2>&1 || { \
+	  echo "doxygen not found. Install: macOS 'brew install doxygen' or Linux 'sudo apt-get install doxygen'"; \
+	  exit 2; \
+	}
+	@echo "Generating API documentation (Doxygen)..."
+	doxygen Doxyfile
+	@echo "Documentation generated in docs/api/html" 

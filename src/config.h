@@ -1,6 +1,7 @@
 /**
  * @file config.h
- * @brief Постійна конфігурація для параметрів пристрою та розкладки.
+ * @brief Зберігання та валідація конфігурації застосунку без сторонніх бібліотек.
+ * @defgroup config Конфігурація
  */
 #ifndef CONFIG_H
 #define CONFIG_H
@@ -8,95 +9,93 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/// Орієнтація сторінки (узгоджено з CLI).
+/**
+ * @brief Орієнтація сторінки при друці.
+ */
 typedef enum {
-    ORIENT_PORTRAIT = 1, /**< портретна орієнтація */
-    ORIENT_LANDSCAPE = 2 /**< альбомна орієнтація */
+    ORIENT_PORTRAIT = 1,  /**< Портретна орієнтація. */
+    ORIENT_LANDSCAPE = 2  /**< Альбомна орієнтація. */
 } orientation_t;
 
-/// Конфігураційний блок для параметрів пристрою/розкладки (типово MiniKit2).
+/**
+ * @brief Структура конфігурації користувача.
+ */
 typedef struct {
-    // Версіонування
-    int version; /**< інкремент при зміні формату на диску */
+    int version;               /**< Версія формату конфігурації. */
 
-    // Сторінка та розміщення
-    orientation_t orientation; /**< орієнтація сторінки */
-    double paper_w_mm;
-    double paper_h_mm;
-    double margin_top_mm;
-    double margin_right_mm;
-    double margin_bottom_mm;
-    double margin_left_mm;
-    double font_size_pt;   /**< Базовий кегль шрифту (pt). */
-    char font_family[128]; /**< Типова родина шрифтів. */
+    orientation_t orientation; /**< Орієнтація сторінки. */
+    double paper_w_mm;         /**< Ширина паперу, мм. */
+    double paper_h_mm;         /**< Висота паперу, мм. */
+    double margin_top_mm;      /**< Верхнє поле, мм. */
+    double margin_right_mm;    /**< Праве поле, мм. */
+    double margin_bottom_mm;   /**< Нижнє поле, мм. */
+    double margin_left_mm;     /**< Ліве поле, мм. */
+    double font_size_pt;       /**< Розмір шрифту, пт. */
+    char font_family[128];     /**< Типова шрифтна родина. */
 
-    // Рух
-    double speed_mm_s;  /**< номінальна швидкість */
-    double accel_mm_s2; /**< номінальне прискорення */
+    double speed_mm_s;         /**< Швидкість руху, мм/с. */
+    double accel_mm_s2;        /**< Прискорення, мм/с^2. */
 
-    // Серво пера
-    int pen_up_pos;        /**< 0..100 відсотків */
-    int pen_down_pos;      /**< 0..100 відсотків */
-    int pen_up_speed;      /**< відсотків/с */
-    int pen_down_speed;    /**< відсотків/с */
-    int pen_up_delay_ms;   /**< затримка після підйому пера */
-    int pen_down_delay_ms; /**< затримка після опускання пера */
-    int servo_timeout_s;   /**< 0 вимикає авто-вимкнення; типово 60 */
+    int pen_up_pos;            /**< Положення пера вгору (%, 0..100). */
+    int pen_down_pos;          /**< Положення пера вниз (%, 0..100). */
+    int pen_up_speed;          /**< Швидкість підняття пера (умовн. од.). */
+    int pen_down_speed;        /**< Швидкість опускання пера (умовн. од.). */
+    int pen_up_delay_ms;       /**< Затримка після підняття пера, мс. */
+    int pen_down_delay_ms;     /**< Затримка після опускання пера, мс. */
+    int servo_timeout_s;       /**< Тайм-аут живлення серво, с. */
 
-    // Обраний віддалений пристрій (псевдонім із `device list`).
-    char default_device[64];
+    char default_device[64];   /**< Типовий псевдонім пристрою. */
 } config_t;
 
-/** Типова модель пристрою, яку використовує CLI. */
+/** Типова модель пристрою. */
 #define CONFIG_DEFAULT_MODEL "minikit2"
 
-/** Типова родина шрифтів (ідентифікатор у реєстрі Hershey). */
+/** Типова шрифтна родина. */
 #define CONFIG_DEFAULT_FONT_FAMILY "EMS Nixish"
 
 /**
- * Заповнити конфігурацію типовими (CLI) заводськими налаштуваннями.
- *
- * @param c            Структура конфігурації для ініціалізації (не NULL).
- * @param device_model Залишено для сумісності; пристрій має бути обраний окремо на сервері.
- * @return 0 при успіху; -1 при некоректних аргументах.
+ * @brief Заповнює конфіг значеннями за замовчуванням.
+ * @param c [out] Місце призначення.
+ * @param device_model Профіль моделі для ініціалізації (NULL — типова).
+ * @return 0 — успіх, -1 — помилка.
  */
 int config_factory_defaults (config_t *c, const char *device_model);
 
 /**
- * Завантажити активну конфігурацію з диска, якщо є; інакше застосувати заводські значення.
- * @param out Вихідна конфігурація для заповнення (не NULL).
- * @return 0 у разі успіху; ненульове при помилках I/O/парсингу (дефолти все одно застосовано).
+ * @brief Завантажує конфігурацію з XDG-шляху.
+ * @param out [out] Заповнена конфігурація.
+ * @return 0 — успіх, <0 — код помилки.
  */
 int config_load (config_t *out);
 
 /**
- * Зберегти конфігурацію на диск атомарно.
- * @param cfg Конфігурація для збереження.
- * @return 0 у разі успіху; ненульове при помилці.
+ * @brief Зберігає конфігурацію на диск (JSON).
+ * @param cfg Конфігурація для запису.
+ * @return 0 — успіх, <0 — код помилки.
  */
 int config_save (const config_t *cfg);
 
 /**
- * Скинути конфігурацію до заводських налаштувань і зберегти.
- * @return 0 у разі успіху; ненульове при помилці.
+ * @brief Скидає конфігурацію до типових значень і зберігає.
+ * @return 0 — успіх, <0 — код помилки.
  */
 int config_reset (void);
 
 /**
- * Валідвати діапазони налаштувань.
- * @param c      Конфіг для перевірки.
- * @param err    Необов'язковий буфер для короткого повідомлення.
- * @param errlen Розмір буфера err.
- * @return 0 якщо валідно; інакше ненульове.
+ * @brief Перевіряє коректність значень конфігурації.
+ * @param c Конфігурація.
+ * @param err [out] Буфер повідомлення (може бути NULL).
+ * @param errlen Розмір буфера повідомлення.
+ * @return 0 — валідно, <0 — код помилки.
  */
 int config_validate (const config_t *c, char *err, size_t errlen);
 
 /**
- * Визначити шлях до файлу конфігурації у buf.
- * @param buf     Вихідний буфер для шляху.
- * @param buflen  Розмір буфера.
- * @return 0 у разі успіху; ненульове при помилці.
+ * @brief Обчислює шлях до файлу конфігурації.
+ * @param buf [out] Буфер шляху.
+ * @param buflen Довжина буфера.
+ * @return 0 — успіх, -1 — помилка/буфер замалий.
  */
 int config_get_path (char *buf, size_t buflen);
 
-#endif /* CONFIG_H */
+#endif

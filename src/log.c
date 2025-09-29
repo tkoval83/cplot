@@ -1,10 +1,10 @@
 /**
  * @file log.c
- * @brief Реалізація простої підсистеми журналювання.
- *
- * У цьому модулі визначено глобальну конфігурацію логера та утиліти
- * для друку повідомлень різних рівнів до stderr. Повідомлення мають бути
- * українською, формат сумісний із printf.
+ * @brief Реалізація рівнів журналювання та форматування повідомлень.
+ * @ingroup log
+ * @details
+ * Виводить повідомлення у `stderr` з урахуванням порога рівня та кольорів,
+ * що визначаються `isatty(stderr)` або змінною `CPLOT_LOG_NO_COLOR`.
  */
 #include "log.h"
 
@@ -16,62 +16,46 @@
 #include <strings.h>
 #include <unistd.h>
 
-/**
- * @brief Глобальна конфігурація логера (рівень і використання кольорів).
- */
+/** \brief Глобальна конфігурація журналювання за замовчуванням. */
 static log_config_t g_cfg = {
     .level = LOG_INFO,
     .use_colors = true,
 };
 
 /**
- * Отримати вказівник на глобальну конфігурацію логера.
- *
- * @return Вказівник на структуру конфігурації (ніколи не NULL).
+ * @copydoc log_get_config
  */
 log_config_t *log_get_config (void) { return &g_cfg; }
 
 /**
- * Встановити мінімальний рівень журналювання.
- *
- * Повідомлення з рівнем, вищим за встановлений (чисельно більшим),
- * не будуть виводитися.
- *
- * @param level Новий рівень (LOG_ERROR/LOG_WARN/LOG_INFO/LOG_DEBUG).
+ * @copydoc log_set_level
  */
 void log_set_level (log_level_t level) { g_cfg.level = level; }
 
 /**
- * Увімкнути/вимкнути ANSI‑кольори у виводі логера.
- *
- * @param use true — використовувати кольори; false — без кольорів.
+ * @copydoc log_set_use_colors
  */
 void log_set_use_colors (bool use) {
     if (!use) {
         g_cfg.use_colors = false;
         return;
     }
-    /* Автовимкнення кольорів, якщо stderr не є TTY */
+
     if (!isatty (fileno (stderr)))
         g_cfg.use_colors = false;
     else
         g_cfg.use_colors = true;
 }
 
-/**
- * Повернути текстову мітку для рівня журналу українською мовою.
- *
- * @param lv Рівень журналу.
- * @return Статичний рядок з міткою рівня.
- */
+/** \brief Повертає локалізований рядок мітки рівня. */
 static const char *level_label (log_level_t lv) {
     switch (lv) {
     case LOG_ERROR:
-        return "помилка"; /* error */
+        return "помилка";
     case LOG_WARN:
-        return "попередження"; /* warn */
+        return "попередження";
     case LOG_INFO:
-        return "інфо"; /* info */
+        return "інфо";
     case LOG_DEBUG:
         return "налагодження";
     default:
@@ -79,12 +63,7 @@ static const char *level_label (log_level_t lv) {
     }
 }
 
-/**
- * Повернути ANSI‑колір для заданого рівня журналу згідно конфігурації.
- *
- * @param lv Рівень журналу.
- * @return Секвенція кольору або порожній рядок, якщо кольори вимкнено.
- */
+/** \brief Повертає ANSI‑колір для рівня з урахуванням `use_colors`. */
 static const char *level_color (log_level_t lv) {
     if (!g_cfg.use_colors)
         return "";
@@ -103,14 +82,7 @@ static const char *level_color (log_level_t lv) {
 }
 
 /**
- * Надрукувати повідомлення до stderr, використовуючи список аргументів.
- *
- * Функція поважає глобальну конфігурацію рівня та кольорів. Якщо рівень
- * повідомлення вищий за поточний, воно ігнорується.
- *
- * @param level Рівень повідомлення.
- * @param fmt   Форматний рядок (українською), як у printf.
- * @param ap    Список аргументів для форматування.
+ * @copydoc log_vprint
  */
 void log_vprint (log_level_t level, const char *fmt, va_list ap) {
     if (!fmt)
@@ -141,11 +113,7 @@ void log_vprint (log_level_t level, const char *fmt, va_list ap) {
 }
 
 /**
- * Зручна обгортка над log_vprint із варіативними аргументами.
- *
- * @param level Рівень повідомлення.
- * @param fmt   Форматний рядок (українською), як у printf.
- * @param ...   Додаткові аргументи згідно fmt.
+ * @copydoc log_print
  */
 void log_print (log_level_t level, const char *fmt, ...) {
     va_list ap;
@@ -155,12 +123,7 @@ void log_print (log_level_t level, const char *fmt, ...) {
 }
 
 /**
- * Ініціалізація логера зі змінних середовища.
- *
- * CPLOT_LOG           = debug|info|warn|error (регістр ігнорується)
- * CPLOT_LOG_NO_COLOR  = 1|true|yes (вимикає кольори)
- *
- * @return 0 (поточна реалізація не повертає детальні коди помилок)
+ * @copydoc log_init_from_env
  */
 int log_init_from_env (void) {
     const char *lvl = getenv ("CPLOT_LOG");
@@ -173,7 +136,6 @@ int log_init_from_env (void) {
             log_set_level (LOG_WARN);
         else if (strcasecmp (lvl, "error") == 0)
             log_set_level (LOG_ERROR);
-        /* Ігноруємо невідоме значення — залишаємо поточний рівень */
     }
 
     const char *nc = getenv ("CPLOT_LOG_NO_COLOR");
@@ -181,9 +143,9 @@ int log_init_from_env (void) {
         if (strcmp (nc, "1") == 0 || strcasecmp (nc, "true") == 0 || strcasecmp (nc, "yes") == 0)
             g_cfg.use_colors = false;
         else
-            log_set_use_colors (g_cfg.use_colors); /* переоцінка TTY */
+            log_set_use_colors (g_cfg.use_colors);
     } else {
-        /* Перевірити TTY ще раз для поточного налаштування */
+
         log_set_use_colors (g_cfg.use_colors);
     }
 

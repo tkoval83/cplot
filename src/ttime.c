@@ -1,5 +1,9 @@
 #include "ttime.h"
-
+/**
+ * @file ttime.c
+ * @brief Реалізація вимірювання часу.
+ * @ingroup ttime
+ */
 double time_diff_ms (const struct timespec *now, const struct timespec *prev) {
     if (!now || !prev)
         return 0.0;

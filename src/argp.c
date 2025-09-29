@@ -1,10 +1,7 @@
 /**
  * @file argp.c
- * @brief Реалізація узагальненого парсера аргументів (перенесено з arguments.c).
- *
- * Модуль надає мінімалістичний інтерфейс для реєстрації парі "опція → обробник",
- * підтримує короткі та довгі форми прапорців, автоматичне форматування довідки і
- * виклик користувацьких колбеків для позиційних аргументів.
+ * @brief Реалізація простого парсера аргументів.
+ * @ingroup argp
  */
 #include "argp.h"
 #include <stdio.h>
@@ -12,12 +9,11 @@
 #include <string.h>
 
 /**
- * @brief Перевиділити пам'ять із семантикою "нуль елементів → звільнити".
- *
- * @param ptr       Поточний буфер (може бути NULL).
+ * @brief Безпечний realloc для масивів (count * elem_size).
+ * @param ptr Поточний вказівник (або NULL).
  * @param new_count Нова кількість елементів.
- * @param elem_size Розмір одного елемента, байт.
- * @return Актуальний буфер або NULL, якщо new_count == 0 чи realloc() не вдалося.
+ * @param elem_size Розмір одного елемента.
+ * @return Новий вказівник або NULL (при new_count=0 або помилці).
  */
 static void *xrealloc (void *ptr, size_t new_count, size_t elem_size) {
     if (new_count == 0) {
@@ -29,14 +25,10 @@ static void *xrealloc (void *ptr, size_t new_count, size_t elem_size) {
 }
 
 /**
- * @brief Забезпечити місткість масиву опцій.
- *
- * Алгоритм подвоює місткість, доки вона не стане не меншою за потрібну, що зменшує кількість
- * дорогих realloc().
- *
- * @param p    Парсер із цільовим масивом.
- * @param need Мінімальна необхідна кількість елементів.
- * @return 0 у разі успіху; -1, якщо не вдалося виділити пам'ять.
+ * @brief Гарантує мінімальну ємність масиву опцій у парсері.
+ * @param p Парсер.
+ * @param need Потрібна кількість елементів.
+ * @return 0 — ємність достатня/збільшено, -1 — помилка виділення.
  */
 static int ensure_capacity (arg_parser_t *p, size_t need) {
     if (p->capacity >= need)
@@ -53,11 +45,10 @@ static int ensure_capacity (arg_parser_t *p, size_t need) {
 }
 
 /**
- * @brief Перевірити збіг аргументу з довгою формою опції.
- *
+ * @brief Перевіряє відповідність довгого аргументу виду --name[=value].
  * @param opt Опис опції.
- * @param arg Значення з argv, наприклад "--file=...".
- * @return 1, якщо збіг; 0 інакше.
+ * @param arg Аргумент командного рядка без початкових тире.
+ * @return 1 — співпадає, 0 — ні.
  */
 static int matches_long (const arg_option_t *opt, const char *arg) {
     if (!opt->long_name)
@@ -66,16 +57,15 @@ static int matches_long (const arg_option_t *opt, const char *arg) {
     if (strncmp (arg, opt->long_name, n) != 0)
         return 0;
     if (opt->takes_value)
-        return arg[n] == '='; /* очікуємо --name=value */
+        return arg[n] == '=';
     return arg[n] == '\0';
 }
 
 /**
- * @brief Перевірити збіг аргументу з короткою формою опції ("-f").
- *
+ * @brief Перевіряє відповідність короткого аргументу на кшталт -h.
  * @param opt Опис опції.
- * @param arg Аргумент із argv.
- * @return 1, якщо збіг; 0 інакше.
+ * @param arg Аргумент (включно з префіксом '-').
+ * @return 1 — співпадає, 0 — ні.
  */
 static int matches_short (const arg_option_t *opt, const char *arg) {
     if (!opt->short_name)
@@ -83,13 +73,10 @@ static int matches_short (const arg_option_t *opt, const char *arg) {
     return strcmp (arg, opt->short_name) == 0;
 }
 
-/* ПУБЛІЧНИЙ ІНТЕРФЕЙС */
 /**
- * Створити новий парсер аргументів.
- *
- * @param program Ім'я програми для відображення у довідці (може бути NULL; буде оновлено з
- * argv[0]).
- * @return Вказівник на створений парсер або NULL при нестачі пам'яті.
+ * @brief Створює новий парсер аргументів.
+ * @param program Імʼя програми (для хелпу).
+ * @return Вказівник на парсер або NULL.
  */
 arg_parser_t *arg_parser_create (const char *program) {
     arg_parser_t *p = (arg_parser_t *)calloc (1, sizeof (*p));
@@ -100,9 +87,8 @@ arg_parser_t *arg_parser_create (const char *program) {
 }
 
 /**
- * Звільнити усі ресурси, пов'язані з парсером.
- *
- * @param p Парсер (безпечний для передачі NULL).
+ * @brief Звільняє ресурси парсера і його таблиці опцій.
+ * @param p Парсер (може бути NULL).
  */
 void arg_parser_destroy (arg_parser_t *p) {
     if (!p)
@@ -112,10 +98,9 @@ void arg_parser_destroy (arg_parser_t *p) {
 }
 
 /**
- * Встановити користувацький колбек для друку заголовка довідки.
- *
- * @param p       Парсер (не NULL).
- * @param handler Функція, яку буде викликано для друку заголовка (може бути NULL для вимкнення).
+ * @brief Встановлює користувацький обробник виводу usage.
+ * @param p Парсер.
+ * @param handler Колбек для друку usage (отримує program).
  */
 void arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler) {
     if (p)
@@ -123,10 +108,9 @@ void arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler) {
 }
 
 /**
- * Встановити обробник за замовчуванням для невідомих/позиційних аргументів.
- *
- * @param p       Парсер (не NULL).
- * @param handler Колбек, який отримує сирий аргумент (може бути NULL для вимкнення).
+ * @brief Встановлює обробник позиційних/невідомих аргументів.
+ * @param p Парсер.
+ * @param handler Колбек, що отримує значення.
  */
 void arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler) {
     if (p)
@@ -134,15 +118,14 @@ void arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler) {
 }
 
 /**
- * Додати опцію до парсера.
- *
- * @param p           Парсер (не NULL).
- * @param long_name   Довга форма ("--name" без значення), не NULL.
- * @param short_name  Коротка форма ("-n") або NULL.
- * @param takes_value 1 якщо очікується значення у вигляді --name=value.
- * @param handler     Колбек, який буде викликано при збігу (value або NULL).
- * @param usage       Опис для довідки (може бути NULL).
- * @return 0 успіх; -1 при помилці (некоректні аргументи або нестача пам'яті).
+ * @brief Додає опцію у парсер.
+ * @param p Парсер.
+ * @param long_name Довге імʼя без префіксу (--).
+ * @param short_name Коротке імʼя з префіксом (-h) або NULL.
+ * @param takes_value Чи потребує значення (--opt=value).
+ * @param handler Колбек-обробник значення.
+ * @param usage Опис для хелпу.
+ * @return 0 — успіх, -1 — помилка.
  */
 int arg_parser_add (
     arg_parser_t *p,
@@ -165,14 +148,13 @@ int arg_parser_add (
 }
 
 /**
- * Додати опцію за шаблоном: "--name" або "--name=" (означає наявність значення).
- *
- * @param p          Парсер (не NULL).
- * @param pattern    Шаблон довгої форми, наприклад "--file" або "--file=".
- * @param short_name Коротка форма ("-f") або NULL.
- * @param handler    Колбек-обробник збігу.
- * @param usage      Опис для довідки (може бути NULL).
- * @return 0 успіх; -1 при помилці (некоректні аргументи або нестача пам'яті).
+ * @brief Додає опцію за шаблоном "name" або "name=value".
+ * @param p Парсер.
+ * @param pattern Шаблон (без префіксу --).
+ * @param short_name Коротке імʼя або NULL.
+ * @param handler Обробник значення.
+ * @param usage Опис для хелпу.
+ * @return 0 — успіх, -1 — помилка.
  */
 int arg_parser_add_auto (
     arg_parser_t *p,
@@ -204,13 +186,9 @@ int arg_parser_add_auto (
 }
 
 /**
- * @brief Надрукувати заголовок довідки перед списком опцій.
- *
- * Використовує користувацький колбек, якщо його встановлено, або друкує
- * стандартний рядок "Використання".
- *
- * @param p   Парсер із налаштованим колбеком.
- * @param out Потік для друку (stdout чи stderr).
+ * @brief Друкує заголовок usage або викликає користувацький колбек.
+ * @param p Парсер.
+ * @param out Потік виводу.
  */
 static void print_usage_header (const arg_parser_t *p, FILE *out) {
     if (p->usage_handler) {
@@ -221,10 +199,9 @@ static void print_usage_header (const arg_parser_t *p, FILE *out) {
 }
 
 /**
- * Надрукувати таблицю опцій, зареєстрованих у парсері.
- *
- * @param p   Парсер (може бути NULL — тоді нічого не робить).
- * @param out Потік для виводу (не NULL, типово stdout).
+ * @brief Друкує таблицю опцій із колонками long/short/usage.
+ * @param p Парсер.
+ * @param out Потік виводу.
  */
 void arg_parser_print_options (const arg_parser_t *p, FILE *out) {
     if (!p)
@@ -249,12 +226,11 @@ void arg_parser_print_options (const arg_parser_t *p, FILE *out) {
 }
 
 /**
- * @brief Застосувати обробник для знайденої опції, розпарсивши значення.
- *
- * @param p   Парсер, що виконує виклик (залишено на випадок розширень).
- * @param opt Структура з описом опції та обробником.
- * @param arg Початковий аргумент із argv.
- * @return Значення, повернуте обробником (0 успіх; ненульове → помилка).
+ * @brief Викликає обробник конкретної опції, видобуваючи значення.
+ * @param p Парсер.
+ * @param opt Опис опції.
+ * @param arg Аргумент рядка (вигляд --name[=value]).
+ * @return Код, повернений обробником (0 — успіх).
  */
 static int handle_option (arg_parser_t *p, const arg_option_t *opt, const char *arg) {
     const char *value = NULL;
@@ -268,16 +244,15 @@ static int handle_option (arg_parser_t *p, const arg_option_t *opt, const char *
         }
         value = eq + 1;
     }
-    (void)p; /* наразі не використовується */
+    (void)p;
     return opt->handler (value);
 }
 
 /**
- * @brief Розпізнати один аргумент: пошук опції або передача у дефолтний колбек.
- *
- * @param p   Активний парсер.
- * @param arg Поточний аргумент із командного рядка.
- * @return 0 у разі успіху; -1, якщо опція невідома або обробник повернув помилку.
+ * @brief Розбирає один аргумент: знаходить опцію або викликає default.
+ * @param p Парсер.
+ * @param arg Аргумент.
+ * @return 0 — успіх, -1 — помилка/невідома опція.
  */
 static int parse_one (arg_parser_t *p, const char *arg) {
     for (size_t i = 0; i < p->count; i++) {
@@ -293,16 +268,11 @@ static int parse_one (arg_parser_t *p, const char *arg) {
 }
 
 /**
- * Розпарсити аргументи командного рядка і викликати обробники.
- *
- * Особливості:
- * - Підтримує --help/-h: друкує заголовок довідки (за наявності) та список опцій і завершує роботу.
- * - Обробляє як довгі, так і короткі форми; значення для опцій передаються як --name=value.
- *
- * @param p    Парсер (не NULL).
+ * @brief Розбирає масив аргументів; підтримує --help/-h для друку usage.
+ * @param p Парсер.
  * @param argc Кількість аргументів.
- * @param argv Вектор аргументів.
- * @return 0 успіх; -1 при помилці розбору чи обробки.
+ * @param argv Масив аргументів.
+ * @return 0 — успіх, -1 — помилка.
  */
 int arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]) {
     if (!p || argc < 0)
@@ -314,7 +284,7 @@ int arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]) {
             print_usage_header (p, stdout);
             arg_parser_print_options (p, stdout);
             p->printed_usage = 1;
-            return 0; /* завершити після help */
+            return 0;
         }
         if (parse_one (p, arg) != 0)
             return -1;

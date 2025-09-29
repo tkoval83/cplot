@@ -1,6 +1,11 @@
 /**
  * @file help.c
- * @brief Help text for the client-side CLI.
+ * @brief Автоматична генерація довідки CLI.
+ * @ingroup help
+ * @details
+ * Формує текст довідки на основі описів команд і опцій з `args.c`. Містить
+ * внутрішні допоміжні структури і функції для рендеру таблиць параметрів,
+ * секцій команд і службових заголовків.
  */
 #include <stdbool.h>
 #include <stdio.h>
@@ -8,8 +13,11 @@
 
 #include "args.h"
 #include "help.h"
-#include "proginfo.h" /* Needed for __PROGRAM_NAME__, __PROGRAM_VERSION__, __PROGRAM_AUTHOR__ */
+#include "proginfo.h"
 
+/**
+ * @brief Друкує загальний опис призначення програми.
+ */
 static void cli_description (void) {
     fprintf (stdout, "Опис:\n");
     fprintf (
@@ -19,39 +27,57 @@ static void cli_description (void) {
                 "  розміри паперу і швидкості руху.\n\n");
 }
 
+/**
+ * @brief Відображення ключа групи опцій у локалізований заголовок.
+ */
 typedef struct option_group_title {
-    const char *key;
-    const char *title;
+    const char *key;   /**< Ключ групи (internal id). */
+    const char *title; /**< Локалізований заголовок. */
 } option_group_title_t;
 
+/**
+ * @brief Таблиця локалізованих заголовків груп опцій.
+ */
 static const option_group_title_t k_option_titles[] = {
     { "global", "Загальні параметри" },
     { "layout", "Параметри розкладки" },
     { "device-settings", "Налаштування команди device" },
     { "font", "Опції команди font" },
     { "config", "Параметри конфігурації" },
-    /* Підкоманда shape відсутня у CLI */
+
 };
 
+/** \brief Максимальна кількість груп опцій, які можуть бути надруковані. */
 #define MAX_OPTION_GROUPS 16
 
+/**
+ * @brief Оцінює довжину текстової мітки опції для вирівнювання колонок.
+ * @param desc Опис опції.
+ * @return Кількість символів мітки "-s, --long <ARG>".
+ */
 static size_t option_label_length (const cli_option_desc_t *desc) {
     size_t len = 0;
     if (desc->short_name != '\0')
-        len += 4; // "-x, "
+        len += 4;
     else
-        len += 4; // відступ для вирівнювання
+        len += 4;
 
-    len += 2; // префікс "--"
+    len += 2;
     if (desc->long_name)
         len += strlen (desc->long_name);
 
     if (desc->arg_placeholder && desc->arg_placeholder[0] != '\0')
-        len += 3 + strlen (desc->arg_placeholder); // пробіл + <...>
+        len += 3 + strlen (desc->arg_placeholder);
 
     return len;
 }
 
+/**
+ * @brief Форматує мітку опції у буфер.
+ * @param desc Опис опції.
+ * @param buf [out] Вихідний буфер (C‑рядок).
+ * @param buf_size Розмір буфера у байтах (включно з нуль-термінатором).
+ */
 static void format_option_label (const cli_option_desc_t *desc, char *buf, size_t buf_size) {
     size_t written = 0;
     if (desc->short_name != '\0') {
@@ -95,6 +121,11 @@ static void format_option_label (const cli_option_desc_t *desc, char *buf, size_
     }
 }
 
+/**
+ * @brief Повертає локалізований заголовок для ключа групи.
+ * @param group_key Ключ групи або `NULL`/порожній.
+ * @return Рядок заголовка; для невідомих ключів — сам ключ.
+ */
 static const char *lookup_group_title (const char *group_key) {
     if (!group_key || group_key[0] == '\0')
         return "Інші параметри";
@@ -105,6 +136,13 @@ static const char *lookup_group_title (const char *group_key) {
     return group_key;
 }
 
+/**
+ * @brief Додає ключ групи до множини вже надрукованих.
+ * @param group_key Ключ групи (може бути `NULL` — трактує як порожній).
+ * @param printed Масив покажчиків на ключі (накопичувач).
+ * @param printed_count Лічильник елементів у `printed` (буде оновлено).
+ * @return 1 — додано новий ключ; 0 — ключ уже був присутній.
+ */
 static int add_group_marker (const char *group_key, const char **printed, size_t *printed_count) {
     if (!group_key)
         group_key = "";
@@ -119,8 +157,15 @@ static int add_group_marker (const char *group_key, const char **printed, size_t
     return 1;
 }
 
-static int
-group_already_printed (const char *group_key, const char **printed, size_t printed_count) {
+/**
+ * @brief Перевіряє, чи група вже була надрукована.
+ * @param group_key Ключ групи або `NULL` (трактує як порожній).
+ * @param printed Масив уже надрукованих ключів.
+ * @param printed_count Кількість елементів у `printed`.
+ * @return 1 — вже надрукована; 0 — ще ні.
+ */
+static int group_already_printed (
+    const char *group_key, const char **printed, size_t printed_count) {
     if (!group_key)
         group_key = "";
     for (size_t i = 0; i < printed_count; ++i) {
@@ -130,11 +175,23 @@ group_already_printed (const char *group_key, const char **printed, size_t print
     return 0;
 }
 
+/**
+ * @brief Друкує пробіли для відступу.
+ * @param stream Потік виводу.
+ * @param indent Кількість пробілів.
+ */
 static void print_indent (FILE *stream, unsigned indent) {
     for (unsigned i = 0; i < indent; ++i)
         fputc (' ', stream);
 }
 
+/**
+ * @brief Друкує один рядок опції: вирівняна мітка + опис.
+ * @param desc Опис опції.
+ * @param label_width Ширина колонки мітки.
+ * @param stream Потік виводу.
+ * @param indent Відступ зліва у пробілах.
+ */
 static void print_option_entry (
     const cli_option_desc_t *desc, size_t label_width, FILE *stream, unsigned indent) {
     char label[128];
@@ -143,13 +200,25 @@ static void print_option_entry (
     fprintf (stream, "%-*s %s\n", (int)label_width, label, desc->description);
 }
 
+/**
+ * @brief Налаштування рендеру однієї групи опцій.
+ */
 typedef struct option_group_render {
-    const char *group_key;
-    const char *title_override;
-    unsigned heading_indent;
-    unsigned entry_indent;
+    const char *group_key;      /**< Ключ групи для відбору опцій. */
+    const char *title_override; /**< Явний заголовок або `NULL` для lookup. */
+    unsigned heading_indent;    /**< Відступ для заголовка. */
+    unsigned entry_indent;      /**< Відступ для рядків опцій. */
 } option_group_render_t;
 
+/**
+ * @brief Друкує групу опцій, що відповідають `render->group_key`.
+ * @param render Налаштування рендеру.
+ * @param options Масив описів опцій.
+ * @param count Кількість опцій у масиві.
+ * @param label_width Ширина колонки мітки.
+ * @param stream Потік виводу.
+ * @return true — щось надруковано; false — у групі немає опцій.
+ */
 static bool emit_option_group (
     const option_group_render_t *render,
     const cli_option_desc_t *options,
@@ -183,6 +252,12 @@ static bool emit_option_group (
     return header_printed;
 }
 
+/**
+ * @brief Обчислює максимальну ширину колонки міток для вирівнювання.
+ * @param options Масив описів опцій.
+ * @param count Кількість елементів у масиві.
+ * @return Максимальна довжина текстової мітки.
+ */
 static size_t compute_label_width (const cli_option_desc_t *options, size_t count) {
     if (!options || count == 0)
         return 0;
@@ -195,6 +270,9 @@ static size_t compute_label_width (const cli_option_desc_t *options, size_t coun
     return width;
 }
 
+/**
+ * @brief Друкує секцію глобальних опцій.
+ */
 static void cli_global_options (
     const cli_option_desc_t *options,
     size_t option_count,
@@ -207,12 +285,16 @@ static void cli_global_options (
         add_group_marker (render.group_key, printed_groups, printed_count);
 }
 
+/**
+ * @brief Відповідність команди та групи опцій для секцій у довідці.
+ */
 typedef struct command_option_section {
-    const char *command;
-    const char *group_key;
-    const char *title;
+    const char *command;   /**< Імʼя команди. */
+    const char *group_key; /**< Ключ групи опцій. */
+    const char *title;     /**< Заголовок секції. */
 } command_option_section_t;
 
+/** \brief Перелік секцій опцій, згрупованих за командами. */
 static const command_option_section_t k_command_sections[] = {
     { "print", "layout", "Параметри розкладки" },
     { "device", "device-settings", "Налаштування перед виконанням дій" },
@@ -220,11 +302,15 @@ static const command_option_section_t k_command_sections[] = {
     { "config", "config", "Опції команди config" },
 };
 
+/**
+ * @brief Опис доступної дії команди `device`.
+ */
 typedef struct device_action_desc {
-    const char *syntax;
-    const char *description;
+    const char *syntax;      /**< Синтаксис (коротка форма виклику). */
+    const char *description; /**< Локалізований опис. */
 } device_action_desc_t;
 
+/** \brief Таблиця доступних дій для `device`. */
 static const device_action_desc_t k_device_actions[] = {
     { "profile", "Підібрати профіль для активного пристрою та оновити локальні параметри" },
     { "list", "Перелічити підключені AxiDraw-пристрої" },
@@ -240,6 +326,10 @@ static const device_action_desc_t k_device_actions[] = {
     { "version", "Вивести прошивку та сумісність" },
 };
 
+/**
+ * @brief Друкує таблицю доступних дій команди `device`.
+ * @param stream Потік виводу.
+ */
 static void print_device_actions (FILE *stream) {
     size_t max_len = 0;
     for (size_t i = 0; i < sizeof (k_device_actions) / sizeof (k_device_actions[0]); ++i) {
@@ -259,8 +349,12 @@ static void print_device_actions (FILE *stream) {
     fprintf (stream, "\n");
 }
 
-/* Блок підкоманди shape відсутній у CLI */
-
+/**
+ * @brief Друкує перелік ключів для `config --set` з описами.
+ * @param stream Потік виводу.
+ * @param heading_indent Відступ для заголовка.
+ * @param entry_indent Відступ для рядків переліку.
+ */
 static void print_config_keys (FILE *stream, unsigned heading_indent, unsigned entry_indent) {
     size_t key_count = 0;
     const cli_config_desc_t *keys = argdefs_config_keys (&key_count);
@@ -284,6 +378,9 @@ static void print_config_keys (FILE *stream, unsigned heading_indent, unsigned e
     fprintf (stream, "\n");
 }
 
+/**
+ * @brief Друкує секцію "Команди" з їхніми описами та повʼязаними опціями.
+ */
 static void cli_commands (
     const cli_option_desc_t *options,
     size_t option_count,
@@ -325,6 +422,9 @@ static void cli_commands (
     }
 }
 
+/**
+ * @brief Друкує групи опцій, що не були привʼязані до конкретних команд.
+ */
 static void cli_remaining_groups (
     const cli_option_desc_t *options,
     size_t option_count,
@@ -344,17 +444,29 @@ static void cli_remaining_groups (
     }
 }
 
+/**
+ * @brief Друкує інформацію про автора програми.
+ */
 static void cli_author (void) { fprintf (stdout, "Автор: %s\n\n", __PROGRAM_AUTHOR__); }
 
+/**
+ * @copydoc cli_print_version
+ */
 void cli_print_version (void) {
     fprintf (stdout, "%s версія %s\n", __PROGRAM_NAME__, __PROGRAM_VERSION__);
 }
 
+/**
+ * @copydoc cli_usage
+ */
 void cli_usage (void) {
     fprintf (stdout, "Використання:\n");
     fprintf (stdout, "  %s [ЗАГАЛЬНІ ПАРАМЕТРИ] КОМАНДА [АРГУМЕНТИ...]\n\n", __PROGRAM_NAME__);
 }
 
+/**
+ * @copydoc cli_help
+ */
 void cli_help (void) {
     size_t option_count = 0;
     const cli_option_desc_t *options = argdefs_options (&option_count);

@@ -1,20 +1,7 @@
 /**
  * @file markdown.c
- * @brief Мінімальний розбір Markdown у контурні шляхи (geom_paths_t).
- *
- * @details
- * Реалізує спрощену підмножину Markdown без зовнішніх залежностей. На вході —
- * UTF‑8 рядок, на виході — полілінії у міліметрах (без розміщення на сторінці).
- * Підтримувані блоки (v1):
- *  - Заголовки `#`/`##`/`###` (лише зміна кеглю 24/18/14 pt)
- *  - Параграфи (порожній рядок — роздільник)
- *  - Блок‑цитати (`>`) — вертикальна лінія зліва + текст із відступом
- *  - Невпорядковані списки (`-`, `*`, `+`) з вкладеністю (кожні 2 пробіли)
- *  - Впорядковані списки (`1.`) з авто-нумерацією та вкладеністю (кожні 2 пробіли)
- *  - Інлайнові стилі: `*курсив*`, `**жирний**`, `~~закреслення~~`, `++підкреслення++`
- *
- * Розміщення (поля, орієнтація, позиція на сторінці) виконується модулем canvas
- * після побудови шляхів.
+ * @brief Реалізація спрощеного рендерингу Markdown.
+ * @ingroup markdown
  */
 
 #include "markdown.h"
@@ -31,39 +18,45 @@
 #include <string.h>
 
 /**
- * @brief Буфер для підготовки інлайнового тексту та стилів Markdown.
- *
- * Під час парсингу `md_inline_parse()` наповнює структуру очищеним текстом
- * без службових маркерів та масивом `text_span_t` для застосування стилів.
+ * @brief Буфер інлайнового тексту після розмітки Markdown.
  */
 typedef struct {
-    char *text;         /**< очищений текст без маркерів */
-    text_span_t *spans; /**< масив інлайнових стилів */
-    size_t span_count;  /**< кількість активних спанів */
-    size_t span_cap;    /**< місткість масиву спанів */
+    char *text;             /**< Нормалізований текст без маркерів `*`/`_`. */
+    text_span_t *spans;     /**< Масив стилізованих ділянок (курсив/напівжирний). */
+    size_t span_count;      /**< Кількість заповнених елементів у `spans`. */
+    size_t span_cap;        /**< Ємність масиву `spans`. */
 } md_inline_buffer_t;
 
 /**
- * @brief Результат рендерингу блоку Markdown перед додаванням до полотна.
- *
- * Містить геометрію в локальних координатах та, за потреби, метрики рядків.
+ * @brief Результат рендерингу одного текстового блоку.
  */
 typedef struct {
-    geom_paths_t paths;         /**< відрендерені шляхи з урахуванням зсуву */
-    text_line_metrics_t *lines; /**< метрики рядків (може бути NULL) */
-    size_t line_count;          /**< кількість рядків */
-    geom_bbox_t bbox;           /**< межі відрендерованого блоку */
+    geom_paths_t paths;          /**< Контури тексту, змінені у глобальні координати. */
+    text_line_metrics_t *lines;  /**< Масив метрик рядків або `NULL`. */
+    size_t line_count;           /**< Кількість рядків у `lines`. */
+    geom_bbox_t bbox;            /**< Обмежувальний прямокутник блоку. */
 } md_render_block_t;
 
 /**
- * @brief Опис одного пункту списку Markdown.
+ * @brief Представлення одного пункту списку.
  */
 typedef struct {
-    char *text;       /**< сирий текст пункту списку */
-    int level;        /**< рівень вкладеності (0 = верхній) */
-    const char *next; /**< позиція у вихідному документі після пункту */
+    char *text;         /**< Текст пункту (виділена памʼять). */
+    int level;          /**< Рівень вкладеності (0..31). */
+    const char *next;   /**< Вказівник на початок наступного рядка вхідного тексту. */
 } md_list_item_t;
 
+/**
+ * @brief Рендерить один текстовий блок у контури.
+ * @param text Вхідний текст (без розмітки Markdown).
+ * @param opts Опції рендерингу.
+ * @param size_pt Кегль у pt.
+ * @param y_offset_mm Зсув Y для початку блоку.
+ * @param accum [out] Акумулятор контурів.
+ * @param info_out [out] Якщо не `NULL` — метрики рендерингу.
+ * @param out_height_mm [out] Оцінена висота блоку (мм).
+ * @return 0 — успіх; 2 — помилка рендерингу/памʼяті.
+ */
 static int render_text_block (
     const char *text,
     const markdown_opts_t *opts,
@@ -78,8 +71,8 @@ static int is_ul_marker (char c);
 static int is_ol_marker (const char *line, size_t len, size_t *digits_len);
 
 /**
- * @brief Скидає буфер інлайнових стилів у початковий стан.
- * @param buf Структура для ініціалізації (може бути NULL).
+ * @brief Ініціалізує буфер інлайнового тексту.
+ * @param buf [out] Буфер, що буде очищено.
  */
 static void md_inline_buffer_init (md_inline_buffer_t *buf) {
     if (!buf)
@@ -91,8 +84,8 @@ static void md_inline_buffer_init (md_inline_buffer_t *buf) {
 }
 
 /**
- * @brief Звільняє ресурси, повʼязані з буфером інлайнових стилів.
- * @param buf Структура для очищення (може бути NULL).
+ * @brief Звільняє ресурси буфера інлайнового тексту.
+ * @param buf Буфер; `NULL` ігнорується.
  */
 static void md_inline_buffer_dispose (md_inline_buffer_t *buf) {
     if (!buf)
@@ -105,8 +98,8 @@ static void md_inline_buffer_dispose (md_inline_buffer_t *buf) {
 }
 
 /**
- * @brief Ініціалізує блок рендерингу перед заповненням.
- * @param block Структура для скидання (може бути NULL).
+ * @brief Обнуляє структуру результату рендерингу.
+ * @param block [out] Структура для ініціалізації.
  */
 static void md_render_block_init (md_render_block_t *block) {
     if (!block)
@@ -115,8 +108,8 @@ static void md_render_block_init (md_render_block_t *block) {
 }
 
 /**
- * @brief Звільняє ресурси блоку рендерингу.
- * @param block Структура для очищення (може бути NULL).
+ * @brief Звільняє ресурси блоку рендерингу (контури/метрики).
+ * @param block Блок для звільнення.
  */
 static void md_render_block_dispose (md_render_block_t *block) {
     if (!block)
@@ -128,16 +121,14 @@ static void md_render_block_dispose (md_render_block_t *block) {
 }
 
 /**
- * @brief Перетворює типографські пункти у міліметри.
- * @param pt Значення у пунктах (pt).
- * @return Еквівалентне значення у міліметрах.
+ * @brief Перетворює пункти типографії у міліметри.
+ * @param pt Значення в пунктах (1pt = 1/72" ).
+ * @return Міліметри.
  */
 static double pt_to_mm (double pt) { return pt * (25.4 / 72.0); }
 
 /**
- * @brief Повертає базовий кегль для рендерингу Markdown.
- * @param opts Опції рендерингу (може бути NULL).
- * @return Кегль у пунктах.
+ * @brief Повертає базовий кегль у pt, із запасним значенням 14.
  */
 static double markdown_default_font_size (const markdown_opts_t *opts) {
     if (!opts || !(opts->base_size_pt > 0.0))
@@ -146,9 +137,7 @@ static double markdown_default_font_size (const markdown_opts_t *opts) {
 }
 
 /**
- * @brief Обчислює базовий вертикальний відступ між блоками.
- * @param opts Опції рендерингу (може бути NULL).
- * @return Висота відступу у міліметрах.
+ * @brief Вертикальний інтервал між блоками, пропорційний кеглю.
  */
 static double markdown_block_gap (const markdown_opts_t *opts) {
     double base = markdown_default_font_size (opts);
@@ -156,10 +145,7 @@ static double markdown_block_gap (const markdown_opts_t *opts) {
 }
 
 /**
- * @brief Перевіряє, чи складається рядок лише з пробільних символів.
- * @param line Початок рядка.
- * @param len  Довжина рядка.
- * @return true, якщо рядок порожній або містить лише пробіли.
+ * @brief Перевіряє, чи рядок порожній (лише пропуски/табуляції/\r).
  */
 static bool markdown_is_blank_line (const char *line, size_t len) {
     if (!line)
@@ -173,10 +159,8 @@ static bool markdown_is_blank_line (const char *line, size_t len) {
 }
 
 /**
- * @brief Додає копію шляхів із одного контейнера до іншого.
- * @param dst Місце призначення.
- * @param src Джерело шляхів.
- * @return 0 при успіху; 1 при помилці памʼяті.
+ * @brief Додає копії шляхів `src` до `dst`.
+ * @return 0 — успіх; 1 — помилка.
  */
 static int paths_append (geom_paths_t *dst, const geom_paths_t *src) {
     if (!dst || !src)
@@ -192,20 +176,20 @@ static int paths_append (geom_paths_t *dst, const geom_paths_t *src) {
 }
 
 /**
- * @brief Тимчасовий запис для стеку інлайнових маркерів.
+ * @brief Маркер стилю в інлайновому парсері.
  */
 typedef struct {
-    unsigned flag; /**< Прапорець стилю, який було відкрито. */
-    size_t start;  /**< Позиція у вихідному тексті, де стиль почав діяти. */
+    unsigned flag; /**< Прапор стилю (`TEXT_STYLE_*`). */
+    size_t start;  /**< Початкова позиція у вихідному буфері `text`. */
 } md_marker_t;
 
 /**
- * @brief Додає інлайновий спан у буфер розмітки.
- * @param buf   Цільовий буфер.
- * @param start Початок діапазону у вихідному тексті.
- * @param end   Кінець діапазону (невключно).
- * @param flag  Прапорець стилю (TEXT_STYLE_*).
- * @return 0 при успіху; 1 при помилці памʼяті.
+ * @brief Додає стилізований діапазон у буфер інлайнового тексту.
+ * @param buf Буфер.
+ * @param start Початок у символах.
+ * @param end Кінець (винятковий) у символах.
+ * @param flag Прапор стилю (`TEXT_STYLE_*`).
+ * @return 0 — успіх; 1 — помилка виділення памʼяті.
  */
 static int md_inline_emit_span (md_inline_buffer_t *buf, size_t start, size_t end, unsigned flag) {
     if (!buf || start >= end)
@@ -223,13 +207,13 @@ static int md_inline_emit_span (md_inline_buffer_t *buf, size_t start, size_t en
 }
 
 /**
- * @brief Обробляє відкриття/закриття інлайнового стилю.
- * @param buf         Буфер для запису спанів.
- * @param stack       Стек відкритих стилів.
- * @param sp          Поточна глибина стеку.
- * @param flag        Прапорець стилю (TEXT_STYLE_*).
- * @param current_len Поточна довжина очищеного тексту.
- * @return 0 при успіху; 1 при помилці памʼяті під час додавання спану.
+ * @brief Обробляє відкриття/закриття маркерів стилю (*, **, _, __).
+ * @param buf Буфер із результатами.
+ * @param stack Стек відкритих маркерів.
+ * @param sp [in,out] Вказівник на вершину стеку.
+ * @param flag Цільовий стиль.
+ * @param current_len Поточна довжина вихідного тексту (для розмітки діапазону).
+ * @return 0 — успіх; 1 — помилка аргументів.
  */
 static int md_inline_toggle (
     md_inline_buffer_t *buf, md_marker_t *stack, int *sp, unsigned flag, size_t current_len) {
@@ -240,16 +224,16 @@ static int md_inline_toggle (
         return md_inline_emit_span (buf, marker.start, current_len, flag & 0xFFFFu);
     }
     if (*sp >= 16)
-        return 0; /* ігноруємо надлишок вкладеності */
+        return 0;
     stack[(*sp)++] = (md_marker_t){ flag, current_len };
     return 0;
 }
 
 /**
- * @brief Розбирає інлайнові маркери Markdown у текст і спани.
- * @param input Вхідний текст.
- * @param out   Буфер для результату (ініціалізується усередині).
- * @return 0 при успіху; 1 при помилці памʼяті.
+ * @brief Розбирає інлайнові акценти Markdown (`*`, `_`).
+ * @param input Вхідний рядок (UTF‑8).
+ * @param out [out] Буфер, у який записуються нормалізований текст і спани стилів.
+ * @return 0 — успіх; 1 — помилка виділення памʼяті або аргументів.
  */
 static int md_inline_parse (const char *input, md_inline_buffer_t *out) {
     if (!out)
@@ -306,17 +290,19 @@ static int md_inline_parse (const char *input, md_inline_buffer_t *out) {
 }
 
 /**
- * @brief Рендерить очищений текст Markdown із заданими спанами у шляхи.
- * @param opts            Опції рендерингу (може бути NULL).
- * @param inline_buf      Буфер із текстом та спанами.
- * @param size_pt         Кегль тексту.
- * @param frame_width_mm  Доступна ширина кадру.
- * @param x_offset_mm     Горизонтальний зсув перед додаванням до полотна.
- * @param y_offset_mm     Вертикальний зсув перед додаванням до полотна.
- * @param want_lines      Чи потрібні метрики рядків для подальших обчислень.
- * @param info            Необовʼязково: збирає статистику рендеру.
- * @param out_block       Результат з геометрією.
- * @return 0 при успіху; 2 при помилці рендерингу.
+ * @brief Рендерить інлайновий буфер у контури з параметрами розкладки.
+ * @param opts Опції рендерингу (родина, базовий кегль, ширина кадру).
+ * @param inline_buf Підготовлений буфер тексту та спанів стилів.
+ * @param size_pt Кегль у pt для цього блоку (<=0 — взяти з `opts`).
+ * @param frame_width_mm Ширина кадру (мм) для переносу рядків.
+ * @param x_offset_mm Зсув X у глобальних координатах (мм).
+ * @param y_offset_mm Зсув Y у глобальних координатах (мм).
+ * @param want_lines Чи повертати масив метрик рядків.
+ * @param align Вирівнювання тексту.
+ * @param force_break Дозволити розрив дуже довгих слів.
+ * @param info [out] Якщо не `NULL` — заповнюються загальні метрики.
+ * @param out_block [out] Вихідний блок з контурами/метриками/bbox.
+ * @return 0 — успіх; 1 — некоректні аргументи; 2 — помилка рендеру/памʼяті.
  */
 static int md_render_inline_block (
     const markdown_opts_t *opts,
@@ -381,10 +367,10 @@ static int md_render_inline_block (
 }
 
 /**
- * @brief Повертає висоту рядка для відрендерованого тексту.
- * @param info        Статистика рендеру (може бути NULL).
- * @param fallback_pt Кегль, який використати, якщо статистика відсутня.
- * @return Висота рядка у міліметрах.
+ * @brief Обчислює висоту рядка у мм.
+ * @param info Метрики рендерингу; якщо `NULL` або значення некоректне — використати `fallback_pt`.
+ * @param fallback_pt Кегль у pt для оцінки висоти, коли немає точних метрик.
+ * @return Висота рядка у мм.
  */
 static double markdown_line_height (const text_render_info_t *info, double fallback_pt) {
     if (info && info->line_height > 0.0)
@@ -393,15 +379,15 @@ static double markdown_line_height (const text_render_info_t *info, double fallb
 }
 
 /**
- * @brief Оцінює вертикальні межі першого рядка блоку тексту.
- * @param paths            Відрендеровані шляхи.
- * @param lines            Метрики рядків (може бути NULL).
- * @param line_count       Кількість рядків у метриках.
- * @param y_offset_mm      Початковий вертикальний зсув блоку.
- * @param line_height_mm   Типова висота рядка.
- * @param cutoff_adjust_mm Зсув, що обмежує включення наступних рядків.
- * @param top_out          [out] Верхня межа першого рядка.
- * @param bottom_out       [out] Нижня межа першого рядка.
+ * @brief Оцінює верх/низ першого рядка блоку для вертикального вирівнювання маркерів.
+ * @param paths Контури блоку.
+ * @param lines Масив метрик рядків.
+ * @param line_count Кількість рядків.
+ * @param y_offset_mm Зсув Y блоку.
+ * @param line_height_mm Номінальна висота рядка (мм).
+ * @param cutoff_adjust_mm Корекція межі відсікання між 1‑м і 2‑м рядками.
+ * @param top_out [out] Верхня межа першого рядка (мм).
+ * @param bottom_out [out] Нижня межа першого рядка (мм).
  */
 static void markdown_first_line_bounds (
     const geom_paths_t *paths,
@@ -450,12 +436,13 @@ static void markdown_first_line_bounds (
 }
 
 /**
- * @brief Збирає послідовність рядків із заданим префіксним маркером.
- * @param p         Початкове положення в тексті.
- * @param marker    Символ-маркер (наприклад, '>').
- * @param out_text  [out] Зконкатенований вміст без маркерів (може бути NULL).
- * @param out_next  [out] Позиція після останнього рядка блоку (може бути NULL).
- * @return 1, якщо принаймні один рядок зібрано; 0, якщо маркер не знайдено; 2 при помилці памʼяті.
+ * @brief Збирає послідовні рядки, що починаються з символу `marker` (напр., '>').
+ * @param p Початок сканування у вхідному тексті.
+ * @param marker Маркер префіксу першої колонки (після пробілів/табів).
+ * @param out_text [out] Новий рядок із зʼєднаним вмістом без маркерів; або `NULL` — щоб
+ *            лише перевірити наявність.
+ * @param out_next [out] Вказівник на позицію після зібраного блоку.
+ * @return 1 — зібрано; 0 — префікс не знайдено; 2 — помилка памʼяті.
  */
 static int markdown_collect_prefixed_lines (
     const char *p, char marker, char **out_text, const char **out_next) {
@@ -534,19 +521,13 @@ static int markdown_collect_prefixed_lines (
     return out_text ? 1 : 0;
 }
 
-/* ---- Таблиці (GFM) -------------------------------------------------------- */
-
 /**
- * @brief Розбити рядок таблиці на осередки за роздільником '|'.
- *
- * Ігнорує початковий та кінцевий символ '|' (за наявності), обрізає пробіли
- * з обох країв осередків.
- *
- * @param line       Вхідний рядок.
- * @param len        Довжина рядка.
- * @param cells_out  [out] Масив рядків-осередків (звільняє викликач через table_free_cells()).
- * @param count_out  [out] Кількість осередків.
- * @return 0 при успіху; 1 при помилці памʼяті/аргументів.
+ * @brief Розбиває один рядок таблиці на комірки за символом '|'.
+ * @param line Рядок таблиці без переводу рядка.
+ * @param len Довжина рядка.
+ * @param cells_out [out] Масив нових рядків‑комірок.
+ * @param count_out [out] Кількість елементів у `cells_out`.
+ * @return 0 — успіх; 1 — помилка аргументів або памʼяті.
  */
 static int table_split_cells (const char *line, size_t len, char ***cells_out, size_t *count_out) {
     if (!line || !cells_out || !count_out)
@@ -565,7 +546,7 @@ static int table_split_cells (const char *line, size_t len, char ***cells_out, s
         ++start;
     if (end > start && end[-1] == '|')
         --end;
-    /* Порахувати кількість розділювачів. */
+
     size_t parts = 1;
     for (const char *p = start; p < end; ++p)
         if (*p == '|')
@@ -601,7 +582,7 @@ static int table_split_cells (const char *line, size_t len, char ***cells_out, s
 }
 
 /**
- * @brief Звільнити масив осередків таблиці.
+ * @brief Звільняє масив комірок таблиці, створений `table_split_cells`.
  */
 static void table_free_cells (char **cells, size_t count) {
     if (!cells)
@@ -611,18 +592,6 @@ static void table_free_cells (char **cells, size_t count) {
     free (cells);
 }
 
-/**
- * @brief Перевірити, чи рядок є роздільником таблиці та зчитати вирівнювання.
- *
- * Синтаксис стовпця: `---`, `:---`, `---:`, `:---:` (мінімум 3 дефіси).
- * Стовпці розділяються `|`, дозволені пробіли по краях.
- *
- * @param line      Рядок для аналізу.
- * @param len       Довжина рядка.
- * @param align_out [out] Масив вирівнювань для стовпців (0=left,1=center,2=right), може бути NULL.
- * @param cols_out  [out] Кількість стовпців (може бути NULL).
- * @return 1 якщо це валідний роздільник; 0 інакше.
- */
 static int
 table_is_separator_line (const char *line, size_t len, int *align_out, size_t *cols_out) {
     if (!line || len == 0)
@@ -637,7 +606,6 @@ table_is_separator_line (const char *line, size_t len, int *align_out, size_t *c
     }
     int ok = 1;
     if (align_out) {
-        /* Очікуємо, що align_out має місткість >= count; викликаючий код забезпечує. */
     }
     for (size_t i = 0; i < count; ++i) {
         char *c = cells[i];
@@ -674,11 +642,11 @@ table_is_separator_line (const char *line, size_t len, int *align_out, size_t *c
         if (align_out) {
             int a = 0;
             if (left_colon && right_colon)
-                a = 1; /* center */
+                a = 1;
             else if (right_colon)
-                a = 2; /* right */
+                a = 2;
             else
-                a = 0; /* left */
+                a = 0;
             align_out[i] = a;
         }
     }
@@ -689,10 +657,13 @@ table_is_separator_line (const char *line, size_t len, int *align_out, size_t *c
 }
 
 /**
- * @brief Розібрати та відрендерити таблицю Markdown (GFM).
- *
- * Формат очікується як мінімум з двома рядками: заголовок і роздільник,
- * далі — рядки даних до першого порожнього або невідповідного рядка.
+ * @brief Прагне розпізнати таблицю Markdown і відрендерити її.
+ * @param p Поточна позиція у тексті.
+ * @param opts Опції рендерингу.
+ * @param y_offset [in,out] Поточний вертикальний зсув; оновлюється після таблиці.
+ * @param out [out] Акумулятор контурів (додаються нові шляхи).
+ * @param p_out [out] Позиція після обробленого блоку.
+ * @return 1 — таблицю оброблено; 0 — це не таблиця; 2 — помилка.
  */
 static int markdown_try_table (
     const char *p,
@@ -722,7 +693,6 @@ static int markdown_try_table (
     if (!table_is_separator_line (line2, line2_len, align_tmp, &sep_cols))
         return 0;
 
-    /* Парсимо заголовок. */
     char **head_cells = NULL;
     size_t head_cols = 0;
     if (table_split_cells (p, line1_len, &head_cells, &head_cols) != 0)
@@ -740,7 +710,6 @@ static int markdown_try_table (
     for (size_t i = 0; i < cols; ++i)
         align[i] = (i < sep_cols) ? align_tmp[i] : 0;
 
-    /* Збираємо рядки даних. */
     const char *cursor = line2_end ? (line2_end + 1) : (line2 + line2_len);
     size_t rows_cap = 8, rows_len = 0;
     char ***rows = (char ***)calloc (rows_cap, sizeof (*rows));
@@ -762,7 +731,7 @@ static int markdown_try_table (
         char **cells = NULL;
         size_t cc = 0;
         if (table_split_cells (cursor, ll, &cells, &cc) != 0) {
-            /* cleanup */
+
             for (size_t r = 0; r < rows_len; ++r)
                 table_free_cells (rows[r], row_counts[r]);
             free (rows);
@@ -797,16 +766,13 @@ static int markdown_try_table (
         cursor = le ? (le + 1) : (cursor + ll);
     }
 
-    /* Візуалізувати таблицю. */
-    const double padding = 1.5; /* мм */
+    const double padding = 1.5;
     const double frame_w = opts->frame_width_mm;
     double col_w = frame_w / (double)cols;
-    /* Без додаткового відступу зверху: покладаємось на попередній блок.
-       Внизу додаємо стандартний block gap для симетрії з попереднім параграфом. */
+
     double base_line_mm = pt_to_mm (markdown_default_font_size (opts));
     double y = *y_offset;
 
-    /* Рядок заголовка: 2 проходи — виміряти, потім відцентрувати. */
     {
         double max_h = 0.0;
         for (size_t ci = 0; ci < cols; ++ci) {
@@ -858,7 +824,7 @@ static int markdown_try_table (
                                            : TEXT_ALIGN_LEFT,
                         true, &ci_info, &blk)
                     == 0) {
-                    double desired_top = y + padding; /* верхній відступ фіксований */
+                    double desired_top = y + padding;
                     double dy = desired_top - blk.bbox.min_y;
                     geom_paths_t shifted;
                     if (geom_paths_translate (&blk.paths, 0.0, dy, &shifted) == 0) {
@@ -877,7 +843,6 @@ static int markdown_try_table (
         y += row_h;
     }
 
-    /* Рядки даних. */
     for (size_t r = 0; r < rows_len; ++r) {
         char **cells = rows[r];
         size_t cc = row_counts[r];
@@ -931,7 +896,7 @@ static int markdown_try_table (
                                            : TEXT_ALIGN_LEFT,
                         true, &ci_info, &blk)
                     == 0) {
-                    double desired_top = y + padding; /* верхній відступ фіксований */
+                    double desired_top = y + padding;
                     double dy = desired_top - blk.bbox.min_y;
                     geom_paths_t shifted;
                     if (geom_paths_translate (&blk.paths, 0.0, dy, &shifted) == 0) {
@@ -950,13 +915,10 @@ static int markdown_try_table (
         y += row_h;
     }
 
-    /* Додатковий відступ після таблиці для візуального «дихання» */
-    /* Відступ після таблиці: повний рядок (baseline) */
     *y_offset = y + base_line_mm;
     if (p_out)
         *p_out = cursor;
 
-    /* Прибирання. */
     table_free_cells (head_cells, head_cols);
     for (size_t r = 0; r < rows_len; ++r)
         table_free_cells (rows[r], row_counts[r]);
@@ -967,8 +929,7 @@ static int markdown_try_table (
 }
 
 /**
- * @brief Очищає структуру пункту списку.
- * @param item Пункт для очищення (може бути NULL).
+ * @brief Звільняє ресурси пункту списку.
  */
 static void md_list_item_dispose (md_list_item_t *item) {
     if (!item)
@@ -981,10 +942,10 @@ static void md_list_item_dispose (md_list_item_t *item) {
 
 /**
  * @brief Зчитує один пункт невпорядкованого списку.
- * @param cursor   Поточна позиція у вихідному тексті.
- * @param item     [out] Опис пункту.
- * @param out_next [out] Початок наступного рядка після пункту (може бути NULL).
- * @return 1, якщо пункт зчитано; 0, якщо маркер не знайдено; 2 при помилці памʼяті.
+ * @param cursor Поточна позиція у вхідному тексті.
+ * @param item [out] Заповнений пункт (текст/рівень/next).
+ * @param out_next [out] Позиція після рядка пункту.
+ * @return 1 — знайдено; 0 — не пункт списку; 2 — помилка памʼяті.
  */
 static int markdown_read_ul_item (const char *cursor, md_list_item_t *item, const char **out_next) {
     if (out_next)
@@ -1024,12 +985,12 @@ static int markdown_read_ul_item (const char *cursor, md_list_item_t *item, cons
 }
 
 /**
- * @brief Додає до полотна один пункт невпорядкованого списку.
- * @param opts     Опції рендерингу.
- * @param item     Пункт списку з текстом і рівнем вкладеності.
- * @param y_offset [in,out] Поточний вертикальний зсув.
- * @param out      Контейнер шляхів для доповнення.
- * @return 0 при успіху; 2 при помилці рендерингу.
+ * @brief Рендерить пункт невпорядкованого списку з кулькою.
+ * @param opts Опції рендерингу.
+ * @param item Пункт списку.
+ * @param y_offset [in,out] Вертикальний зсув; збільшується на висоту пункту.
+ * @param out [out] Акумулятор контурів.
+ * @return 0 — успіх; 2 — помилка рендерингу/памʼяті.
  */
 static int markdown_render_ul_item (
     const markdown_opts_t *opts, const md_list_item_t *item, double *y_offset, geom_paths_t *out) {
@@ -1092,11 +1053,11 @@ static int markdown_render_ul_item (
 
 /**
  * @brief Зчитує один пункт впорядкованого списку.
- * @param cursor       Поточна позиція у вихідному тексті.
- * @param item         [out] Опис пункту.
- * @param marker_value [out] Початкове числове значення маркера (може бути NULL).
- * @param out_next     [out] Початок наступного рядка (може бути NULL).
- * @return 1 при успіху; 0 якщо маркер відсутній; 2 при помилці памʼяті.
+ * @param cursor Поточна позиція у вхідному тексті.
+ * @param item [out] Заповнений пункт.
+ * @param marker_value [out] Початкове значення індексу (якщо вказано у маркері).
+ * @param out_next [out] Позиція після рядка пункту.
+ * @return 1 — знайдено; 0 — не пункт списку; 2 — помилка памʼяті.
  */
 static int markdown_read_ol_item (
     const char *cursor, md_list_item_t *item, int *marker_value, const char **out_next) {
@@ -1122,7 +1083,7 @@ static int markdown_read_ol_item (
     if (marker_value)
         *marker_value = value;
 
-    const char *content = marker + digits + 2; /* '.' і пробіл */
+    const char *content = marker + digits + 2;
     size_t content_len = (size_t)(line_len - (content - cursor));
     char *text = (char *)malloc (content_len + 1);
     if (!text)
@@ -1144,13 +1105,13 @@ static int markdown_read_ol_item (
 }
 
 /**
- * @brief Додає до полотна один пункт впорядкованого списку.
- * @param opts     Опції рендерингу.
- * @param item     Пункт із текстом та рівнем вкладеності.
- * @param number   Порядковий номер, який слід відобразити.
- * @param y_offset [in,out] Поточний вертикальний зсув.
- * @param out      Контейнер шляхів для доповнення.
- * @return 0 при успіху; 2 при помилці рендерингу.
+ * @brief Рендерить пункт впорядкованого списку з числовою міткою.
+ * @param opts Опції рендерингу.
+ * @param item Пункт списку.
+ * @param number Номер елемента для відображення.
+ * @param y_offset [in,out] Вертикальний зсув; збільшується на висоту пункту.
+ * @param out [out] Акумулятор контурів.
+ * @return 0 — успіх; 2 — помилка рендерингу/памʼяті.
  */
 static int markdown_render_ol_item (
     const markdown_opts_t *opts,
@@ -1169,7 +1130,6 @@ static int markdown_render_ol_item (
     if (!(indent_mm >= 0.0))
         indent_mm = 0.0;
 
-    /* Лейбл (номер). */
     char label_text[32];
     snprintf (label_text, sizeof label_text, "%d.", number);
 
@@ -1195,7 +1155,6 @@ static int markdown_render_ol_item (
     if (!(label_width > 0.0))
         label_width = pt_to_mm (size_pt * 0.6);
 
-    /* Текст пункту. */
     md_inline_buffer_t item_buf;
     md_inline_buffer_init (&item_buf);
     if (md_inline_parse (item->text, &item_buf) != 0) {
@@ -1221,7 +1180,6 @@ static int markdown_render_ol_item (
     }
     md_inline_buffer_dispose (&item_buf);
 
-    /* Вирівнювання базових ліній. */
     double text_baseline = (item_block.line_count > 0) ? item_block.lines[0].baseline_y : 0.0;
     double label_baseline = (label_block.line_count > 0) ? label_block.lines[0].baseline_y : 0.0;
     double label_y = *y_offset + text_baseline - label_baseline;
@@ -1247,7 +1205,6 @@ static int markdown_render_ol_item (
         return 2;
     }
 
-    /* Оновити вертикальний зсув. */
     double top = item_block.bbox.min_y;
     double bottom = item_block.bbox.max_y;
     double label_top = label_block.bbox.min_y + label_y;
@@ -1269,14 +1226,14 @@ static int markdown_render_ol_item (
 }
 
 /**
- * @brief Прагне відрендерити заголовок (рядок із префіксом '#').
- * @param p        Поточна позиція у тексті.
- * @param opts     Опції рендерингу.
- * @param y_offset [in,out] Поточний вертикальний зсув.
- * @param out      Контейнер шляхів.
- * @param info     Необовʼязково: статистика рендеру (може бути NULL).
- * @param out_next [out] Позиція після блоку (може бути NULL).
- * @return 1, якщо блок опрацьовано; 0, якщо це не заголовок; 2 при помилці.
+ * @brief Прагне розпізнати заголовок Markdown (`#`, `##`, `###`).
+ * @param p Поточна позиція тексту.
+ * @param opts Опції рендерингу.
+ * @param y_offset [in,out] Поточний вертикальний зсув; оновлюється.
+ * @param out [out] Акумулятор контурів.
+ * @param info [out] Метрики останнього текстового блоку (може бути `NULL`).
+ * @param out_next [out] Позиція після обробленого рядка.
+ * @return 1 — оброблено; 0 — не заголовок; 2 — помилка.
  */
 static int markdown_try_heading (
     const char *p,
@@ -1304,7 +1261,7 @@ static int markdown_try_heading (
     if (level == 0 || level > 3 || cursor >= p + linelen || *cursor != ' ')
         return 0;
 
-    ++cursor; /* пропустити пробіл після #... */
+    ++cursor;
     size_t text_len = (size_t)(linelen - (cursor - p));
     char *heading = (char *)malloc (text_len + 1);
     if (!heading)
@@ -1328,14 +1285,14 @@ static int markdown_try_heading (
 }
 
 /**
- * @brief Прагне зібрати та відрендерити параграф (сукупність рядків).
- * @param p        Поточна позиція у тексті.
- * @param opts     Опції рендерингу.
- * @param y_offset [in,out] Поточний вертикальний зсув.
- * @param out      Контейнер шляхів.
- * @param info     Необовʼязково: статистика рендеру (може бути NULL).
- * @param out_next [out] Позиція після блоку (може бути NULL).
- * @return 1, якщо параграф опрацьовано; 0, якщо рядок порожній; 2 при помилці памʼяті.
+ * @brief Прагне розпізнати абзац (блок звичайного тексту).
+ * @param p Поточна позиція тексту.
+ * @param opts Опції рендерингу.
+ * @param y_offset [in,out] Поточний вертикальний зсув; оновлюється.
+ * @param out [out] Акумулятор контурів.
+ * @param info [out] Метрики останнього текстового блоку (може бути `NULL`).
+ * @param out_next [out] Позиція після обробленого блоку.
+ * @return 1 — оброблено; 0 — не абзац; 2 — помилка.
  */
 static int markdown_try_paragraph (
     const char *p,
@@ -1361,9 +1318,6 @@ static int markdown_try_paragraph (
         if (line_len == 0 || markdown_is_blank_line (cursor, line_len))
             break;
 
-        /* Якщо наступний рядок починає новий блочний елемент (UL/OL/TABLE),
-         * завершуємо параграф тут і дозволяємо зовнішньому циклу
-         * обробити список. */
         int indent = count_indent_spaces (cursor, line_len);
         const char *marker = cursor + indent;
         size_t rem = (line_len > (size_t)indent) ? (line_len - (size_t)indent) : 0;
@@ -1372,7 +1326,7 @@ static int markdown_try_paragraph (
             break;
         if (rem >= 3 && is_ol_marker (marker, rem, &digits))
             break;
-        /* Перевірка на таблицю: поточний рядок містить '|', а наступний — роздільник. */
+
         if (memchr (cursor, '|', line_len)) {
             const char *nline = line_end ? (line_end + 1) : (cursor + line_len);
             if (*nline) {
@@ -1433,16 +1387,6 @@ static int markdown_try_paragraph (
     return 1;
 }
 
-/**
- * Відрендерити один текстовий блок заданим кеглем і змістити його на `y_offset_mm` вниз.
- * @param text         Текст блоку в UTF‑8 (не NULL).
- * @param opts         Опції рендерингу (родина, ширина кадру).
- * @param size_pt      Кегль у пунктах (pt).
- * @param y_offset_mm  Зміщення по Y в міліметрах.
- * @param accum        Призначення для додавання шляхів.
- * @param info_out     Необовʼязково: метадані рендерингу.
- * @return 0 при успіху; 1 при помилці.
- */
 static int render_text_block (
     const char *text,
     const markdown_opts_t *opts,
@@ -1483,11 +1427,7 @@ static int render_text_block (
 }
 
 /**
- * Порахувати кількість «пробільних» позицій відступу на початку рядка.
- * Табуляція рахується як 4 пробіли.
- * @param line   Початок рядка.
- * @param linelen Довжина рядка.
- * @return Кількість відступу у позиціях.
+ * @brief Підраховує логічні пробіли відступу на початку рядка (таб = 4 пробіли).
  */
 static int count_indent_spaces (const char *line, size_t linelen) {
     int spaces = 0;
@@ -1503,19 +1443,15 @@ static int count_indent_spaces (const char *line, size_t linelen) {
     return spaces;
 }
 
-/**
- * Перевірити, чи символ є маркером невпорядкованого списку.
- * @param c Символ.
- * @return 1 якщо `c` ∈ {'-','*','+'}; інакше 0.
- */
+/** \brief Перевіряє символ маркера невпорядкованого списку ('-', '*', '+'). */
 static int is_ul_marker (char c) { return c == '-' || c == '*' || c == '+'; }
 
 /**
- * Перевірити, чи рядок починається з маркера впорядкованого списку: DIGITS '.' пробіл.
- * @param line   Початок рядка.
- * @param len    Довжина рядка до кінця або до \n.
- * @param[out] digits_len Скільки цифр у префіксі (0, якщо не OL).
- * @return 1, якщо це елемент OL; інакше 0.
+ * @brief Перевіряє, чи початок рядка має вигляд "<digits>. ".
+ * @param line Початок рядка.
+ * @param len Довжина доступного фрагмента.
+ * @param digits_len [out] Кількість цифр у префіксі.
+ * @return 1 — так; 0 — ні.
  */
 static int is_ol_marker (const char *line, size_t len, size_t *digits_len) {
     size_t i = 0;
@@ -1532,13 +1468,8 @@ static int is_ol_marker (const char *line, size_t len, size_t *digits_len) {
 }
 
 /**
- * Розібрати та відрендерити блок‑цитату (рядки, що починаються з '>').
- * @param p        Поточна позиція у тексті.
- * @param opts     Опції рендерингу.
- * @param y_offset [in,out] Поточний вертикальний зсув у мм.
- * @param out      Акумулятор шляхів (додаються результати).
- * @param p_out    [out] Позиція після блоку (або p, якщо це не цитата).
- * @return 1 якщо блок відрендерено; 0 якщо це не цитата; 2 при помилці памʼяті.
+ * @brief Прагне розпізнати та відрендерити блок цитати ('>').
+ * @return 1 — оброблено; 0 — не цитата; 2 — помилка.
  */
 static int parse_blockquote (
     const char *p,
@@ -1611,13 +1542,8 @@ static int parse_blockquote (
 }
 
 /**
- * Розібрати та відрендерити невпорядкований список (UL).
- * @param p        Поточна позиція у тексті.
- * @param opts     Опції рендерингу.
- * @param y_offset [in,out] Поточний вертикальний зсув у мм.
- * @param out      Акумулятор шляхів.
- * @param p_out    [out] Позиція після блоку (або p, якщо це не список).
- * @return 1, якщо список відрендерено; 0, якщо це не список; 2 — помилка памʼяті.
+ * @brief Прагне розпізнати та відрендерити невпорядкований список.
+ * @return 1 — оброблено; 0 — не список; 2 — помилка.
  */
 static int parse_unordered_list (
     const char *p,
@@ -1659,18 +1585,8 @@ static int parse_unordered_list (
 }
 
 /**
- * Розібрати та відрендерити впорядкований список (OL) з авто-нумерацією.
- *
- * Підтримує вкладеність через відступи: кожні 2 пробіли збільшують рівень.
- * Нумерація для кожного рівня ведеться окремо та починається з 1, якщо у
- * першому елементі рівня не задано інше стартове число (через префікс).
- *
- * @param p        Поточна позиція у тексті.
- * @param opts     Опції рендерингу.
- * @param y_offset [in,out] Поточний вертикальний зсув у мм.
- * @param out      Акумулятор шляхів.
- * @param p_out    [out] Позиція після блоку (або p, якщо це не список).
- * @return 1, якщо список відрендерено; 0, якщо це не список; 2 — помилка памʼяті.
+ * @brief Прагне розпізнати та відрендерити впорядкований список.
+ * @return 1 — оброблено; 0 — не список; 2 — помилка.
  */
 static int parse_ordered_list (
     const char *p,
@@ -1732,20 +1648,7 @@ static int parse_ordered_list (
 }
 
 /**
- * @brief Розбирає Markdown‑документ і будує контурні шляхи.
- *
- * Алгоритм:
- *  1) Ітерація по рядках; пропускаємо початкові порожні рядки.
- *  2) Визначаємо тип блоку (заголовок, цитата, список UL або параграф).
- *  3) Рендеримо блок у тимчасові шляхи `geom_paths_t` (у мм) і додаємо у загальний
- *     контейнер, зсуваючи по `y_offset`.
- *  4) Збільшуємо `y_offset` на висоту блока + базовий міжрядковий відступ.
- *
- * @param text  Вхідний Markdown у UTF‑8 (не NULL).
- * @param opts  Опції рендерингу (родина, базовий кегль, ширина кадру).
- * @param out   Вихідні шляхи (ініціалізуються всередині; викликач звільняє `geom_paths_free`).
- * @param info  Необовʼязково: загальні метадані рендеру тексту.
- * @return 0 при успіху; 1 при помилці памʼяті/параметрів.
+ * @copydoc markdown_render_paths
  */
 int markdown_render_paths (
     const char *text, const markdown_opts_t *opts, geom_paths_t *out, text_render_info_t *info) {
@@ -1824,7 +1727,6 @@ int markdown_render_paths (
             continue;
         }
 
-        /* Якщо нічого не спрацювало — перейти до наступного рядка, щоб уникнути циклу. */
         const char *fallback = strchr (cursor, '\n');
         cursor = fallback ? (fallback + 1) : (cursor + strlen (cursor));
     }

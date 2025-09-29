@@ -1,9 +1,29 @@
 #define _GNU_SOURCE
-
 /**
  * @file cmd.c
- * @brief Реалізації фасаду підкоманд (скорочена назва файлу).
+ * @ingroup cmd
+ * @brief Фасади CLI-підкоманд: `print`, `device`, `config`, `fonts`, `version`.
+ *
+ * @details
+ * Цей модуль реалізує високорівневі обробники підкоманд CLI та координує роботу
+ * між підсистемами: розкладка/рендеринг (drawing, svg/png), конфігурація (config),
+ * шрифти (fontreg), а також взаємодія з обладнанням AxiDraw (axidraw/ebb/serial).
+ *
+ * Основні принципи:
+ * - Вивід у stdout містить лише результати команд (наприклад, переліки, превʼю SVG/PNG).
+ *   Журнали і попередження надсилаються через підсистему логування (log.c).
+ * - Потік виводу результатів керується через `cmd_set_output()` і є потоково-локальним
+ *   (`__thread`-змінна), що спрощує тестування та можливий паралелізм.
+ * - Операції з пристроєм виконуються через шаблон `with_axidraw_device()`, який:
+ *   захоплює lock-файл для ексклюзивного доступу, відкриває зʼєднання, викликає дію,
+ *   за потреби очікує завершення рухів (FIFO/таймінги), та коректно відʼєднує пристрій.
+ * - Превʼю формується в памʼяті (`SVG` або `PNG`) і повертається як байтовий буфер.
+ * - Усі повідомлення та довідка локалізовані українською мовою.
+ *
+ * Коди повернення узгоджені з CLI: `0` — успіх, `1` — помилка виконання або валідації,
+ * `2` — некоректне використання/відсутня дія.
  */
+
 #include "cmd.h"
 #include "axidraw.h"
 #include "config.h"
@@ -31,44 +51,54 @@
 #include <time.h>
 #include <unistd.h>
 
+/** Глобальний (thread-local) потік для результатів команд. */
 static __thread FILE *g_cmd_out = NULL;
-/* Локальний тип формату превʼю (не експортується у заголовок) */
+
+/**
+ * @brief Формат превʼю, що генерується у памʼять.
+ */
 typedef enum {
-    PREVIEW_FMT_SVG = 0,
-    PREVIEW_FMT_PNG = 1,
+    PREVIEW_FMT_SVG = 0, /**< Векторний SVG. */
+    PREVIEW_FMT_PNG = 1, /**< Растровий PNG. */
 } preview_fmt_t;
+/**
+ * @brief Серіалізація побудованої розкладки у SVG/PNG як байти.
+ * @param layout Готова розкладка.
+ * @param fmt Формат виводу (SVG або PNG).
+ * @param out_bytes [out] Буфер результату (mallocʼується всередині; викликальник звільняє).
+ * @param out_len [out] Розмір буфера.
+ * @return 0 — успіх, інакше код помилки.
+ */
 static int layout_to_bytes (
     const drawing_layout_t *layout, preview_fmt_t fmt, uint8_t **out_bytes, size_t *out_len);
 
-/* Локальні типи */
-typedef enum { VERBOSE_OFF = 0, VERBOSE_ON = 1 } verbose_level_t;
-
-/* Вперед-оголошення */
+/**
+ * @brief Рівень докладності для внутрішніх операцій команд.
+ */
+typedef enum {
+    VERBOSE_OFF = 0,
+    /**< Без додаткових журналів. */ VERBOSE_ON = 1 /**< Докладно. */
+} verbose_level_t;
 
 /**
- * @brief Отримати поточний вихідний потік для команд.
- *
- * Повертає встановлений через `cmd_set_output()` потік або `stdout` за замовчуванням.
+ * @brief Потік виводу для результатів команд.
+ * @return Потік (встановлений через cmd_set_output або stdout).
  */
 static FILE *cmd_output_stream (void) { return g_cmd_out ? g_cmd_out : stdout; }
 
 /**
- * @brief Встановити альтернативний потік виводу для командних повідомлень.
- *
- * Функція потокобезпечна завдяки використанню TLS (`__thread`). Передайте NULL, щоб
- * повернутись до `stdout`.
- *
- * @param out Потік виводу або NULL.
+ * @brief Встановлює користувацький потік виводу результатів.
+ * @param out Потік або NULL для stdout.
  */
 void cmd_set_output (FILE *out) { g_cmd_out = out; }
 
+/** Зручний макрос для потоку виводу результатів команд. */
 #define CMD_OUT cmd_output_stream ()
 
 /**
- * @brief Побудувати структуру налаштувань AxiDraw на основі конфігурації.
- *
- * @param[out] out Місце для запису налаштувань (не NULL).
- * @param cfg      Джерело конфігурації; якщо NULL — використовується стан за замовчуванням.
+ * @brief Переносить параметри з конфігурації до структур налаштувань AxiDraw.
+ * @param out [out] Призначення налаштувань.
+ * @param cfg Джерело конфігурації (може бути NULL — тоді лише скидання).
  */
 static void axidraw_settings_from_config (axidraw_settings_t *out, const config_t *cfg) {
     if (!out)
@@ -88,11 +118,10 @@ static void axidraw_settings_from_config (axidraw_settings_t *out, const config_
 }
 
 /**
- * @brief Завантажити налаштування AxiDraw для конкретної моделі.
- *
- * @param model     Ідентифікатор моделі (може бути NULL).
- * @param[out] settings Структура для результату (не NULL).
- * @return `true`, якщо налаштування успішно зібрані; `false` у разі помилки.
+ * @brief Завантажує налаштування для моделі AxiDraw із профілю та дефолтів.
+ * @param model Ідентифікатор моделі (NULL — типова).
+ * @param settings [out] Налаштування для застосунку.
+ * @return true — успіх, false — помилка.
  */
 static bool load_axidraw_settings (const char *model, axidraw_settings_t *settings) {
     if (!settings)
@@ -107,7 +136,7 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
     const axidraw_device_profile_t *profile = axidraw_device_profile_for_model (model_id);
     axidraw_device_profile_apply (&cfg, profile);
     axidraw_settings_from_config (settings, &cfg);
-    /* Пропагуємо steps_per_mm із профілю */
+
     if (profile && profile->steps_per_mm > 0.0) {
         settings->steps_per_mm = profile->steps_per_mm;
     } else if (!(settings->steps_per_mm > 0.0)) {
@@ -115,7 +144,7 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
         if (defp && defp->steps_per_mm > 0.0)
             settings->steps_per_mm = defp->steps_per_mm;
     }
-    /* Жорстка перевірка апаратної характеристики */
+
     if (!(settings->steps_per_mm > 0.0)) {
         LOGE (
             "Профіль моделі '%s' має некоректний коефіцієнт кроків на міліметр — перервано",
@@ -127,11 +156,13 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
     return true;
 }
 
+/** Максимальна тривалість сегмента руху у мілісекундах (обмеження EBB). */
 #define AXIDRAW_MAX_DURATION_MS 16777215u
+/** Кількість ітерацій очікування простою пристрою між опитуваннями. */
 #define AXIDRAW_IDLE_WAIT_ATTEMPTS 200
 
 /**
- * @brief Попередити користувача, що пристрій зайнятий іншим процесом.
+ * @brief Попереджає про зайнятість пристрою, читаючи інформацію з lock-файлу.
  */
 static void warn_device_busy (void) {
     char holder[64] = "невідомий процес";
@@ -148,70 +179,13 @@ static void warn_device_busy (void) {
     LOGW ("Пристрій вже використовується (%s)", holder);
 }
 
-/* Вилучено налагоджувальні знімки стану пристрою для спрощення виводу. */
-
 /**
- * @brief Конвертувати міліметри у кроки AxiDraw із захистом від переповнення.
- *
- * @param mm Відстань у міліметрах.
- * @return Кількість кроків у межах int32.
+ * @brief Обчислює габарити робочої рамки залежно від орієнтації та полів.
+ * @param page Параметри сторінки.
+ * @param out_w [out] Ширина рамки.
+ * @param out_h [out] Висота рамки.
  */
-static int32_t mm_to_steps (axidraw_device_t *dev, double mm) {
-    const axidraw_settings_t *cfg = dev ? axidraw_device_settings (dev) : NULL;
-    double steps_per_mm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
-
-    if (!(steps_per_mm > 0.0)) {
-        LOGE ("Коефіцієнт кроків на міліметр не ініціалізовано — профіль пристрою не застосовано");
-        return 0;
-    }
-
-    if (!(mm > -1e300 && mm < 1e300)) { /* захист від NaN/Inf */
-        LOGW ("Некоректне значення відстані (mm=%.2f) — повертаю 0", mm);
-        return 0;
-    }
-
-    double scaled = round (mm * steps_per_mm);
-
-    if (scaled > (double)INT32_MAX) {
-        LOGW ("Конвертація міліметрів у кроки призвела до переповнення — обмежено максимумом");
-        return INT32_MAX;
-    }
-    if (scaled < (double)INT32_MIN) {
-        LOGW (
-            "Конвертація міліметрів у кроки призвела до від’ємного переповнення — обмежено "
-            "мінімумом");
-        return INT32_MIN;
-    }
-
-    /* Дрібне попередження, якщо абсолютне значення незвично велике (може вказувати на помилку
-     * одиниць, наприклад подали мікрони замість мм). */
-    if (fabs (scaled) > 5e7) {
-        LOGW ("Нетипово велика кількість кроків для заданої відстані — перевірте одиниці");
-    }
-
-    return (int32_t)scaled;
-}
-
-/**
- * @brief Обчислити тривалість руху в мс для заданої відстані та швидкості.
- *
- * @param distance_mm Відстань у міліметрах.
- * @param speed_mm_s  Швидкість у мм/с.
- * @return Тривалість у мс (мінімум 1, максимум `AXIDRAW_MAX_DURATION_MS`).
- */
-static uint32_t motion_duration_ms (double distance_mm, double speed_mm_s) {
-    if (distance_mm <= 0.0 || speed_mm_s <= 0.0)
-        return 1;
-    double ms = ceil ((distance_mm / speed_mm_s) * 1000.0);
-    if (ms < 1.0)
-        ms = 1.0;
-    if (ms > (double)AXIDRAW_MAX_DURATION_MS)
-        ms = (double)AXIDRAW_MAX_DURATION_MS;
-    return (uint32_t)ms;
-}
-
-/* ------------------------- Fit-to-page helpers ------------------------- */
-static void page_frame_dims(const drawing_page_t *page, double *out_w, double *out_h) {
+static void page_frame_dims (const drawing_page_t *page, double *out_w, double *out_h) {
     double fw = 0.0, fh = 0.0;
     if (page->orientation == ORIENT_PORTRAIT) {
         fw = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
@@ -220,19 +194,38 @@ static void page_frame_dims(const drawing_page_t *page, double *out_w, double *o
         fw = page->paper_w_mm - page->margin_left_mm - page->margin_right_mm;
         fh = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
     }
-    if (out_w) *out_w = fw;
-    if (out_h) *out_h = fh;
+    if (out_w)
+        *out_w = fw;
+    if (out_h)
+        *out_h = fh;
 }
 
-static double clamp_scale(double s) {
-    if (!(s > 0.0)) return 1.0;
-    if (s > 1.0) s = 1.0; /* only down */
-    return s * 0.985; /* small margin */
+/**
+ * @brief Обмежує масштабу в діапазоні (0,1] та застосовує невеликий відступ.
+ * @param s Вхідний коефіцієнт.
+ * @return Обмежене значення.
+ */
+static double clamp_scale (double s) {
+    if (!(s > 0.0))
+        return 1.0;
+    if (s > 1.0)
+        s = 1.0;
+    return s * 0.985;
 }
 
-/* ===================== SHAPE (підкоманда) ===================== */
-
-/* Вперед-оголошення для локальної утиліти build_print_page(), оголошеної нижче. */
+/**
+ * @brief Виводить параметри сторінки/полів на основі моделі та перевіряє коректність.
+ * @param page [out] Параметри сторінки для заповнення.
+ * @param device_model Ідентифікатор моделі пристрою (NULL — типова).
+ * @param paper_w_mm Ширина паперу, мм (<=0 — взяти з профілю).
+ * @param paper_h_mm Висота паперу, мм (<=0 — взяти з профілю).
+ * @param margin_top_mm Верхнє поле, мм (<0 — взяти з профілю).
+ * @param margin_right_mm Праве поле, мм (<0 — взяти з профілю).
+ * @param margin_bottom_mm Нижнє поле, мм (<0 — взяти з профілю).
+ * @param margin_left_mm Ліве поле, мм (<0 — взяти з профілю).
+ * @param orientation Орієнтація (ORIENT_PORTRAIT/ORIENT_LANDSCAPE або інше — взяти з профілю).
+ * @return 0 — успіх, 1/2 — помилка параметрів.
+ */
 static int build_print_page (
     drawing_page_t *page,
     const char *device_model,
@@ -244,13 +237,10 @@ static int build_print_page (
     double margin_left_mm,
     int orientation);
 
-/* Функціонал фігур у цьому модулі не використовується. */
-
 /**
- * @brief Дочекатися, поки пристрій завершить рух та очистить FIFO.
- *
- * @param dev Пристрій AxiDraw.
- * @return 0, якщо пристрій зупинився вчасно; -1 при тайм-ауті або помилці.
+ * @brief Очікує, доки пристрій завершить активні рухи (з тайм-бюджетом).
+ * @param dev Підключений пристрій.
+ * @return 0 — готово/без руху, -1 — тайм-аут/помилка.
  */
 static int wait_for_device_idle (axidraw_device_t *dev) {
     if (!dev)
@@ -268,22 +258,24 @@ static int wait_for_device_idle (axidraw_device_t *dev) {
     return -1;
 }
 
+/**
+ * @brief Тип колбека дії над підключеним пристроєм AxiDraw.
+ * @param dev Підключений пристрій.
+ * @param ctx Контекст користувача.
+ * @return 0 — успіх, інакше помилка.
+ */
 typedef int (*device_cb_t) (axidraw_device_t *dev, void *ctx);
 
 /**
- * @brief Універсальний шаблон виконання дії над пристроєм AxiDraw.
- *
- * Піклується про блокування, підключення, застосування налаштувань і очікування завершення
- * команди. Колбек виконується лише після успішного підключення.
- *
- * @param port        Шлях до порту (може бути NULL — тоді буде знайдено автоматично).
- * @param model       Модель пристрою для завантаження конфігурації (може бути NULL).
- * @param verbose     Режим виводу (on/off).
- * @param action_name Людиночиткий опис дії для логів.
- * @param cb          Колбек, який виконує безпосередню операцію.
- * @param ctx         Контекст, що передається у колбек (може бути NULL).
- * @param wait_idle   Чи потрібно чекати завершення руху перед відʼєднанням.
- * @return 0 при успіху; 1 у разі помилки або якщо пристрій зайнятий.
+ * @brief Відкриває пристрій, виконує колбек дії, чекає (опційно) і закриває пристрій.
+ * @param port Шлях до порту (вже розвʼязаний).
+ * @param model Модель профілю.
+ * @param verbose Рівень докладності.
+ * @param action_name Назва дії для журналів.
+ * @param cb Колбек, що отримує dev.
+ * @param ctx Контекст для колбека.
+ * @param wait_idle Чекати завершення рухів після дії.
+ * @return 0 — успіх, 1 — помилка/зайнятий пристрій.
  */
 static int with_axidraw_device (
     const char *port,
@@ -333,7 +325,7 @@ static int with_axidraw_device (
     if (rc == 0 && wait_idle)
         idle_rc = wait_for_device_idle (&dev);
 
-    (void)action_name; /* уникнути попередження про невикористану змінну у мінімальному логуванні */
+    (void)action_name;
 
     axidraw_device_disconnect (&dev);
 
@@ -348,7 +340,10 @@ cleanup:
 }
 
 /**
- * @brief Колбек для підняття пера.
+ * @brief Колбек: підняти перо.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_pen_up_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -359,7 +354,10 @@ static int device_pen_up_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для опускання пера.
+ * @brief Колбек: опустити перо.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_pen_down_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -370,7 +368,10 @@ static int device_pen_down_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для перемикання стану пера.
+ * @brief Колбек: перемкнути стан пера (up/down).
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -386,7 +387,10 @@ static int device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для ввімкнення моторів.
+ * @brief Колбек: увімкнути мотори.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -397,7 +401,10 @@ static int device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для вимкнення моторів.
+ * @brief Колбек: вимкнути мотори.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -408,7 +415,10 @@ static int device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для аварійної зупинки.
+ * @brief Колбек: аварійна зупинка.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_abort_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -424,7 +434,10 @@ typedef struct {
 } jog_ctx_t;
 
 /**
- * @brief Колбек для ручного зсуву (`jog`).
+ * @brief Колбек: ручний зсув на dx/dy мм.
+ * @param dev Підключений пристрій.
+ * @param ctx Контекст зі зсувами (jog_ctx_t*).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
     jog_ctx_t *jog = (jog_ctx_t *)ctx;
@@ -439,14 +452,9 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
     if (rc != 0)
         return rc;
 
-    int32_t steps_x = mm_to_steps (dev, dx);
-    int32_t steps_y = mm_to_steps (dev, dy);
-    double distance = hypot (dx, dy);
     const axidraw_settings_t *cfg = axidraw_device_settings (dev);
     double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 75.0;
-    uint32_t duration = motion_duration_ms (distance, speed);
-
-    rc = axidraw_move_xy (dev, duration, steps_x, steps_y);
+    rc = axidraw_move_mm (dev, dx, dy, speed);
     if (rc == 0 && wait_for_device_idle (dev) == 0) {
         int32_t s1 = 0, s2 = 0;
         if (ebb_query_steps (dev->port, &s1, &s2, dev->timeout_ms) == 0) {
@@ -459,8 +467,7 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
                     pos_y);
             } else {
                 fprintf (
-                    CMD_OUT,
-                    "Зсув виконано. Поточна позиція: %d (кроки осі 1), %d (кроки осі 2)\n",
+                    CMD_OUT, "Зсув виконано. Поточна позиція: %d (кроки осі 1), %d (кроки осі 2)\n",
                     s1, s2);
             }
         }
@@ -469,7 +476,10 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для повернення у домашню позицію.
+ * @brief Колбек: повернення у home.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_home_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -477,9 +487,8 @@ static int device_home_cb (axidraw_device_t *dev, void *ctx) {
     double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 150.0;
     double steps_per_mm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
     if (!(steps_per_mm > 0.0)) {
-        LOGE (
-            "Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
-            "позицію");
+        LOGE ("Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
+              "позицію");
         return -1;
     }
     double steps_per_sec = speed * steps_per_mm;
@@ -510,7 +519,10 @@ static int device_home_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для запиту версії прошивки.
+ * @brief Колбек: друк версії контролера.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_version_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -524,7 +536,10 @@ static int device_version_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для друку поточного статусу пристрою.
+ * @brief Колбек: зведений статус контролера.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_status_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -564,7 +579,10 @@ static int device_status_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для запиту координат у кроках/мм.
+ * @brief Колбек: друк позиції у кроках/мм.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_position_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -591,7 +609,10 @@ static int device_position_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для скидання стану пристрою (перо, кроки, мотори).
+ * @brief Колбек: скинути стан (pen up, clear steps, motors off).
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_reset_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -610,7 +631,10 @@ static int device_reset_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 /**
- * @brief Колбек для перезавантаження контролера.
+ * @brief Колбек: перезавантажити контролер.
+ * @param dev Підключений пристрій.
+ * @param ctx Не використовується (NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
@@ -623,36 +647,53 @@ static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
 }
 
 #ifndef PATH_MAX
+/** Fallback визначення PATH_MAX для платформ без нього. */
 #define PATH_MAX 4096
 #endif
 
+/**
+ * @brief Опис одного знайденого серійного порту.
+ */
 typedef struct {
-    char path[PATH_MAX];
-    bool responsive;
-    char version[64];
-    char detail[128];
-    char alias[64];
+    char path[PATH_MAX]; /**< Повний шлях до tty-порту. */
+    bool responsive;     /**< true, якщо контролер відповідає на запити. */
+    char version[64];    /**< Рядок версії прошивки (якщо відома). */
+    char detail[128];    /**< Додаткові подробиці (помилка/статус). */
+    char alias[64];      /**< Зручний псевдонім, похідний від імені порту. */
 } device_port_info_t;
 
+/**
+ * @brief Узагальнена інформація про обраний пристрій та профіль руху.
+ */
 typedef struct {
-    double paper_w_mm;
-    double paper_h_mm;
-    double speed_mm_s;
-    double accel_mm_s2;
-    char alias[64];
-    char port[PATH_MAX];
-    char profile_model[64];
-    char requested_model[64];
-    bool auto_selected;
+    double paper_w_mm;        /**< Робоча ширина, мм. */
+    double paper_h_mm;        /**< Робоча висота, мм. */
+    double speed_mm_s;        /**< Рекомендована швидкість, мм/с. */
+    double accel_mm_s2;       /**< Рекомендоване прискорення, мм/с^2. */
+    char alias[64];           /**< Обраний псевдонім. */
+    char port[PATH_MAX];      /**< Шлях до порту. */
+    char profile_model[64];   /**< Назва застосованої моделі профілю. */
+    char requested_model[64]; /**< Запитана користувачем модель. */
+    bool auto_selected;       /**< true, якщо порт обрано автоматично. */
 } device_profile_info_t;
 
+/**
+ * @brief Гарантує, що у конфігурації встановлено робоче поле та динаміку з профілю пристрою.
+ * @param cfg [in,out] Конфігурація, що доповнюється.
+ * @param inout_alias [in,out] Псевдонім пристрою; може бути оновлений.
+ * @param alias_len Розмір буфера псевдоніма.
+ * @param model Бажана модель профілю (NULL — типова).
+ * @param verbose Рівень докладності.
+ * @return true — успіх, false — не вдалося визначити профіль/порт.
+ */
 static bool ensure_device_profile (
     config_t *cfg, char *inout_alias, size_t alias_len, const char *model, verbose_level_t verbose);
 
 /**
- * @brief Побудувати дружню назву порту з повного шляху.
- *
- * Пробіли замінюються на підкреслення, при відсутності імені використовується `device`.
+ * @brief Формує псевдонім пристрою з базового імені шляху.
+ * @param path Шлях (наприклад, /dev/ttyACM0).
+ * @param out [out] Буфер для псевдоніма.
+ * @param out_len Розмір буфера.
  */
 static void derive_port_alias (const char *path, char *out, size_t out_len) {
     if (!out || out_len == 0)
@@ -680,9 +721,7 @@ static void derive_port_alias (const char *path, char *out, size_t out_len) {
     }
 }
 
-/**
- * @brief Перевірити, чи порт вже міститься у зібраному списку.
- */
+/** Перевіряє, чи порт уже є у списку. */
 static bool device_port_exists (const device_port_info_t *ports, size_t count, const char *path) {
     if (!ports || !path)
         return false;
@@ -694,7 +733,12 @@ static bool device_port_exists (const device_port_info_t *ports, size_t count, c
 }
 
 /**
- * @brief Додати новий порт до динамічного масиву (з перевіркою на дубль).
+ * @brief Додає порт у динамічний масив, розширюючи за потреби.
+ * @param ports [in,out] Вказівник на масив портів (realloc усередині).
+ * @param count [in,out] Кількість елементів (збільшується при успіху).
+ * @param capacity [in,out] Ємність масиву (може зрости).
+ * @param path Шлях до tty-порту для додавання.
+ * @return true — успіх, false — помилка виділення памʼяті.
  */
 static bool
 device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, const char *path) {
@@ -721,12 +765,11 @@ device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, co
 }
 
 /**
- * @brief Зібрати потенційні порти AxiDraw із файлової системи.
- *
- * @param[out] ports     Динамічний масив з результатами.
- * @param[out] count     Кількість знайдених портів.
- * @param[in,out] capacity Поточна місткість масиву.
- * @return 0 при успіху; -1 при помилці пам'яті.
+ * @brief Збирає список потенційних портів AxiDraw із кількох шаблонів.
+ * @param ports [out] Динамічний масив портів.
+ * @param count [out] Кількість.
+ * @param capacity [in,out] Ємність масиву.
+ * @return 0 — успіх, -1 — помилка виділення.
  */
 static int collect_device_ports (device_port_info_t **ports, size_t *count, size_t *capacity) {
     if (!ports || !count || !capacity)
@@ -777,7 +820,7 @@ static int collect_device_ports (device_port_info_t **ports, size_t *count, size
 }
 
 /**
- * @brief Перевірити кожен порт на доступність AxiDraw і зчитати метадані.
+ * @brief Перевіряє відповіді від контролера для кожного порту та зчитує версію.
  */
 static void probe_device_ports (device_port_info_t *ports, size_t count) {
     if (!ports)
@@ -808,15 +851,14 @@ static void probe_device_ports (device_port_info_t *ports, size_t count) {
 }
 
 /**
- * @brief Визначити фактичний порт AxiDraw за псевдонімом або шляхом.
- *
- * @param alias          Псевдонім або NULL.
- * @param[out] port_buf  Буфер для шляху порту.
- * @param port_buf_len   Розмір буфера порту.
- * @param[out] alias_buf Буфер для зворотного псевдоніма (може бути NULL).
- * @param alias_buf_len  Розмір буфера псевдоніма.
- * @param[out] auto_selected Чи було обрано перший доступний порт автоматично.
- * @return 0 успіх; 1 — портів не знайдено; 2 — псевдонім не знайдено; -1 — помилка.
+ * @brief Визначає придатний порт на основі псевдоніма або авто-вибору.
+ * @param alias Бажаний псевдонім/шлях (може бути NULL).
+ * @param out_path [out] Обраний шлях порту.
+ * @param out_len Розмір буфера шляху.
+ * @param out_alias [out] Обраний псевдонім (опційно).
+ * @param out_alias_len Розмір буфера псевдоніма.
+ * @param out_auto_selected [out] true, якщо порт обрано автоматично.
+ * @return 0 — успіх, 1 — не знайдено жодного, 2 — псевдонім не знайдено, -1 — помилка.
  */
 static int resolve_device_port (
     const char *alias,
@@ -879,7 +921,7 @@ static int resolve_device_port (
 }
 
 /**
- * @brief Перелічити локальні порти AxiDraw із коротким описом.
+ * @brief Локальна реалізація `device list` — друк знайдених портів.
  */
 static int device_list_local (const char *model, verbose_level_t verbose) {
     (void)model;
@@ -931,7 +973,12 @@ static int device_list_local (const char *model, verbose_level_t verbose) {
 }
 
 /**
- * @brief Зібрати інформацію про профіль пристрою з локального середовища.
+ * @brief Зчитує профіль/порт/аліас для пристрою для друку користувачу.
+ * @param alias Псевдонім або NULL.
+ * @param model Модель профілю або NULL.
+ * @param info [out] Заповнені поля.
+ * @param verbose Режим докладності.
+ * @return true — успіх, false — помилка.
  */
 static bool device_profile_local (
     const char *alias, const char *model, device_profile_info_t *info, verbose_level_t verbose) {
@@ -995,10 +1042,6 @@ static bool device_profile_local (
     return true;
 }
 
-/**
- * @brief Виконати підкоманду `device` у локальному режимі.
- */
-/* ---- Табличні ранери дій пристрою (file-scope) ---------------------------------- */
 #if 0
 static __thread const char *g_device_alias_ctx = NULL;
 
@@ -1028,8 +1071,7 @@ static int run_device_profile (
     (void)dx;
     (void)dy;
     device_profile_info_t info;
-    /* Використовуємо alias з контексту (g_device_alias_ctx), бо профіль не потребує відкритого
-     * порту */
+
     if (!device_profile_local (g_device_alias_ctx, model, &info, v))
         return 1;
     fprintf (CMD_OUT, "ALIAS=%s\n", info.alias);
@@ -1190,8 +1232,7 @@ static int run_device_reboot (
     (void)dy;
     return with_axidraw_device (port, model, v, "перезавантаження", device_reboot_cb, NULL, false);
 }
-#endif /* legacy CLI dispatchers using device_action_t */
-/* ---------------------------------------------------------------------------- */
+#endif
 
 #if 0
 static int device_execute_local (
@@ -1272,9 +1313,7 @@ static int device_execute_local (
 }
 #endif
 
-/**
- * @brief Перетворити рядок у `double` з суворою валідацією.
- */
+/** Розбір числа з плаваючою крапкою (strict). */
 static bool parse_double_str (const char *value, double *out) {
     if (!value || !out)
         return false;
@@ -1286,21 +1325,16 @@ static bool parse_double_str (const char *value, double *out) {
     return true;
 }
 
-/**
- * @brief Перетворити рядок у `int` з суворою валідацією.
- */
+/** Розбір десяткового цілого зі строгими перевірками. */
 static bool parse_int_str (const char *value, int *out) {
     if (!value || !out)
         return false;
     char *endptr = NULL;
     long v = strtol (value, &endptr, 10);
-    /* Валідація:
-     *  - endptr == value  → не прочитано жодної цифри
-     *  - *endptr != '\0'  → залишились сторонні символи
-     */
+
     if (endptr == value || (endptr && *endptr))
         return false;
-    /* Перевірка діапазону перед приведенням до int */
+
     if (v > INT_MAX || v < INT_MIN)
         return false;
     *out = (int)v;
@@ -1308,9 +1342,8 @@ static bool parse_int_str (const char *value, int *out) {
 }
 
 /**
- * @brief Застосувати одну пару `key=value` до конфігурації.
- *
- * Нормалізує ключ (обрізання пробілів, нижній регістр) і підтримує відомі псевдоніми.
+ * @brief Застосовує одну пару key=value до конфігурації (обмежений перелік ключів).
+ * @return 0 — успіх, -1 — невідомий ключ або некоректне значення.
  */
 static int config_apply_pair (config_t *cfg, const char *key_raw, const char *value_raw) {
     if (!cfg || !key_raw || !value_raw)
@@ -1352,7 +1385,6 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
     double dbl = 0.0;
     int integer = 0;
 
-    /* width/height/orientation — не зберігаються у конфіг (перемикаються для кожного друку). */
     if (strcmp (key, "paper_w_mm") == 0 || strcmp (key, "paper_w") == 0
         || strcmp (key, "width") == 0)
         return -1;
@@ -1401,7 +1433,7 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
         cfg->accel_mm_s2 = dbl;
         return 0;
     }
-    /* Положення пера (up/down) — це операційні параметри; не змінюються через config --set. */
+
     if (strcmp (key, "pen_up_pos") == 0 || strcmp (key, "pen_up") == 0)
         return -1;
     if (strcmp (key, "pen_down_pos") == 0 || strcmp (key, "pen_down") == 0)
@@ -1451,16 +1483,12 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
 }
 
 /**
- * @brief Гарантувати, що конфігурація містить розміри й швидкості для активного пристрою.
- *
- * За потреби зчитує профіль пристрою і оновлює конфігурацію та псевдонім.
- *
- * @param[in,out] cfg        Конфігурація, яку слід доповнити.
- * @param[in,out] inout_alias Буфер з псевдонімом (може бути NULL).
- * @param alias_len          Розмір буфера псевдоніма.
- * @param model              Переважна модель (може бути NULL).
- * @param verbose            Режим детального логування.
- * @return `true`, якщо профіль застосовано або вже був повним.
+ * @brief Реалізація ensure_device_profile(): доповнення конфігурації з даних пристрою.
+ * @param cfg [in,out] Конфігурація.
+ * @param inout_alias [in,out] Псевдонім пристрою.
+ * @param alias_len Розмір буфера псевдоніма.
+ * @param model Бажана модель профілю (опційно).
+ * @param verbose Рівень докладності.
  */
 static bool ensure_device_profile (
     config_t *cfg,
@@ -1504,22 +1532,6 @@ static bool ensure_device_profile (
     return true;
 }
 
-/**
- * @brief Підготувати структуру сторінки для друку з урахуванням моделі пристрою.
- *
- * Застосовує значення за замовчуванням для паперу та полів, якщо користувач їх не вказав.
- *
- * @param[out] page        Структура сторінки для заповнення (не NULL).
- * @param device_model     Ідентифікатор моделі (може бути NULL).
- * @param paper_w_mm       Бажана ширина паперу або ≤0 для значення за замовчуванням.
- * @param paper_h_mm       Бажана висота паперу або ≤0 для значення за замовчуванням.
- * @param margin_top_mm    Верхнє поле або <0 для дефолту.
- * @param margin_right_mm  Праве поле або <0 для дефолту.
- * @param margin_bottom_mm Нижнє поле або <0 для дефолту.
- * @param margin_left_mm   Ліве поле або <0 для дефолту.
- * @param orientation      Орієнтація (портрет/ландшафт) або інше значення для дефолту.
- * @return 0 при успіху; 1 — не вдалося завантажити профіль; 2 — некоректні параметри.
- */
 static int build_print_page (
     drawing_page_t *page,
     const char *device_model,
@@ -1576,28 +1588,6 @@ static int build_print_page (
     return 0;
 }
 
-/**
- * @brief Виконати команду `print`, побудувавши траєкторію без відправки на пристрій.
- *
- * Поки що функція лише валідує й будує розкладку (майбутня інтеграція з планером).
- *
- * @param in             Вхідний текст у UTF-8.
- * @param font_family    Назва шрифту або NULL.
- * @param font_size_pt   Кегль у пунктах (>0 для перевизначення).
- * @param device_model   Ідентифікатор моделі пристрою або NULL.
- * @param paper_w_mm     Ширина паперу у мм.
- * @param paper_h_mm     Висота паперу у мм.
- * @param margin_top_mm  Верхнє поле у мм.
- * @param margin_right_mm Праве поле у мм.
- * @param margin_bottom_mm Нижнє поле у мм.
- * @param margin_left_mm  Ліве поле у мм.
- * @param orientation    Орієнтація (портрет/ландшафт).
- * @param dry_run        Чи виконувати без фактичної відправки.
- * @param verbose        Режим логування.
- * @return Код виконання (0 → успіх).
- */
-/* Побудова даних прев’ю винесена у буферні API (див. нижче). */
-
 static int layout_to_bytes (
     const drawing_layout_t *layout, preview_fmt_t format, uint8_t **out_bytes, size_t *out_len) {
     if (!out_bytes || !out_len)
@@ -1614,6 +1604,30 @@ static int layout_to_bytes (
     return rc;
 }
 
+/**
+ * @brief Виконує побудову розкладки та друк (або симуляцію) без генерації превʼю.
+ * @return 0 — успіх, інакше код помилки.
+ */
+/**
+ * @brief Виконує побудову розкладки та друк (або симуляцію) без генерації превʼю.
+ * @param in_chars Вхідний текст.
+ * @param in_len Довжина вхідного тексту (байти).
+ * @param markdown true — інтерпретувати як Markdown.
+ * @param family Родина шрифтів (NULL — брати з конфігурації).
+ * @param font_size Кегль у пунктах (<=0 — з конфігурації).
+ * @param model Модель пристрою (NULL — типова).
+ * @param paper_w Ширина паперу, мм (<=0 — з профілю).
+ * @param paper_h Висота паперу, мм (<=0 — з профілю).
+ * @param margin_top Верхнє поле, мм (<0 — з конфіг.).
+ * @param margin_right Праве поле, мм (<0 — з конфіг.).
+ * @param margin_bottom Нижнє поле, мм (<0 — з конфіг.).
+ * @param margin_left Ліве поле, мм (<0 — з конфіг.).
+ * @param orientation Орієнтація (портрет/альбом).
+ * @param fit_page true — масштабувати під рамку.
+ * @param dry_run true — без надсилання на пристрій.
+ * @param verbose true — докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_print_execute (
     const char *in_chars,
     size_t in_len,
@@ -1662,7 +1676,7 @@ cmd_result_t cmd_print_execute (
     if (setup_rc != 0)
         return setup_rc;
     page.fit_to_frame = fit_page ? 1 : 0;
-    LOGD("cmd: fit_page flag=%d", page.fit_to_frame);
+    LOGD ("cmd: fit_page flag=%d", page.fit_to_frame);
 
     string_t input = { .chars = in_chars ? in_chars : "", .len = in_len, .enc = STR_ENC_UTF8 };
     if (markdown) {
@@ -1677,24 +1691,23 @@ cmd_result_t cmd_print_execute (
         if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
             return 1;
 
-        /* Якщо запрошено fit-page — приблизно підігнати кегль і перерендерити. */
         if (page.fit_to_frame) {
             double fw, fh;
-            page_frame_dims(&page, &fw, &fh);
+            page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb;
-            if (geom_bbox_of_paths(&md_paths, &bb) == 0) {
+            if (geom_bbox_of_paths (&md_paths, &bb) == 0) {
                 double cw = bb.max_x - bb.min_x;
                 double ch = bb.max_y - bb.min_y;
                 if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
-                    geom_paths_free(&md_paths);
+                    geom_paths_free (&md_paths);
                     double sx = fw / cw;
                     double sy = fh / ch;
-                    double s = clamp_scale(sx < sy ? sx : sy);
+                    double s = clamp_scale (sx < sy ? sx : sy);
                     double new_pt = mopts.base_size_pt * s;
                     if (new_pt < 3.0)
                         new_pt = 3.0;
                     mopts.base_size_pt = new_pt;
-                    /* Оскільки змінився кегль — перерендеримо, щоб отримати інший перенос рядків. */
+
                     if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
                         return 1;
                 }
@@ -1715,15 +1728,15 @@ cmd_result_t cmd_print_execute (
 
         if (page.fit_to_frame) {
             double fw, fh;
-            page_frame_dims(&page, &fw, &fh);
+            page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb = layout_info.layout.bounds_mm;
             double cw = bb.max_x - bb.min_x;
             double ch = bb.max_y - bb.min_y;
             if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
-                drawing_layout_dispose(&layout_info);
+                drawing_layout_dispose (&layout_info);
                 double sx = fw / cw;
                 double sy = fh / ch;
-                double s = clamp_scale(sx < sy ? sx : sy);
+                double s = clamp_scale (sx < sy ? sx : sy);
                 double new_pt = font_size * s;
                 if (new_pt < 3.0)
                     new_pt = 3.0;
@@ -1736,6 +1749,32 @@ cmd_result_t cmd_print_execute (
     }
 }
 
+/**
+ * @brief Формує превʼю SVG/PNG для заданого вхідного тексту та параметрів сторінки.
+ * @return 0 — успіх, інакше код помилки.
+ */
+/**
+ * @brief Формує превʼю SVG/PNG для заданого вхідного тексту та параметрів сторінки.
+ * @param in_chars Вхідний текст.
+ * @param in_len Довжина вхідного тексту (байти).
+ * @param markdown true — інтерпретувати як Markdown.
+ * @param family Родина шрифтів (NULL — брати з конфігурації).
+ * @param font_size Кегль у пунктах (<=0 — з конфігурації).
+ * @param model Модель пристрою (NULL — типова).
+ * @param paper_w Ширина паперу, мм (<=0 — з профілю).
+ * @param paper_h Висота паперу, мм (<=0 — з профілю).
+ * @param margin_top Верхнє поле, мм (<0 — з конфіг.).
+ * @param margin_right Праве поле, мм (<0 — з конфіг.).
+ * @param margin_bottom Нижнє поле, мм (<0 — з конфіг.).
+ * @param margin_left Ліве поле, мм (<0 — з конфіг.).
+ * @param orientation Орієнтація (портрет/альбом).
+ * @param fit_page 1 — масштабувати під рамку.
+ * @param preview_png 1 — PNG, 0 — SVG.
+ * @param verbose true — докладні журнали.
+ * @param out_bytes [out] Байти результату (malloc).
+ * @param out_len [out] Довжина буфера.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_print_preview (
     const char *in_chars,
     size_t in_len,
@@ -1799,13 +1838,19 @@ cmd_result_t cmd_print_preview (
         if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
             return 1;
         if (page.fit_to_frame) {
-            double fw, fh; page_frame_dims(&page, &fw, &fh);
-            geom_bbox_t bb; if (geom_bbox_of_paths(&md_paths, &bb) == 0) {
-                double cw = bb.max_x - bb.min_x; double ch = bb.max_y - bb.min_y;
+            double fw, fh;
+            page_frame_dims (&page, &fw, &fh);
+            geom_bbox_t bb;
+            if (geom_bbox_of_paths (&md_paths, &bb) == 0) {
+                double cw = bb.max_x - bb.min_x;
+                double ch = bb.max_y - bb.min_y;
                 if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
-                    geom_paths_free(&md_paths);
-                    double sx = fw / cw, sy = fh / ch; double s = clamp_scale(sx < sy ? sx : sy);
-                    double new_pt = mopts.base_size_pt * s; if (new_pt < 3.0) new_pt = 3.0;
+                    geom_paths_free (&md_paths);
+                    double sx = fw / cw, sy = fh / ch;
+                    double s = clamp_scale (sx < sy ? sx : sy);
+                    double new_pt = mopts.base_size_pt * s;
+                    if (new_pt < 3.0)
+                        new_pt = 3.0;
                     mopts.base_size_pt = new_pt;
                     if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
                         return 1;
@@ -1825,13 +1870,18 @@ cmd_result_t cmd_print_preview (
         if (drawing_build_layout (&page, family, font_size, input, &layout_info) != 0)
             return 1;
         if (page.fit_to_frame) {
-            double fw, fh; page_frame_dims(&page, &fw, &fh);
+            double fw, fh;
+            page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb = layout_info.layout.bounds_mm;
-            double cw = bb.max_x - bb.min_x; double ch = bb.max_y - bb.min_y;
+            double cw = bb.max_x - bb.min_x;
+            double ch = bb.max_y - bb.min_y;
             if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
-                drawing_layout_dispose(&layout_info);
-                double sx = fw / cw, sy = fh / ch; double s = clamp_scale(sx < sy ? sx : sy);
-                double new_pt = font_size * s; if (new_pt < 3.0) new_pt = 3.0;
+                drawing_layout_dispose (&layout_info);
+                double sx = fw / cw, sy = fh / ch;
+                double s = clamp_scale (sx < sy ? sx : sy);
+                double new_pt = font_size * s;
+                if (new_pt < 3.0)
+                    new_pt = 3.0;
                 if (drawing_build_layout (&page, family, new_pt, input, &layout_info) != 0)
                     return 1;
             }
@@ -1843,7 +1893,9 @@ cmd_result_t cmd_print_preview (
 }
 
 /**
- * @brief Надрукувати версію програми.
+ * @brief Друкує рядок версії програми у вихідний потік.
+ * @param verbose true — друкувати додаткові журнали.
+ * @return 0 — успіх.
  */
 cmd_result_t cmd_version_execute (bool verbose) {
     if (verbose)
@@ -1853,13 +1905,19 @@ cmd_result_t cmd_version_execute (bool verbose) {
 }
 
 /**
- * @brief Виконати команду `fonts` (перелік доступних шрифтів).
+ * @brief Друк переліку шрифтів (еквівалент `cmd_font_list_execute(false)`).
+ * @param verbose true — друкувати додаткові журнали.
+ * @return 0 — успіх, інакше код помилки.
  */
-/* Залишено для сумісності, але викличемо нову реалізацію з прапорцем families_only=0. */
 cmd_result_t cmd_fonts_execute (bool verbose) { return cmd_font_list_execute (0, verbose); }
 
 /**
- * @brief Виконати підкоманду `config` (show/reset/set).
+ * @brief Виконує дію конфігурації: show/reset/set.
+ * @param action 1=show, 2=reset, 3=set.
+ * @param set_pairs Кома-розділений список key=value (для action=3).
+ * @param inout_cfg Конфіг (NULL — авто-завантаження/збереження).
+ * @param verbose true — додаткові журнали.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t
 cmd_config_execute (int action, const char *set_pairs, config_t *inout_cfg, bool verbose) {
@@ -1886,11 +1944,10 @@ cmd_config_execute (int action, const char *set_pairs, config_t *inout_cfg, bool
 }
 
 /**
- * @brief Вивести діагностичну інформацію про систему.
- */
-
-/**
- * @brief Вивести зареєстровані гарнітури Hershey.
+ * @brief Друкує список шрифтів або родин шрифтів.
+ * @param families_only Якщо 1 — лише родини; 0 — всі шрифти.
+ * @param verbose true — докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t cmd_font_list_execute (bool families_only, bool verbose) {
     (void)verbose;
@@ -1927,7 +1984,10 @@ cmd_result_t cmd_font_list_execute (bool families_only, bool verbose) {
 }
 
 /**
- * @brief Вивести поточну конфігурацію `cplot`.
+ * @brief Друк поточної конфігурації користувача.
+ * @param cfg Конфіг (NULL — авто-завантаження).
+ * @param verbose Докладні журнали.
+ * @return 0 — успіх.
  */
 cmd_result_t cmd_config_show (const config_t *cfg, bool verbose) {
     config_t local;
@@ -1966,7 +2026,10 @@ cmd_result_t cmd_config_show (const config_t *cfg, bool verbose) {
 }
 
 /**
- * @brief Скинути конфігурацію до заводських налаштувань поточної моделі.
+ * @brief Скидання конфігурації до дефолтів із збереженням.
+ * @param inout_cfg Конфіг (NULL — авто-завантаження/збереження).
+ * @param verbose Докладні журнали.
+ * @return 0 — успіх, інакше помилка.
  */
 cmd_result_t cmd_config_reset (config_t *inout_cfg, bool verbose) {
     config_t local;
@@ -1995,7 +2058,11 @@ cmd_result_t cmd_config_reset (config_t *inout_cfg, bool verbose) {
 }
 
 /**
- * @brief Застосувати набір `key=value` до конфігурації.
+ * @brief Застосування пар ключ=значення до конфігурації та збереження.
+ * @param set_pairs Кома-розділений список key=value.
+ * @param inout_cfg Конфіг (NULL — авто-завантаження/збереження).
+ * @param verbose Докладні журнали.
+ * @return 0 — успіх, інакше помилка.
  */
 cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, bool verbose) {
     config_t local;
@@ -2060,21 +2127,22 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, bool ve
 }
 
 /**
- * @brief Виконати підкоманду `device` (локально).
- *
- * @param action     Опис дії пристрою.
- * @param alias      Псевдонім пристрою (може бути NULL).
- * @param model      Модель AxiDraw (може бути NULL).
- * @param jog_dx_mm  Зсув по X для `jog`.
- * @param jog_dy_mm  Зсув по Y для `jog`.
- * @param verbose    Режим логування.
- * @return Код виконання (0 → успіх, 2 → невідома дія тощо).
+ * @brief Публічний фасад для `device list`.
+ * @param model Модель профілю (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше помилка.
  */
-/* ---- Публічні функції пристрою без "actions" ------------------------------ */
 cmd_result_t cmd_device_list (const char *model, bool verbose) {
     return device_list_local (model, verbose ? VERBOSE_ON : VERBOSE_OFF);
 }
 
+/**
+ * @brief Публічний фасад для друку профілю пристрою.
+ * @param alias Псевдонім/порт пристрою (опційно).
+ * @param model Очікувана модель профілю (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше помилка.
+ */
 cmd_result_t cmd_device_profile (const char *alias, const char *model, bool verbose) {
     device_profile_info_t info;
     if (!device_profile_local (alias, model, &info, verbose ? VERBOSE_ON : VERBOSE_OFF))
@@ -2091,6 +2159,10 @@ cmd_result_t cmd_device_profile (const char *alias, const char *model, bool verb
     return 0;
 }
 
+/**
+ * @brief Розвʼязує порт за псевдонімом та друкує повідомлення про помилку у stdout.
+ * @return 0 — успіх, 1 — помилка/не знайдено.
+ */
 static int resolve_port_or_err (const char *alias, char *out, size_t outlen) {
     int r = resolve_device_port (alias && *alias ? alias : NULL, out, outlen, NULL, 0, NULL);
     if (r == 0)
@@ -2125,6 +2197,15 @@ DEV_WRAP (cmd_device_position, "позиція", device_position_cb, false)
 DEV_WRAP (cmd_device_reset, "скидання", device_reset_cb, false)
 DEV_WRAP (cmd_device_reboot, "перезавантаження", device_reboot_cb, false)
 
+/**
+ * @brief Публічний фасад для ручного зсуву (jog) на X/Y мм.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param dx_mm Зсув X (мм).
+ * @param dy_mm Зсув Y (мм).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше помилка.
+ */
 cmd_result_t
 cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm, bool verbose) {
     char port_buf[PATH_MAX];
@@ -2135,4 +2216,3 @@ cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm
         port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, "ручний зсув", device_jog_cb, &ctx,
         false);
 }
-/* (helpers defined earlier) */

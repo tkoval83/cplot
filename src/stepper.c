@@ -1,12 +1,12 @@
 /**
  * @file stepper.c
- * @brief Мінімальний перетворювач планувальника у команди AxiDraw.
- *
- * Примітка: Значення steps_per_mm тепер походить із профілю/налаштувань пристрою
- * (axidraw_settings_t) і не повинно підмінятися жорстко закодованою константою. Тут ми не
- * застосовуємо жорсткий fallback до історичного значення 80.0 — очікується, що вищий рівень
- * (контекст пристрою) передасть валідне значення через stepper_config_t або буде взято із
- * axidraw_settings_t динамічно.
+ * @brief Реалізація перетворення блоків у кроки/таймінги.
+ * @ingroup stepper
+ * @details
+ * Розбиває кожен блок руху на фази (розгін/круїз/гальмування), розподіляє кроки
+ * між осями A/B та обчислює початкові швидкості/прискорення в одиницях EBB
+ * (інтервали 40 мкс, фіксована‑кома частоти кроків). За `dry_run` команди на
+ * пристрій не надсилаються, генеруються лише журнали.
  */
 
 #include "stepper.h"
@@ -17,31 +17,32 @@
 
 #include "log.h"
 
+/** \brief Допуск для ігнорування дуже коротких відрізків, мм. */
 #define STEPPER_EPS_MM 1e-6
+/** \brief Допуск для перевірки нульових швидкостей. */
 #define SPEED_EPS 1e-6
+/** \brief Період таймера EBB LowLevelMove, секунди (40 мкс). */
 #define LM_INTERVAL_SEC 0.00004
+/** \brief Масштаб для перетворення кроків/с у фіксовану частоту EBB. */
 #define LM_RATE_SCALE (2147483648.0 * LM_INTERVAL_SEC)
 
 /**
- * @brief Опис однієї трапецієподібної фази для LM-команди та її відстеження.
+ * @brief Одна фаза руху всередині блоку (розгін/круїз/гальмування).
  */
 typedef struct {
-    double distance_mm;
-    double start_speed_mm_s;
-    double end_speed_mm_s;
-    int32_t steps_a;
-    int32_t steps_b;
-    double duration_s;
-    unsigned long block_seq;
-    size_t phase_index;
-    size_t phase_count;
+    double distance_mm;        /**< Довжина цієї фази, мм. */
+    double start_speed_mm_s;   /**< Початкова швидкість, мм/с. */
+    double end_speed_mm_s;     /**< Кінцева швидкість, мм/с. */
+    int32_t steps_a;           /**< Кроки на вісь A у фазі. */
+    int32_t steps_b;           /**< Кроки на вісь B у фазі. */
+    double duration_s;         /**< Тривалість фази, с. */
+    unsigned long block_seq;   /**< Порядковий номер блоку. */
+    size_t phase_index;        /**< Індекс фази в межах блоку. */
+    size_t phase_count;        /**< Кількість фаз у блоці. */
 } stepper_phase_t;
 
 /**
- * @brief Перетворити частоту кроків на значення rate для LM.
- *
- * @param steps_per_sec Частота кроків (кроки/с).
- * @return Значення rate, обмежене 31‑бітним діапазоном.
+ * @brief Перетворює кроки/с на EBB‑частоту у фіксованій комі.
  */
 static uint32_t rate_from_steps_per_sec (double steps_per_sec) {
     if (!(steps_per_sec > 0.0))
@@ -54,12 +55,7 @@ static uint32_t rate_from_steps_per_sec (double steps_per_sec) {
     return (uint32_t)llround (rate);
 }
 
-/**
- * @brief Обмежити дійсне значення діапазоном signed 32‑bit.
- *
- * @param value Дійсне значення.
- * @return Округлене значення з урахуванням меж INT32.
- */
+/** \brief Безпечно зводить double до int32 з насиченням. */
 static int32_t clamp_i32 (double value) {
     if (!isfinite (value))
         return 0;
@@ -71,12 +67,7 @@ static int32_t clamp_i32 (double value) {
 }
 
 /**
- * @brief Оцінити тривалість фази виходячи з початкової/кінцевої швидкостей.
- *
- * @param distance_mm Довжина фазової ділянки у мм.
- * @param start_speed Швидкість на вході у фазу (мм/с).
- * @param end_speed   Швидкість на виході з фази (мм/с).
- * @return Тривалість у секундах або 0.0, якщо розрахунок неможливий.
+ * @brief Оцінює тривалість фази за математикою рівноприскореного руху.
  */
 static double phase_duration_s (double distance_mm, double start_speed, double end_speed) {
     if (!(distance_mm > 0.0))
@@ -91,12 +82,11 @@ static double phase_duration_s (double distance_mm, double start_speed, double e
 }
 
 /**
- * @brief Відправити підготовлену фазу руху у вигляді LM-команди.
- *
- * @param ctx           Контекст stepper-підсистеми.
- * @param phase         Фаза з попередньо розрахованими параметрами.
- * @param send_command  true → відправляти команду на пристрій; false → лише логувати.
- * @return true при успіху або коли рух не потребує кроків; false при помилці відправлення.
+ * @brief Готує та (за потреби) відправляє одну LowLevelMove фазу до пристрою.
+ * @param ctx Контекст крокувача.
+ * @param phase Опис фази.
+ * @param send_command Якщо `true` і `ctx->cfg.dev` заданий — викликає `axidraw_move_lowlevel`.
+ * @return true — успіх; false — помилка валідації або відправлення.
  */
 static bool
 stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase, bool send_command) {
@@ -170,10 +160,7 @@ stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase, bool s
 }
 
 /**
- * @brief Ініціалізувати контекст stepper-підсистеми.
- *
- * @param ctx Контекст для заповнення.
- * @param cfg Початкові налаштування або NULL для типових.
+ * @brief Повертає `steps_per_mm` із конфігурації або налаштувань пристрою.
  */
 static double resolve_steps_per_mm (const stepper_config_t *cfg) {
     if (cfg && cfg->steps_per_mm > 0.0)
@@ -183,11 +170,14 @@ static double resolve_steps_per_mm (const stepper_config_t *cfg) {
         if (s && s->steps_per_mm > 0.0)
             return s->steps_per_mm;
     }
-    /* Якщо коефіцієнт кроків на міліметр не задано у профілі, повертається 0.0. */
+
     LOGE ("крокувач: коефіцієнт кроків на міліметр не встановлено (потрібен профіль пристрою)");
     return 0.0;
 }
 
+/**
+ * @copydoc stepper_init
+ */
 void stepper_init (stepper_context_t *ctx, const stepper_config_t *cfg) {
     if (!ctx)
         return;
@@ -197,20 +187,13 @@ void stepper_init (stepper_context_t *ctx, const stepper_config_t *cfg) {
         ctx->cfg.steps_per_mm = 0.0;
         ctx->cfg.dev = NULL;
     }
-    /* Автоматично вирішуємо steps_per_mm, якщо ще не встановлено */
+
     if (!(ctx->cfg.steps_per_mm > 0.0))
         ctx->cfg.steps_per_mm = resolve_steps_per_mm (&ctx->cfg);
     ctx->emitted_blocks = 0;
 }
 
-/**
- * @brief Перетворити зміщення у мм в кроки для осей X/Y.
- *
- * @param ctx         Контекст налаштувань stepper.
- * @param block       Підготовлений блок планувальника.
- * @param steps_x_out Вихідні кроки по осі X.
- * @param steps_y_out Вихідні кроки по осі Y.
- */
+/** \brief Конвертує зміщення блоку у кроки по осях X/Y. */
 static void mm_to_steps (
     const stepper_context_t *ctx,
     const plan_block_t *block,
@@ -228,12 +211,7 @@ static void mm_to_steps (
 }
 
 /**
- * @brief Передати блок траєкторії у виконавчий пристрій або у лог dry-run.
- *
- * @param ctx     Контекст stepper.
- * @param block   Блок, що містить відрізок руху.
- * @param dry_run true, якщо слід лише залогувати команду.
- * @return true при успіху; false, якщо відправлення на пристрій завершилося помилкою.
+ * @copydoc stepper_submit_block
  */
 bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bool dry_run) {
     if (!ctx || !block)

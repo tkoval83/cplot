@@ -1,6 +1,9 @@
 /**
  * @file cli.h
- * @brief Обгортка для класичного CLI, що працює через мережевий клієнт.
+ * @brief Інтерфейс маршрутизатора CLI-підкоманд.
+ * @defgroup cli CLI
+ * @ingroup main
+ * Описує виконання підкоманд та їх параметрів.
  */
 #ifndef CPLOT_CLI_H
 #define CPLOT_CLI_H
@@ -8,13 +11,13 @@
 #include "args.h"
 
 /**
- * @brief Виконати команду CLI згідно з розібраними опціями.
- *
- * @param options Розібрані параметри командного рядка (не NULL).
- * @param argc    Кількість аргументів у початковому `argv`.
- * @param argv    Оригінальний масив аргументів (не NULL).
- * @return 0 у разі успіху; ненульовий код при помилці виконання команди.
+ * @brief Виконує вибрану CLI-підкоманду.
+ * @ingroup cli
+ * @param options Розібрані опції й параметри.
+ * @param argc Початковий argc процесу (для делегування підкомандам).
+ * @param argv Початковий argv процесу (для делегування підкомандам).
+ * @return 0 у разі успіху, інакше код помилки.
  */
 int cli_run (const options_t *options, int argc, char *argv[]);
 
-#endif /* CPLOT_CLI_H */
+#endif

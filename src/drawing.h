@@ -1,6 +1,7 @@
 /**
  * @file drawing.h
- * @brief Перетворення текстового вводу на геометрію, превʼю та плани руху.
+ * @brief Побудова розкладки, превʼю SVG/PNG та плану руху.
+ * @defgroup drawing Візуалізація
  */
 #ifndef CPLOT_DRAWING_H
 #define CPLOT_DRAWING_H
@@ -16,50 +17,60 @@ extern "C" {
 #endif
 
 /**
- * @brief Параметри сторінки та полів для розкладки.
+ * @brief Параметри сторінки та полів та орієнтації.
  */
 typedef struct {
-    double paper_w_mm;
-    double paper_h_mm;
-    double margin_top_mm;
-    double margin_right_mm;
-    double margin_bottom_mm;
-    double margin_left_mm;
-    orientation_t orientation;
-    int fit_to_frame; /* 0=disabled, 1=scale down to fit page */
+    double paper_w_mm;         /**< Ширина паперу, мм. */
+    double paper_h_mm;         /**< Висота паперу, мм. */
+    double margin_top_mm;      /**< Верхнє поле, мм. */
+    double margin_right_mm;    /**< Праве поле, мм. */
+    double margin_bottom_mm;   /**< Нижнє поле, мм. */
+    double margin_left_mm;     /**< Ліве поле, мм. */
+    orientation_t orientation; /**< Орієнтація сторінки. */
+    int fit_to_frame;          /**< 1 — масштабувати вміст під рамку. */
 } drawing_page_t;
 
 /**
- * @brief Результат побудови розкладки (шляхи у мм + метадані).
+ * @brief Результат побудови розкладки для рендерингу.
  */
 typedef struct {
-    canvas_layout_t layout;       /**< Геометрія у координатах пристрою (мм). */
-    text_render_info_t text_info; /**< Статистика рендерингу тексту. */
+    canvas_layout_t layout;       /**< Розміщені контури у мм та рамка. */
+    text_render_info_t text_info; /**< Відомості про рендеринг тексту. */
 } drawing_layout_t;
 
-/* Локальні базові типи вводу/виводу для модуля рендерингу */
-typedef enum { STR_ENC_UTF8 = 0, STR_ENC_ASCII = 1 } string_encoding_t;
+/**
+ * @brief Підтримувані кодування рядків вводу.
+ */
+typedef enum {
+    STR_ENC_UTF8 = 0,  /**< Вхідний текст — UTF-8. */
+    STR_ENC_ASCII = 1  /**< Вхідний текст — ASCII. */
+} string_encoding_t;
 
+/**
+ * @brief Представлення рядка без копіювання.
+ */
 typedef struct string_view {
-    const char *chars;
-    size_t len;
-    string_encoding_t enc;
+    const char *chars;       /**< Вказівник на символи (може не бути завершено \0). */
+    size_t len;              /**< Довжина у байтах. */
+    string_encoding_t enc;   /**< Кодування. */
 } string_t;
 
+/**
+ * @brief Буфер байтів для виводу SVG/PNG.
+ */
 typedef struct bytes {
-    uint8_t *bytes;
-    size_t len;
+    uint8_t *bytes; /**< Вказівник на байти (mallocʼені). */
+    size_t len;     /**< Довжина буфера. */
 } bytes_t;
 
 /**
- * @brief Побудувати розкладку тексту у координатах пристрою.
- *
- * @param page        Параметри сторінки.
- * @param font_family Родина шрифтів або NULL.
- * @param font_size_pt Кегль у пунктах (≤0 — типове значення).
- * @param input       Текст для рендерингу.
- * @param layout      Вихідна структура з геометрією.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Побудова розкладки на основі тексту та параметрів сторінки.
+ * @param page Параметри сторінки.
+ * @param font_family Родина шрифту.
+ * @param font_size_pt Розмір шрифту у пунктах.
+ * @param input Вхідний рядок.
+ * @param layout [out] Результуюча розкладка.
+ * @return 0 — успіх, інакше — код помилки.
  */
 int drawing_build_layout (
     const drawing_page_t *page,
@@ -69,49 +80,43 @@ int drawing_build_layout (
     drawing_layout_t *layout);
 
 /**
- * @brief Побудувати розкладку з уже наявних шляхів (напр., з фігур Bézier).
- *
- * @param page         Параметри сторінки та полів (не NULL).
- * @param source_paths Вхідні шляхи у координатах `units` (типово мм).
- * @param layout       Вихідна структура з геометрією (не NULL).
- * @return 0 успіх; 2 — некоректні параметри полотна; 1 — помилка памʼяті.
+ * @brief Побудова розкладки з уже готових контурів.
+ * @param page Параметри сторінки.
+ * @param source_paths Вхідні контури (у мм або ін. — конвертуються).
+ * @param layout [out] Результуюча розкладка.
+ * @return 0 — успіх, інакше — код помилки.
  */
 int drawing_build_layout_from_paths (
     const drawing_page_t *page, const geom_paths_t *source_paths, drawing_layout_t *layout);
 
 /**
- * @brief Звільнити ресурси, повʼязані з розкладкою.
- *
- * @param layout Структура для очищення.
+ * @brief Вивільняє ресурси розкладки.
  */
 void drawing_layout_dispose (drawing_layout_t *layout);
 
 /**
- * @brief Згенерувати SVG-превʼю для готової розкладки.
- *
- * @param layout Розкладка з геометрією.
- * @param out    Вихідний буфер із байтами SVG.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Генерує SVG превʼю.
+ * @param layout Розкладка.
+ * @param out [out] Байти SVG (mallocʼяться всередині).
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_preview_svg (const drawing_layout_t *layout, bytes_t *out);
 
 /**
- * @brief Згенерувати PNG-превʼю для готової розкладки.
- *
- * @param layout Розкладка з геометрією.
- * @param out    Вихідний буфер із байтами PNG.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Генерує PNG превʼю.
+ * @param layout Розкладка.
+ * @param out [out] Байти PNG (mallocʼяться всередині).
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_preview_png (const drawing_layout_t *layout, bytes_t *out);
 
 /**
- * @brief Сформувати план руху, використовуючи planner_plan().
- *
- * @param layout     Розкладка з геометрією.
- * @param limits     Обмеження планувальника або NULL.
- * @param out_blocks Вихідний масив блоків (виділяється).
- * @param out_count  Вихід: кількість блоків.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Генерує план руху для графопобудовника з розкладки.
+ * @param layout Джерело шляхів у мм.
+ * @param limits Обмеження планувальника (NULL — з конфігурації).
+ * @param out_blocks [out] Масив блоків руху.
+ * @param out_count [out] Кількість блоків.
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_generate_motion_plan (
     const drawing_layout_t *layout,
@@ -123,4 +128,4 @@ int drawing_generate_motion_plan (
 }
 #endif
 
-#endif /* CPLOT_DRAWING_H */
+#endif

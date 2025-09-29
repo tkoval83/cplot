@@ -1,11 +1,9 @@
 /**
  * @file colors.h
- * @brief Коди екранування ANSI для кольорового виводу у терміналі.
+ * @brief ANSI-коди кольорів для журналів.
  */
 #ifndef COLORS_H
 #define COLORS_H
-
-// Визначення кольорів ANSI для гарного виводу.
 
 #define NO_COLOR "\x1b[0m"
 #define RED "\x1b[31m"
@@ -16,4 +14,4 @@
 #define CYAN "\x1b[36m"
 #define GRAY "\x1b[37m"
 
-#endif // COLORS_H
+#endif

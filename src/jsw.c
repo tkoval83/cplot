@@ -1,6 +1,10 @@
 /**
  * @file jsw.c
- * @brief Прості утиліти ЗАПИСУ JSON: екранування рядків та потоковий writer.
+ * @brief Реалізація простого JSON writer.
+ * @ingroup jsw
+ * @details
+ * Реалізує запис мінімізованого JSON у `FILE*`, автоматично розставляючи коми
+ * між елементами контейнерів та керуючи станом вкладеності.
  */
 
 #include "jsw.h"
@@ -8,14 +12,7 @@
 #include <string.h>
 
 /**
- * Екранувати рядок для JSON та вивести у потік.
- *
- * Екрануються символи '"', '\\', керуючі переведення рядка/табуляція тощо.
- * Для байтів < 0x20 виводиться послідовність \u00XX.
- *
- * @param f   Потік виводу.
- * @param s   Вхідний буфер (UTF‑8).
- * @param len Довжина буфера у байтах.
+ * @copydoc json_fprint_escaped
  */
 void json_fprint_escaped (FILE *f, const char *s, size_t len) {
     for (size_t i = 0; i < len; i++) {
@@ -46,82 +43,85 @@ void json_fprint_escaped (FILE *f, const char *s, size_t len) {
     }
 }
 
-/**
- * Вставити кому перед наступним елементом за потреби відповідно до контексту.
- *
- * @param w Записувач JSON.
- */
+/** \brief Вставляє кому за потреби перед новим елементом. */
 static inline void jsonw_maybe_comma (json_writer_t *w) {
     if (w->depth > 0) {
         unsigned int idx = (unsigned int)(w->depth - 1);
-        if (w->type[idx] == 1 /* object */) {
+        if (w->type[idx] == 1) { /* обʼєкт */
             if (w->key_open[idx]) {
-                /* очікується значення після ключа, кома не потрібна */
+
             } else if (w->count[idx] > 0) {
                 fputc (',', w->f);
             }
-        } else if (w->type[idx] == 2 /* array */) {
+        } else if (w->type[idx] == 2) { /* масив */
             if (w->count[idx] > 0)
                 fputc (',', w->f);
         }
     }
 }
 
-/**
- * Оновити внутрішній стан після виводу значення (лічильники/прапорці).
- *
- * @param w Записувач JSON.
- */
+/** \brief Оновлює лічильники після запису значення. */
 static inline void jsonw_after_value (json_writer_t *w) {
     if (w->depth > 0) {
         unsigned int idx = (unsigned int)(w->depth - 1);
-        if (w->type[idx] == 1) {
+        if (w->type[idx] == 1) { /* обʼєкт */
             w->key_open[idx] = 0;
             w->count[idx]++;
-        } else if (w->type[idx] == 2) {
+        } else if (w->type[idx] == 2) { /* масив */
             w->count[idx]++;
         }
     }
 }
 
+/** \brief Код типу контексту на стеці: обʼєкт. */
+#define JSW_CTX_OBJECT 1
+/** \brief Код типу контексту на стеці: масив. */
+#define JSW_CTX_ARRAY 2
+
 /**
- * Ініціалізувати записувач JSON для виводу у вказаний потік.
- * @param w Вказівник на структуру (обнуляється).
- * @param f Потік виводу (stdout, файл тощо).
+ * @copydoc jsonw_init
  */
 void jsonw_init (json_writer_t *w, FILE *f) {
     memset (w, 0, sizeof (*w));
     w->f = f;
 }
 
-/** Почати об’єкт "{" у поточному контексті. */
+/**
+ * @copydoc jsonw_begin_object
+ */
 void jsonw_begin_object (json_writer_t *w) {
     jsonw_maybe_comma (w);
     fputc ('{', w->f);
-    w->type[w->depth] = 1;
+    w->type[w->depth] = JSW_CTX_OBJECT;
     w->count[w->depth] = 0;
     w->key_open[w->depth] = 0;
     w->depth++;
 }
 
-/** Завершити поточний об’єкт "}". */
+/**
+ * @copydoc jsonw_end_object
+ */
 void jsonw_end_object (json_writer_t *w) {
     fputc ('}', w->f);
     w->depth--;
     jsonw_after_value (w);
 }
 
-/** Почати масив "[" у поточному контексті. */
+/**
+ * @copydoc jsonw_begin_array
+ */
 void jsonw_begin_array (json_writer_t *w) {
     jsonw_maybe_comma (w);
     fputc ('[', w->f);
-    w->type[w->depth] = 2;
+    w->type[w->depth] = JSW_CTX_ARRAY;
     w->count[w->depth] = 0;
     w->key_open[w->depth] = 0;
     w->depth++;
 }
 
-/** Завершити поточний масив "]". */
+/**
+ * @copydoc jsonw_end_array
+ */
 void jsonw_end_array (json_writer_t *w) {
     fputc (']', w->f);
     w->depth--;
@@ -129,14 +129,12 @@ void jsonw_end_array (json_writer_t *w) {
 }
 
 /**
- * Вивести ключ у поточному об’єкті з двокрапкою: "key":
- * @param w   Записувач.
- * @param key Ключ (UTF‑8).
+ * @copydoc jsonw_key
  */
 void jsonw_key (json_writer_t *w, const char *key) {
     if (w->depth > 0) {
         unsigned int idx = (unsigned int)(w->depth - 1);
-        if (w->type[idx] == 1) {
+        if (w->type[idx] == JSW_CTX_OBJECT) {
             if (w->count[idx] > 0)
                 fputc (',', w->f);
         }
@@ -150,7 +148,9 @@ void jsonw_key (json_writer_t *w, const char *key) {
     }
 }
 
-/** Вивести рядок як значення (із екрануванням). */
+/**
+ * @copydoc jsonw_string
+ */
 void jsonw_string (json_writer_t *w, const char *s, size_t len) {
     jsonw_maybe_comma (w);
     fputc ('"', w->f);
@@ -159,38 +159,50 @@ void jsonw_string (json_writer_t *w, const char *s, size_t len) {
     jsonw_after_value (w);
 }
 
-/** Зручність: вивести C‑рядок як значення. */
+/**
+ * @copydoc jsonw_string_cstr
+ */
 void jsonw_string_cstr (json_writer_t *w, const char *s) { jsonw_string (w, s, strlen (s)); }
 
-/** Вивести булеве значення. */
+/**
+ * @copydoc jsonw_bool
+ */
 void jsonw_bool (json_writer_t *w, int b) {
     jsonw_maybe_comma (w);
     fputs (b ? "true" : "false", w->f);
     jsonw_after_value (w);
 }
 
-/** Вивести ціле значення. */
+/**
+ * @copydoc jsonw_int
+ */
 void jsonw_int (json_writer_t *w, long long v) {
     jsonw_maybe_comma (w);
     fprintf (w->f, "%lld", v);
     jsonw_after_value (w);
 }
 
-/** Вивести число з плаваючою крапкою. */
+/**
+ * @copydoc jsonw_double
+ */
 void jsonw_double (json_writer_t *w, double v) {
     jsonw_maybe_comma (w);
     fprintf (w->f, "%g", v);
     jsonw_after_value (w);
 }
 
-/** Вивести null. */
+/**
+ * @copydoc jsonw_null
+ */
 void jsonw_null (json_writer_t *w) {
     jsonw_maybe_comma (w);
     fputs ("null", w->f);
     jsonw_after_value (w);
 }
 
-/** Вставити сирий JSON‑фрагмент без екранування. */
+/**
+ * @copydoc jsonw_raw
+ */
 void jsonw_raw (json_writer_t *w, const char *raw, size_t len) {
     jsonw_maybe_comma (w);
     fwrite (raw, 1, len, w->f);

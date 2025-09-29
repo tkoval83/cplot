@@ -1,6 +1,11 @@
 /**
  * @file shape.c
- * @brief Реалізація побудови базових фігур і кривих Безьє.
+ * @brief Реалізація генерації базових фігур.
+ * @ingroup shape
+ * @details
+ * Формує полілінії для простих фігур. Кола/еліпси/заокруглення кутів
+ * апроксимуються кубічними Безьє з параметром плоскості (`flatness`, мм)
+ * через рекурсивне підділення.
  */
 
 #include "shape.h"
@@ -9,14 +14,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** \brief Допуск для порівняння координат при замиканні контурів, мм. */
 #define SHAPE_TOL 1e-9
 
+/**
+ * @brief Тимчасовий шлях для накопичення точок перед додаванням у `geom_paths_t`.
+ */
 typedef struct {
-    geom_point_t *pts;
-    size_t len;
-    size_t cap;
+    geom_point_t *pts; /**< Динамічний масив точок. */
+    size_t len;        /**< Кількість точок. */
+    size_t cap;        /**< Ємність масиву. */
 } tmp_path_t;
 
+/**
+ * @brief Ініціалізує тимчасовий шлях із початковою ємністю.
+ */
 static int tmp_path_init (tmp_path_t *p, size_t cap0) {
     memset (p, 0, sizeof (*p));
     if (cap0 == 0)
@@ -28,6 +40,9 @@ static int tmp_path_init (tmp_path_t *p, size_t cap0) {
     return 0;
 }
 
+/**
+ * @brief Гарантує ємність щонайменше `need` точок.
+ */
 static int tmp_path_reserve (tmp_path_t *p, size_t need) {
     if (need <= p->cap)
         return 0;
@@ -42,6 +57,9 @@ static int tmp_path_reserve (tmp_path_t *p, size_t need) {
     return 0;
 }
 
+/**
+ * @brief Додає точку до тимчасового шляху.
+ */
 static int tmp_path_push (tmp_path_t *p, double x, double y) {
     if (tmp_path_reserve (p, p->len + 1) != 0)
         return -1;
@@ -49,11 +67,17 @@ static int tmp_path_push (tmp_path_t *p, double x, double y) {
     return 0;
 }
 
+/**
+ * @brief Вивільняє памʼять тимчасового шляху.
+ */
 static void tmp_path_free (tmp_path_t *p) {
     free (p->pts);
     memset (p, 0, sizeof (*p));
 }
 
+/**
+ * @brief Відстань від точки `p` до прямої через `a`–`b`.
+ */
 static double dist_point_to_line (geom_point_t a, geom_point_t b, geom_point_t p) {
     double vx = b.x - a.x, vy = b.y - a.y;
     double wx = p.x - a.x, wy = p.y - a.y;
@@ -64,6 +88,14 @@ static double dist_point_to_line (geom_point_t a, geom_point_t b, geom_point_t p
     return cross / denom;
 }
 
+/**
+ * @brief Рекурсивно апроксимує кубічну криву Безьє ламаною з допуском `flatness`.
+ * @param out Буфер вихідних точок (початкова точка має бути вже додана).
+ * @param p0,p1,p2,p3 Опорні точки кубічної кривої.
+ * @param flatness Максимально допустиме відхилення (мм).
+ * @param depth Поточна глибина рекурсії (обмежена 20).
+ * @return 0 — успіх; -1 — помилка памʼяті.
+ */
 static int flatten_cubic (
     tmp_path_t *out,
     geom_point_t p0,
@@ -73,16 +105,16 @@ static int flatten_cubic (
     double flatness,
     int depth) {
     if (depth > 20) {
-        // Запобігання нескінченній рекурсії в крайніх випадках
+
         return tmp_path_push (out, p3.x, p3.y);
     }
     double d1 = dist_point_to_line (p0, p3, p1);
     double d2 = dist_point_to_line (p0, p3, p2);
     if (d1 <= flatness && d2 <= flatness) {
-        // Достатньо плоско — додаємо кінцеву точку
+
         return tmp_path_push (out, p3.x, p3.y);
     }
-    // Рекурсивно ділимо криву навпіл (де Кастельно)
+
     geom_point_t p01 = { (p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5 };
     geom_point_t p12 = { (p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5 };
     geom_point_t p23 = { (p2.x + p3.x) * 0.5, (p2.y + p3.y) * 0.5 };
@@ -96,19 +128,25 @@ static int flatten_cubic (
     return 0;
 }
 
+/**
+ * @brief Додає накопичені точки як окремий шлях у `out`.
+ */
 static int append_tmp_as_path (geom_paths_t *out, const tmp_path_t *tp) {
     if (!out || !tp || tp->len == 0)
         return 0;
     return geom_paths_push_path (out, tp->pts, tp->len);
 }
 
+/**
+ * @copydoc shape_rect
+ */
 int shape_rect (geom_paths_t *out, double x, double y, double w, double h) {
     if (!out || !(w > 0.0) || !(h > 0.0))
         return -1;
     tmp_path_t tp;
     if (tmp_path_init (&tp, 5) != 0)
         return -1;
-    // Замкнений прямокутник (повтор першої точки в кінці)
+
     if (tmp_path_push (&tp, x, y) != 0 || tmp_path_push (&tp, x + w, y) != 0
         || tmp_path_push (&tp, x + w, y + h) != 0 || tmp_path_push (&tp, x, y + h) != 0
         || tmp_path_push (&tp, x, y) != 0) {
@@ -120,6 +158,9 @@ int shape_rect (geom_paths_t *out, double x, double y, double w, double h) {
     return rc;
 }
 
+/**
+ * @copydoc shape_polyline
+ */
 int shape_polyline (geom_paths_t *out, const geom_point_t *pts, size_t len, int closed) {
     if (!out || !pts || len < 2)
         return -1;
@@ -146,6 +187,9 @@ int shape_polyline (geom_paths_t *out, const geom_point_t *pts, size_t len, int 
     return rc;
 }
 
+/**
+ * @brief Внутрішня реалізація заокругленого прямокутника.
+ */
 static int round_rect_internal (
     geom_paths_t *out,
     double x,
@@ -158,7 +202,7 @@ static int round_rect_internal (
     tmp_path_t tp;
     if (tmp_path_init (&tp, 64) != 0)
         return -1;
-    const double k = 0.5522847498307936; // для апроксимації чверті кола кубічною Безьє
+    const double k = 0.5522847498307936;
 
     double x0 = x, y0 = y, x1 = x + w, y1 = y + h;
     if (rx <= 0.0 && ry <= 0.0) {
@@ -181,19 +225,17 @@ static int round_rect_internal (
     if (ry > h * 0.5)
         ry = h * 0.5;
 
-    // Старт: верхня грань, з урахуванням радіуса
     geom_point_t p = { x0 + rx, y0 };
     if (tmp_path_push (&tp, p.x, p.y) != 0) {
         tmp_path_free (&tp);
         return -1;
     }
 
-    // Верхня грань до (x1 - rx, y0)
     if (tmp_path_push (&tp, x1 - rx, y0) != 0) {
         tmp_path_free (&tp);
         return -1;
     }
-    // Кут: верхній правий (до x1, y0+ry)
+
     {
         geom_point_t p0 = { x1 - rx, y0 };
         geom_point_t p1 = { p0.x + k * rx, p0.y };
@@ -204,12 +246,12 @@ static int round_rect_internal (
             return -1;
         }
     }
-    // Права грань до (x1, y1 - ry)
+
     if (tmp_path_push (&tp, x1, y1 - ry) != 0) {
         tmp_path_free (&tp);
         return -1;
     }
-    // Нижній правий кут (до x1 - rx, y1)
+
     {
         geom_point_t p0 = { x1, y1 - ry };
         geom_point_t p1 = { p0.x, p0.y + k * ry };
@@ -220,12 +262,12 @@ static int round_rect_internal (
             return -1;
         }
     }
-    // Нижня грань до (x0 + rx, y1)
+
     if (tmp_path_push (&tp, x0 + rx, y1) != 0) {
         tmp_path_free (&tp);
         return -1;
     }
-    // Нижній лівий кут (до x0, y1 - ry)
+
     {
         geom_point_t p0 = { x0 + rx, y1 };
         geom_point_t p1 = { p0.x - k * rx, p0.y };
@@ -236,12 +278,12 @@ static int round_rect_internal (
             return -1;
         }
     }
-    // Ліва грань до (x0, y0 + ry)
+
     if (tmp_path_push (&tp, x0, y0 + ry) != 0) {
         tmp_path_free (&tp);
         return -1;
     }
-    // Верхній лівий кут (до x0 + rx, y0)
+
     {
         geom_point_t p0 = { x0, y0 + ry };
         geom_point_t p1 = { p0.x, p0.y - k * ry };
@@ -252,7 +294,7 @@ static int round_rect_internal (
             return -1;
         }
     }
-    // Замикання шляху (повтор першої точки, якщо потрібно)
+
     if (tmp_path_push (&tp, x0 + rx, y0) != 0) {
         tmp_path_free (&tp);
         return -1;
@@ -263,6 +305,9 @@ static int round_rect_internal (
     return rc;
 }
 
+/**
+ * @copydoc shape_round_rect
+ */
 int shape_round_rect (
     geom_paths_t *out,
     double x,
@@ -277,6 +322,9 @@ int shape_round_rect (
     return round_rect_internal (out, x, y, w, h, rx, ry, flatness);
 }
 
+/**
+ * @copydoc shape_ellipse
+ */
 int shape_ellipse (geom_paths_t *out, double cx, double cy, double rx, double ry, double flatness) {
     if (!out || !(rx > 0.0) || !(ry > 0.0) || flatness <= 0.0)
         return -1;
@@ -285,13 +333,12 @@ int shape_ellipse (geom_paths_t *out, double cx, double cy, double rx, double ry
         return -1;
     const double k = 0.5522847498307936;
 
-    // 4 чверті еліпса як кубічні криві Безьє
     geom_point_t p0 = { cx + rx, cy };
     if (tmp_path_push (&tp, p0.x, p0.y) != 0) {
         tmp_path_free (&tp);
         return -1;
     }
-    // Q1: (cx+rx,cy) -> (cx,cy+ry)
+
     {
         geom_point_t p1 = { p0.x, p0.y + k * ry };
         geom_point_t p3 = { cx, cy + ry };
@@ -300,7 +347,7 @@ int shape_ellipse (geom_paths_t *out, double cx, double cy, double rx, double ry
             goto fail;
         p0 = p3;
     }
-    // Q2: (cx,cy+ry) -> (cx-rx,cy)
+
     {
         geom_point_t p1 = { p0.x - k * rx, p0.y };
         geom_point_t p3 = { cx - rx, cy };
@@ -309,7 +356,7 @@ int shape_ellipse (geom_paths_t *out, double cx, double cy, double rx, double ry
             goto fail;
         p0 = p3;
     }
-    // Q3: (cx-rx,cy) -> (cx,cy-ry)
+
     {
         geom_point_t p1 = { p0.x, p0.y - k * ry };
         geom_point_t p3 = { cx, cy - ry };
@@ -318,14 +365,14 @@ int shape_ellipse (geom_paths_t *out, double cx, double cy, double rx, double ry
             goto fail;
         p0 = p3;
     }
-    // Q4: (cx,cy-ry) -> (cx+rx,cy)
+
     {
         geom_point_t p1 = { p0.x + k * rx, p0.y };
         geom_point_t p3 = (geom_point_t){ cx + rx, cy };
         geom_point_t p2 = { p3.x, p3.y - k * ry };
         if (flatten_cubic (&tp, p0, p1, p2, p3, flatness, 0) != 0)
             goto fail;
-        // замкнути
+
         if (tmp_path_push (&tp, tp.pts[0].x, tp.pts[0].y) != 0)
             goto fail;
     }
@@ -341,10 +388,16 @@ fail:
     return -1;
 }
 
+/**
+ * @copydoc shape_circle
+ */
 int shape_circle (geom_paths_t *out, double cx, double cy, double r, double flatness) {
     return shape_ellipse (out, cx, cy, r, r, flatness);
 }
 
+/**
+ * @copydoc shape_bezier_cubic
+ */
 int shape_bezier_cubic (
     geom_paths_t *out,
     geom_point_t p0,
@@ -370,10 +423,12 @@ int shape_bezier_cubic (
     return rc;
 }
 
+/**
+ * @copydoc shape_bezier_quad
+ */
 int shape_bezier_quad (
     geom_paths_t *out, geom_point_t p0, geom_point_t p1, geom_point_t p2, double flatness) {
-    // Квадратичну Безьє зведемо до кубічної еквівалентної:
-    // c1 = p0 + 2/3*(p1 - p0); c2 = p2 + 2/3*(p1 - p2)
+
     geom_point_t c1 = { p0.x + (2.0 / 3.0) * (p1.x - p0.x), p0.y + (2.0 / 3.0) * (p1.y - p0.y) };
     geom_point_t c2 = { p2.x + (2.0 / 3.0) * (p1.x - p2.x), p2.y + (2.0 / 3.0) * (p1.y - p2.y) };
     return shape_bezier_cubic (out, p0, c1, c2, p2, flatness);

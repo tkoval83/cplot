@@ -1,6 +1,8 @@
 /**
  * @file cmd.h
- * @brief Публічний API підкоманд (без залежності від CLI/args).
+ * @brief Фасади виконання підкоманд `print`, `device`, `config`, `fonts`, `version`.
+ * @defgroup cmd Команди
+ * @ingroup cli
  */
 #ifndef CPLOT_CMD_H
 #define CPLOT_CMD_H
@@ -15,12 +17,37 @@
 extern "C" {
 #endif
 
-/** Код результату виконання підкоманди (0 — успіх). */
+/**
+ * @brief Уніфікований тип коду результату команд.
+ */
 typedef int cmd_result_t;
 
+/**
+ * @brief Встановлює потік виводу для результатів (stdout за замовчуванням).
+ * @param out Потік виводу (наприклад, для превʼю байтів PNG/SVG).
+ */
 void cmd_set_output (FILE *out);
 
-/** Друк/планування з буфера (без читання stdin/файлів). */
+/**
+ * @brief Виконання друку на пристрій AxiDraw.
+ * @param in_chars Вхідний текст.
+ * @param in_len Довжина вхідного тексту.
+ * @param markdown Чи інтерпретувати вхід як Markdown.
+ * @param font_family Назва шрифтної родини Hershey.
+ * @param font_size_pt Розмір шрифту у пунктах.
+ * @param device_model Модель пристрою (профіль руху).
+ * @param paper_w_mm Ширина паперу у мм.
+ * @param paper_h_mm Висота паперу у мм.
+ * @param margin_top_mm Верхнє поле у мм.
+ * @param margin_right_mm Праве поле у мм.
+ * @param margin_bottom_mm Нижнє поле у мм.
+ * @param margin_left_mm Ліве поле у мм.
+ * @param orientation Орієнтація сторінки.
+ * @param fit_page Масштабувати вміст під сторінку.
+ * @param dry_run Режим без фізичних дій.
+ * @param verbose Детальні журнали.
+ * @return 0 — успіх, інакше — код помилки.
+ */
 cmd_result_t cmd_print_execute (
     const char *in_chars,
     size_t in_len,
@@ -40,26 +67,26 @@ cmd_result_t cmd_print_execute (
     bool verbose);
 
 /**
- * Згенерувати попередній перегляд розкладки.
- *
- * Обгортка над cmd_print_execute() з фіксованим режимом preview=true.
- *
- * @param in               Вміст вхідного файлу (буфер у пам'яті; не NULL при len>0).
- * @param font_family      Родина шрифтів або NULL для типового.
- * @param font_size_pt     Кегль у пунктах (≤0 — використати значення з конфігурації).
- * @param device_model     Ідентифікатор моделі AxiDraw або NULL для типової.
- * @param paper_w_mm       Ширина паперу (мм).
- * @param paper_h_mm       Висота паперу (мм).
- * @param margin_top_mm    Верхнє поле (мм).
- * @param margin_right_mm  Праве поле (мм).
- * @param margin_bottom_mm Нижнє поле (мм).
- * @param margin_left_mm   Ліве поле (мм).
- * @param orientation      Одна з констант orientation_t (див. config.h).
- * @param format           Формат прев’ю (SVG або PNG).
- * @param verbose          Рівень деталізації логів.
- * @param out              Вихідний буфер з байтами прев'ю (виділяється всередині; звільняє викликач
- * через free()).
- * @return 0 успіх; ненульовий код — помилка. На помилці out->bytes==NULL, out->len==0.
+ * @brief Генерує превʼю векторного/растрового зображення без друку на пристрій.
+ * @param in_chars Вхідний текст.
+ * @param in_len Довжина вхідного тексту.
+ * @param markdown Чи інтерпретувати вхід як Markdown.
+ * @param font_family Назва шрифтної родини Hershey.
+ * @param font_size_pt Розмір шрифту у пунктах.
+ * @param device_model Модель пристрою (профіль руху).
+ * @param paper_w_mm Ширина паперу у мм.
+ * @param paper_h_mm Висота паперу у мм.
+ * @param margin_top_mm Верхнє поле у мм.
+ * @param margin_right_mm Праве поле у мм.
+ * @param margin_bottom_mm Нижнє поле у мм.
+ * @param margin_left_mm Ліве поле у мм.
+ * @param orientation Орієнтація сторінки.
+ * @param fit_page Масштабувати вміст під сторінку (як булеве ціле).
+ * @param preview_png Якщо 1 — вивід PNG, інакше SVG.
+ * @param verbose Детальні журнали.
+ * @param out_bytes [out] Буфер згенерованих байтів.
+ * @param out_len [out] Довжина буфера в байтах.
+ * @return 0 — успіх, інакше — код помилки.
  */
 cmd_result_t cmd_print_preview (
     const char *in_chars,
@@ -80,87 +107,204 @@ cmd_result_t cmd_print_preview (
     bool verbose,
     uint8_t **out_bytes,
     size_t *out_len);
-/** Показати версію програми. @return 0 успіх. */
-cmd_result_t cmd_version_execute (bool verbose);
-/** Вивести список доступних векторних шрифтів. @return 0 успіх. */
-cmd_result_t cmd_fonts_execute (bool verbose);
+
 /**
- * Перелік шрифтів (деталізована функція для підкоманди fonts).
- *
- * @param verbose Рівень деталізації логів.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Друк версії застосунку.
+ * @param verbose Увімкнути докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
+ */
+cmd_result_t cmd_version_execute (bool verbose);
+
+/**
+ * @brief Друк інформації про доступні шрифти.
+ * @param verbose Увімкнути докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
+ */
+cmd_result_t cmd_fonts_execute (bool verbose);
+
+/**
+ * @brief Друк переліку шрифтів або лише родин шрифтів.
+ * @param families_only Якщо true — лише родини; false — усі шрифти.
+ * @param verbose Увімкнути докладний режим.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t cmd_font_list_execute (bool families_only, bool verbose);
+
 /**
- * Операції над конфігурацією (show/reset/set).
- *
- * @param action     Дія (див. config_action_t у args.h).
- * @param set_pairs  Пара(и) key=value через кому (для action==SET) або NULL.
- * @param inout_cfg  Конфігурація для читання/зміни (може бути попередньо
- *                   заповненою значеннями за замовчуванням).
- * @param verbose    Рівень деталізації.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Загальний обробник підкоманди `config`.
+ * @param action Дія: show/reset/set (1/2/3).
+ * @param set_pairs Парам-рядок для `--set`.
+ * @param inout_cfg Конфіг для читання/запису (NULL — авто-завантаження).
+ * @param verbose Увімкнути докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t
 cmd_config_execute (int action, const char *set_pairs, config_t *inout_cfg, bool verbose);
 
 /**
- * Показати конфігурацію (деталізована функція для config --show).
- *
- * @param cfg     Конфігурація для показу (не NULL).
- * @param verbose Рівень деталізації логів.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Друк конфігурації.
+ * @param cfg Конфіг (NULL — авто-завантаження).
+ * @param verbose Докладні журнали.
+ * @return 0 — успіх.
  */
 cmd_result_t cmd_config_show (const config_t *cfg, bool verbose);
 
 /**
- * Скинути конфігурацію до типових значень (config --reset).
- *
- * @param inout_cfg Конфігурація для зміни (не NULL).
- * @param verbose   Рівень деталізації логів.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Скидання конфігурації до типових значень.
+ * @param inout_cfg Конфіг для запису (NULL — авто-завантаження/збереження).
+ * @param verbose Докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t cmd_config_reset (config_t *inout_cfg, bool verbose);
 
 /**
- * Встановити значення конфігурації за парами key=value (config --set).
- *
- * @param set_pairs  Рядок пар key=value, розділених комами (не NULL).
- * @param inout_cfg  Конфігурація для зміни (не NULL).
- * @param verbose    Рівень деталізації логів.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Застосування пар ключ=значення до конфігурації.
+ * @param set_pairs Кома-розділений список key=value.
+ * @param inout_cfg Конфіг (NULL — авто-завантаження/збереження).
+ * @param verbose Докладні журнали.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, bool verbose);
+
 /**
- * Операції над пристроєм (list/jog/pen/...)
- *
- * @param action    Дія пристрою (див. device_action_t у args.h; не NULL).
- * @param alias     Псевдонім пристрою (як у `device list`) або NULL для автопошуку.
- * @param model     Ідентифікатор моделі або NULL для типової.
- * @param jog_dx_mm Зсув по X у мм для дії jog.
- * @param jog_dy_mm Зсув по Y у мм для дії jog.
- * @param verbose   Рівень деталізації.
- * @return 0 успіх; ненульовий код — помилка.
+ * @brief Перелік доступних пристроїв AxiDraw.
+ * @param model Модель профілю (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
  */
 cmd_result_t cmd_device_list (const char *model, bool verbose);
+
+/**
+ * @brief Друк активного профілю руху/параметрів.
+ * @param alias Псевдонім/порт пристрою (опційно).
+ * @param model Очікувана модель профілю (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_profile (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Підняти перо.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_pen_up (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Опустити перо.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_pen_down (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Перемкнути стан пера.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_pen_toggle (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Увімкнути мотори.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_motors_on (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Вимкнути мотори.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_motors_off (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Аварійна зупинка.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_abort (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Поїздка в home.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_home (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Ручний зсув на вказану відстань по осях.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param dx_mm Зсув X (мм).
+ * @param dy_mm Зсув Y (мм).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t
 cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm, bool verbose);
+
+/**
+ * @brief Друк версії прошивки EBB/пристрою.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_version (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Звіт про статус пристрою.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_status (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Поточна позиція пристрою.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_position (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Мʼякий скидання контролера.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_reset (const char *alias, const char *model, bool verbose);
+
+/**
+ * @brief Перезавантаження контролера.
+ * @param alias Псевдонім/порт (опційно).
+ * @param model Модель (опційно).
+ * @param verbose Докладний режим.
+ * @return 0 — успіх, інакше код помилки.
+ */
 cmd_result_t cmd_device_reboot (const char *alias, const char *model, bool verbose);
 
 #ifdef __cplusplus
-} /* extern "C" */
+}
 #endif
 
-#endif /* CPLOT_CMD_H */
+#endif

@@ -1,6 +1,10 @@
 /**
- * @file string.c
- * @brief Shared utility helpers for safe string manipulation.
+ * @file str.c
+ * @brief Реалізація рядкових утиліт.
+ * @ingroup str
+ * @details
+ * Містить прості операції над ASCII‑рядками та мінімальний UTF‑8 декодер, що
+ * перевіряє базову коректність послідовностей і запобігає надмірним формам.
  */
 
 #include "str.h"
@@ -11,11 +15,7 @@
 #include <string.h>
 
 /**
- * @brief Виділити новий рядок і скопіювати в нього `src`.
- *
- * @param src     Вхідний рядок (NUL-термінований).
- * @param[out] out_dst Отримує адресу нового буфера (`free` викликача).
- * @return 0 при успіху; -1 при помилці памʼяті; -2 при некоректних аргументах.
+ * @copydoc string_duplicate
  */
 int string_duplicate (const char *src, char **out_dst) {
     if (!src || !out_dst)
@@ -30,11 +30,7 @@ int string_duplicate (const char *src, char **out_dst) {
 }
 
 /**
- * @brief Безпечно скопіювати `src` у буфер з обмеженою довжиною.
- *
- * @param dst      Буфер призначення.
- * @param dst_size Розмір буфера.
- * @param src      Джерело (може бути NULL → записати порожній рядок).
+ * @copydoc string_copy
  */
 void string_copy (char *dst, size_t dst_size, const char *src) {
     if (!dst || dst_size == 0)
@@ -48,7 +44,7 @@ void string_copy (char *dst, size_t dst_size, const char *src) {
 }
 
 /**
- * @brief Порівняти два ASCII-рядки без урахування регістру.
+ * @copydoc string_equals_ci
  */
 bool string_equals_ci (const char *a, const char *b) {
     if (!a || !b)
@@ -65,7 +61,7 @@ bool string_equals_ci (const char *a, const char *b) {
 }
 
 /**
- * @brief Перетворити рядок у нижній регістр (ASCII).
+ * @copydoc string_to_lower_ascii
  */
 void string_to_lower_ascii (char *s) {
     if (!s)
@@ -75,7 +71,7 @@ void string_to_lower_ascii (char *s) {
 }
 
 /**
- * @brief Обрізати ASCII-пробіли з початку та кінця рядка.
+ * @copydoc string_trim_ascii
  */
 void string_trim_ascii (char *s) {
     if (!s)
@@ -91,6 +87,9 @@ void string_trim_ascii (char *s) {
     *end = '\0';
 }
 
+/**
+ * @copydoc str_utf8_decode
+ */
 int str_utf8_decode (const char *input, uint32_t *out_cp, size_t *consumed) {
     if (!input || !out_cp)
         return -1;

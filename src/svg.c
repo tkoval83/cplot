@@ -1,6 +1,11 @@
 /**
  * @file svg.c
- * @brief Примітивний SVG-рендерер для попереднього перегляду текстових шляхів.
+ * @brief Реалізація генерації SVG.
+ * @ingroup svg
+ * @details
+ * Формує мінімальний SVG: заголовок із розмірами у мм, фон‑прямокутник та
+ * послідовність `path` елементів, що зʼєднують точки поліліній. Буфер строїться
+ * у динамічній памʼяті з автоматичним розширенням.
  */
 
 #include "svg.h"
@@ -17,13 +22,12 @@
 #endif
 
 /**
- * @brief Забезпечити необхідну місткість рядкового буфера.
- *
- * @param buf   Буфер рядка (перевиділяється за потреби).
- * @param len   Поточна довжина записаних символів.
- * @param cap   Поточна місткість (оновлюється).
- * @param extra Кількість додаткових байтів, яку потрібно розмістити (без урахування NUL).
- * @return 0 при успіху; -1 при помилці памʼяті або некоректних аргументах.
+ * @brief Гарантує ємність рядкового буфера на +`extra` байтів (із `\0`).
+ * @param buf [in,out] Вказівник на буфер (може бути `NULL` при старті).
+ * @param len [in,out] Поточна довжина корисних даних у буфері.
+ * @param cap [in,out] Поточна ємність буфера у байтах.
+ * @param extra Скільки додаткових байтів потрібно записати (без урахування `\0`).
+ * @return 0 — успіх; -1 — помилка виділення памʼяті.
  */
 static int str_reserve (char **buf, size_t *len, size_t *cap, size_t extra) {
     size_t need = *len + extra + 1;
@@ -41,14 +45,12 @@ static int str_reserve (char **buf, size_t *len, size_t *cap, size_t extra) {
 }
 
 /**
- * @brief Додати форматований рядок у динамічний буфер (printf-подібно).
- *
- * @param buf  Буфер рядка (перевиділяється за потреби).
- * @param len  Поточна довжина (оновлюється).
- * @param cap  Поточна місткість (оновлюється).
- * @param fmt  Формат printf.
- * @param ...  Аргументи.
- * @return 0 при успіху; -1 при помилці памʼяті або форматування.
+ * @brief Додає до буфера рядок, сформований за `printf`‑форматом.
+ * @param buf [in,out] Буфер.
+ * @param len [in,out] Довжина корисних даних.
+ * @param cap [in,out] Ємність буфера.
+ * @param fmt Форматний рядок.
+ * @return 0 — успіх; -1 — помилка виділення памʼяті/форматування.
  */
 static int str_appendf (char **buf, size_t *len, size_t *cap, const char *fmt, ...) {
     va_list args;
@@ -69,11 +71,7 @@ static int str_appendf (char **buf, size_t *len, size_t *cap, const char *fmt, .
 }
 
 /**
- * @brief Згенерувати SVG-превʼю для текстової розкладки.
- *
- * @param layout Розкладка (містить шляхи у міліметрах).
- * @param[out] out Байтовий буфер SVG (malloc; звільняє викликач).
- * @return 0 при успіху; 1 при помилці памʼяті/параметрів.
+ * @copydoc svg_render_layout
  */
 int svg_render_layout (const drawing_layout_t *layout, bytes_t *out) {
     if (!layout || !out)
@@ -101,8 +99,6 @@ int svg_render_layout (const drawing_layout_t *layout, bytes_t *out) {
             c->paper_w_mm, c->paper_h_mm)
         != 0)
         goto fail;
-
-    /* Рамка робочої області не відображається у прев’ю. */
 
     for (size_t i = 0; i < paths->len; ++i) {
         const geom_path_t *p = &paths->items[i];

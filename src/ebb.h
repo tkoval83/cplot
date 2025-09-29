@@ -1,6 +1,8 @@
 /**
  * @file ebb.h
- * @brief Високорівневі обгортки над протоколом EBB (EiBotBoard).
+ * @brief Протокол EBB (EiBotBoard) для керування AxiDraw.
+ * @defgroup ebb EBB
+ * @ingroup device
  */
 #ifndef EBB_H
 #define EBB_H
@@ -16,120 +18,116 @@ extern "C" {
 #endif
 
 /**
- * Режими ввімкнення моторів для команди EM.
- * Значення відповідають параметрам Enable1/Enable2 у документації EBB.
+ * @brief Режими мікрокроку для моторів EBB.
  */
 typedef enum {
-    EBB_MOTOR_DISABLED = 0, /**< Вимкнути мотор (вільне обертання). */
-    EBB_MOTOR_STEP_16 = 1,  /**< 1/16 мікрокрок, мотор увімкнено. */
-    EBB_MOTOR_STEP_8 = 2,   /**< 1/8 мікрокрок, мотор увімкнено. */
-    EBB_MOTOR_STEP_4 = 3,   /**< 1/4 мікрокрок, мотор увімкнено. */
-    EBB_MOTOR_STEP_2 = 4,   /**< 1/2 мікрокрок, мотор увімкнено. */
-    EBB_MOTOR_STEP_FULL = 5 /**< Повний крок, мотор увімкнено. */
+    EBB_MOTOR_DISABLED = 0, /**< Мотор вимкнено. */
+    EBB_MOTOR_STEP_16 = 1,  /**< 1/16 мікрокрок. */
+    EBB_MOTOR_STEP_8 = 2,   /**< 1/8 мікрокрок. */
+    EBB_MOTOR_STEP_4 = 3,   /**< 1/4 мікрокрок. */
+    EBB_MOTOR_STEP_2 = 4,   /**< 1/2 мікрокрок. */
+    EBB_MOTOR_STEP_FULL = 5 /**< Повний крок. */
 } ebb_motor_mode_t;
 
+/**
+ * @brief Прапорці очищення лічильників для низькорівневих команд.
+ */
 typedef enum {
-    EBB_CLEAR_NONE = 0,  /**< Не скидати жодного акумулятора. */
-    EBB_CLEAR_AXIS1 = 1, /**< Скинути акумулятор осі 1 (LM/LT). */
-    EBB_CLEAR_AXIS2 = 2, /**< Скинути акумулятор осі 2 (LM/LT). */
-    EBB_CLEAR_BOTH = 3,  /**< Скинути обидва акумулятори. */
+    EBB_CLEAR_NONE = 0,  /**< Не очищати. */
+    EBB_CLEAR_AXIS1 = 1, /**< Очистити лічильник осі 1. */
+    EBB_CLEAR_AXIS2 = 2, /**< Очистити лічильник осі 2. */
+    EBB_CLEAR_BOTH = 3,  /**< Очистити обидва лічильники. */
 } ebb_clear_flag_t;
 
 /**
- * Статус рухової системи, повернутий командою QM.
+ * @brief Стан руху та черги команд у контролері.
  */
 typedef struct {
-    int command_active; /**< 1 якщо виконується рухова команда. */
-    int motor1_active;  /**< 1 якщо мотор 1 рухається. */
-    int motor2_active;  /**< 1 якщо мотор 2 рухається. */
-    int fifo_pending;   /**< 1 якщо FIFO не порожній (версії ≥ 2.4.4). */
+    int command_active; /**< 1 — виконується команда руху. */
+    int motor1_active;  /**< 1 — мотор 1 активний. */
+    int motor2_active;  /**< 1 — мотор 2 активний. */
+    int fifo_pending;   /**< Кількість команд у черзі FIFO (якщо повідомляється). */
 } ebb_motion_status_t;
 
-/* Агрегований знімок стану вилучено; для отримання інформації використовуйте
- * окремі виклики ebb_query_motion/steps/pen/servo_power/version. */
-
 /**
- * Надіслати команду EM для ввімкнення/вимкнення моторів та вибору мікрокроку.
- *
- * @param sp        Відкритий послідовний порт EBB.
- * @param motor1    Режим для мотора 1 (визначає глобальний мікрокрок).
- * @param motor2    Режим для мотора 2 (0 = вимкнено, інше = увімкнено).
- * @param timeout_ms Тайм-аут очікування відповіді OK.
- * @return 0 при успіху; -1 при помилці або негативній відповіді.
+ * @brief Увімкнути мотори з режимами мікрокроку.
+ * @param sp Відкритий порт EBB.
+ * @param motor1 Режим мотора 1.
+ * @param motor2 Режим мотора 2.
+ * @param timeout_ms Тайм-аут команди (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_enable_motors (
     serial_port_t *sp, ebb_motor_mode_t motor1, ebb_motor_mode_t motor2, int timeout_ms);
 
 /**
- * Псевдонім для EM,0,0 — повністю вимкнути мотори.
- *
- * @param sp        Відкритий порт.
- * @param timeout_ms Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці.
+ * @brief Вимкнути живлення моторів.
+ * @param sp Порт EBB.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_disable_motors (serial_port_t *sp, int timeout_ms);
-
 /**
- * Виконати прямолінійний рух (SM) із зазначеною тривалістю та кроками.
- *
- * @param sp          Відкритий послідовний порт.
- * @param duration_ms Тривалість у мілісекундах (1..16777215).
- * @param steps1      Кроки по осі 1 (-16777215..16777215).
- * @param steps2      Кроки по осі 2 (-16777215..16777215).
- * @param timeout_ms  Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці або хибних аргументах.
+ * @brief Рух на задану кількість кроків за визначений час.
+ * @param sp Порт.
+ * @param duration_ms Тривалість інтервалу (мс).
+ * @param steps1 Кроки осі 1.
+ * @param steps2 Кроки осі 2.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_move_steps (
     serial_port_t *sp, uint32_t duration_ms, int32_t steps1, int32_t steps2, int timeout_ms);
 
 /**
- * Перемістити перо (SP) із можливим додатковим очікуванням.
- *
- * @param sp          Відкритий послідовний порт.
- * @param pen_up      true → підняти перо (SP,1), false → опустити (SP,0).
- * @param settle_ms   Додаткова пауза перед наступною командою (0..65535).
- * @param portb_pin   Номер RB-виводу (0..7) або -1 для значення за замовчуванням.
- * @param timeout_ms  Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці/хибних аргументах.
+ * @brief Керує станом пера через сервопривід.
+ * @param sp Порт.
+ * @param pen_up true — перо вгору, false — вниз.
+ * @param settle_ms Затримка стабілізації (мс).
+ * @param portb_pin Альтернативний пін (або -1).
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_pen_set (serial_port_t *sp, bool pen_up, int settle_ms, int portb_pin, int timeout_ms);
 
-/** @brief Підняти перо (SP,1) без додаткових параметрів. */
+/**
+ * @brief Зручна обгортка для підняття пера (SP,1).
+ * @param sp Порт EBB.
+ * @param timeout_ms Тайм-аут команди (мс).
+ * @return 0 — успіх, інакше помилка.
+ */
 static inline int ebb_pen_up (serial_port_t *sp, int timeout_ms) {
     return ebb_pen_set (sp, true, 0, -1, timeout_ms);
 }
 
-/** @brief Опустити перо (SP,0) без додаткових параметрів. */
 static inline int ebb_pen_down (serial_port_t *sp, int timeout_ms) {
     return ebb_pen_set (sp, false, 0, -1, timeout_ms);
 }
 
 /**
- * Зробити рух у координатах A/B (XM) для CoreXY/H-bot кінематики.
- *
- * @param sp          Відкритий послідовний порт.
- * @param duration_ms Тривалість у мілісекундах (1..16777215).
- * @param steps_a     Кроки вздовж осі A (-16777215..16777215).
- * @param steps_b     Кроки вздовж осі B (-16777215..16777215).
- * @param timeout_ms  Тайм-аут очікування OK.
- * @return 0 у разі успіху; -1 при помилці або некоректних параметрах.
+ * @brief Рух у CoreXY-просторі (A/B осі) на задані кроки.
+ * @param sp Порт.
+ * @param duration_ms Тривалість (мс).
+ * @param steps_a Кроки уздовж осі A.
+ * @param steps_b Кроки уздовж осі B.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_move_mixed (
     serial_port_t *sp, uint32_t duration_ms, int32_t steps_a, int32_t steps_b, int timeout_ms);
 
 /**
- * Низькорівнева команда LM (step-limited) з можливістю задавати прискорення.
- *
- * @param sp          Відкритий послідовний порт.
- * @param rate1       Початкова швидкість осі 1 (0..2147483647).
- * @param steps1      Цільові кроки осі 1 (±2147483647).
- * @param accel1      Прискорення осі 1 (±2147483647).
- * @param rate2       Початкова швидкість осі 2 (0..2147483647).
- * @param steps2      Цільові кроки осі 2 (±2147483647).
- * @param accel2      Прискорення осі 2 (±2147483647).
- * @param clear_flags Значення EBB_CLEAR_* або -1 щоб не передавати параметр.
- * @param timeout_ms  Тайм-аут очікування OK.
- * @return 0 у разі успіху; -1 при помилці/хибних параметрах.
+ * @brief Низькорівневий рух із швидкостями/прискореннями та кроками.
+ * @param sp Порт.
+ * @param rate1 Початкова швидкість осі 1.
+ * @param steps1 Кроки осі 1.
+ * @param accel1 Прискорення осі 1.
+ * @param rate2 Початкова швидкість осі 2.
+ * @param steps2 Кроки осі 2.
+ * @param accel2 Прискорення осі 2.
+ * @param clear_flags Прапори очищення (або -1 — без параметра).
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_move_lowlevel_steps (
     serial_port_t *sp,
@@ -143,17 +141,16 @@ int ebb_move_lowlevel_steps (
     int timeout_ms);
 
 /**
- * Низькорівнева команда LT (time-limited) з можливістю задавати прискорення.
- *
- * @param sp          Відкритий послідовний порт.
- * @param intervals   Тривалість у 40-µs інтервалах (>0).
- * @param rate1       Початкова швидкість осі 1 (±2147483647).
- * @param accel1      Прискорення осі 1 (±2147483647).
- * @param rate2       Початкова швидкість осі 2 (±2147483647).
- * @param accel2      Прискорення осі 2 (±2147483647).
- * @param clear_flags Значення EBB_CLEAR_* або -1 щоб не передавати параметр.
- * @param timeout_ms  Тайм-аут очікування OK.
- * @return 0 у разі успіху; -1 при помилці/хибних параметрах.
+ * @brief Низькорівневий рух із фіксованою кількістю інтервалів.
+ * @param sp Порт.
+ * @param intervals Кількість інтервалів.
+ * @param rate1 Швидкість осі 1.
+ * @param accel1 Прискорення осі 1.
+ * @param rate2 Швидкість осі 2.
+ * @param accel2 Прискорення осі 2.
+ * @param clear_flags Прапори очищення (або -1 — без параметра).
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_move_lowlevel_time (
     serial_port_t *sp,
@@ -166,14 +163,13 @@ int ebb_move_lowlevel_time (
     int timeout_ms);
 
 /**
- * Виконати команду HM — повернення в home або у вказані абсолютні координати.
- *
- * @param sp         Відкритий послідовний порт.
- * @param step_rate  Швидкість у кроках за секунду (2..25000).
- * @param pos1       Якщо не NULL, абсолютна позиція осі 1 (±4'294'967).
- * @param pos2       Якщо не NULL, абсолютна позиція осі 2 (±4'294'967).
- * @param timeout_ms Тайм-аут очікування OK.
- * @return 0 у разі успіху; -1 при помилці або хибних параметрах.
+ * @brief Хоумінг: рух до заданих позицій із кроковою швидкістю.
+ * @param sp Порт.
+ * @param step_rate Частота кроків.
+ * @param pos1 Ціль осі 1 (або NULL).
+ * @param pos2 Ціль осі 2 (або NULL).
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_home_move (
     serial_port_t *sp,
@@ -183,89 +179,86 @@ int ebb_home_move (
     int timeout_ms);
 
 /**
- * Отримати глобальні лічильники кроків (QS).
- *
- * @param sp         Відкритий послідовний порт.
- * @param steps1_out Вихід для позиції осі 1 (не NULL).
- * @param steps2_out Вихід для позиції осі 2 (не NULL).
- * @param timeout_ms Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці/некоректних даних.
+ * @brief Зчитує лічильники кроків осей.
+ * @param sp Порт.
+ * @param steps1_out [out] Кроки осі 1.
+ * @param steps2_out [out] Кроки осі 2.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_query_steps (serial_port_t *sp, int32_t *steps1_out, int32_t *steps2_out, int timeout_ms);
 
 /**
- * Обнулити глобальні лічильники кроків (CS).
- *
- * @param sp         Відкритий послідовний порт.
- * @param timeout_ms Тайм-аут очікування OK.
- * @return 0 при успіху; -1 при помилці.
+ * @brief Обнуляє лічильники кроків осей.
+ * @param sp Порт.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_clear_steps (serial_port_t *sp, int timeout_ms);
 
 /**
- * Отримати статус рухової системи (QM).
- *
- * @param sp         Відкритий послідовний порт.
- * @param status_out Вихідна структура (не NULL).
- * @param timeout_ms Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці/некоректних даних.
+ * @brief Запит статусу руху (активність/черга).
+ * @param sp Порт.
+ * @param status_out [out] Структура стану (QM).
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_query_motion (serial_port_t *sp, ebb_motion_status_t *status_out, int timeout_ms);
 
 /**
- * Дізнатись стан пера (QP).
- *
- * @param sp         Відкритий послідовний порт.
- * @param pen_up_out Вихід: true якщо перо підняте (не NULL).
- * @param timeout_ms Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці/некоректних даних.
+ * @brief Запит стану пера.
+ * @param sp Порт.
+ * @param pen_up_out [out] true — перо вгору.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_query_pen (serial_port_t *sp, bool *pen_up_out, int timeout_ms);
 
 /**
- * Дізнатись чи подається живлення на сервопривід (QR).
+ * @brief Запит живлення сервоприводу.
+ * @param sp Порт.
+ * @param power_on_out [out] true — живлення увімкнено.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_query_servo_power (serial_port_t *sp, bool *power_on_out, int timeout_ms);
 
 /**
- * Отримати рядок версії/нікнейму (V або QT).
+ * @brief Зчитує рядок версії прошивки.
+ * @param sp Порт.
+ * @param version_buf [out] Буфер для рядка версії.
+ * @param version_len Довжина буфера версії.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_query_version (serial_port_t *sp, char *version_buf, size_t version_len, int timeout_ms);
 
 /**
- * Зібрати агрегований знімок стану (QM, QS, QP, QR, V).
- */
-/* ebb_collect_status() вилучено. */
-
-/**
- * @brief Налаштувати параметр режиму (команда SC).
- *
- * @param sp          Відкритий послідовний порт.
- * @param param_id    Ідентифікатор параметра (0..255).
- * @param value       Значення параметра (0..65535).
- * @param timeout_ms  Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці або хибних аргументах.
+ * @brief Налаштовує параметр режиму контролера.
+ * @param sp Порт.
+ * @param param_id Ідентифікатор параметра (0..255).
+ * @param value Значення (0..65535).
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_configure_mode (serial_port_t *sp, int param_id, int value, int timeout_ms);
 
 /**
- * @brief Встановити тайм-аут живлення сервоприводу (команда SR).
- *
- * @param sp          Відкритий послідовний порт.
- * @param timeout_ms  Тайм-аут авто-вимкнення сервоприводу у мс.
- * @param power_state -1, щоб не змінювати стан живлення; 0 → вимкнути; 1 → увімкнути.
- * @param cmd_timeout_ms Тайм-аут очікування відповіді на команду.
- * @return 0 при успіху; -1 при помилці або хибних аргументах.
+ * @brief Встановлює тайм-аут живлення серво та стан.
+ * @param sp Порт.
+ * @param timeout_ms Тайм-аут у мілісекундах.
+ * @param power_state 0/1 для вимкнення/увімкнення (інше — не змінювати).
+ * @param cmd_timeout_ms Тайм-аут команди (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_set_servo_power_timeout (
     serial_port_t *sp, uint32_t timeout_ms, int power_state, int cmd_timeout_ms);
 
 /**
- * @brief Аварійно зупинити всі рухи (команда ES).
- *
- * @param sp         Відкритий послідовний порт.
- * @param timeout_ms Тайм-аут очікування відповіді.
- * @return 0 при успіху; -1 при помилці.
+ * @brief Аварійна зупинка контролера.
+ * @param sp Порт.
+ * @param timeout_ms Тайм-аут (мс).
+ * @return 0 — успіх, інакше помилка.
  */
 int ebb_emergency_stop (serial_port_t *sp, int timeout_ms);
 
@@ -273,4 +266,4 @@ int ebb_emergency_stop (serial_port_t *sp, int timeout_ms);
 }
 #endif
 
-#endif /* EBB_H */
+#endif

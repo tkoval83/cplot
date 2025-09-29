@@ -1,6 +1,12 @@
 /**
  * @file png.c
- * @brief Генерація PNG-превʼю з розкладки.
+ * @brief Реалізація растрового превʼю (PNG).
+ * @ingroup png
+ * @details
+ * Генерує мінімальне PNG (IHDR/IDAT/IEND) у відтінках сірого (8‑біт) з
+ * некорпімованим Deflate‑потоком (zlib контейнер). Лінії конвертуються з
+ * міліметрових координат у пікселі за сталим DPI і растеризуються алгоритмом
+ * Брезенгема.
  */
 
 #include "png.h"
@@ -17,12 +23,12 @@
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
 #endif
 
+/** \brief Базова роздільність превʼю у точках на дюйм. */
 #define PNG_DPI 96.0
 
 /**
- * @brief Записати 32-бітне слово у big-endian.
- *
- * @param dst   Вихідний буфер (мінімум 4 байти).
+ * @brief Запис 32‑бітного значення у форматі big‑endian.
+ * @param dst Вказівник на 4‑байтовий буфер призначення.
  * @param value Значення для запису.
  */
 static void write_u32_be (uint8_t *dst, uint32_t value) {
@@ -33,12 +39,11 @@ static void write_u32_be (uint8_t *dst, uint32_t value) {
 }
 
 /**
- * @brief Оновити CRC-32 з використанням полінома PNG.
- *
- * @param crc  Поточне значення CRC (0 для початку).
- * @param data Дані для хешування.
- * @param len  Кількість байтів у даних.
- * @return Оновлене значення CRC.
+ * @brief Обчислює CRC‑32 (поліном 0xEDB88320) для шматка даних.
+ * @param crc Поточне значення CRC (0 — для початку). Внутрішньо застосовується XOR із 0xFFFFFFFF.
+ * @param data Дані.
+ * @param len Довжина у байтах.
+ * @return Оновлене CRC‑32.
  */
 static uint32_t crc32_update (uint32_t crc, const uint8_t *data, size_t len) {
     static uint32_t table[256];
@@ -59,12 +64,11 @@ static uint32_t crc32_update (uint32_t crc, const uint8_t *data, size_t len) {
 }
 
 /**
- * @brief Оновити контрольну суму Adler-32 (zlib).
- *
- * @param adler Поточне значення (1 для початку).
- * @param data  Дані для хешування.
- * @param len   Кількість байтів.
- * @return Оновлене значення Adler-32.
+ * @brief Оновлює контрольну суму Adler‑32 для zlib.
+ * @param adler Поточне значення (типово 1).
+ * @param data Дані.
+ * @param len Довжина.
+ * @return Нова Adler‑32.
  */
 static uint32_t adler32_update (uint32_t adler, const uint8_t *data, size_t len) {
     uint32_t s1 = adler & 0xFFFFU;
@@ -77,14 +81,13 @@ static uint32_t adler32_update (uint32_t adler, const uint8_t *data, size_t len)
 }
 
 /**
- * @brief Додати байти до динамічного буфера PNG.
- *
- * @param buf  Вказівник на буфер (realloc за потреби).
- * @param len  Поточна довжина буфера (оновлюється).
- * @param cap  Поточна місткість (оновлюється).
- * @param data Дані для додавання.
- * @param add  Кількість байтів.
- * @return 0 при успіху; -1 якщо не вдалося перевиділити памʼять.
+ * @brief Додає байти у динамічний буфер із автоматичним розширенням.
+ * @param buf [in,out] Вказівник на буфер (може бути `NULL` на старті).
+ * @param len [in,out] Поточна довжина буфера.
+ * @param cap [in,out] Ємність буфера.
+ * @param data Джерело байтів.
+ * @param add Кількість байтів для додавання.
+ * @return 0 — успіх; -1 — помилка виділення памʼяті.
  */
 static int append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t *data, size_t add) {
     size_t need = *len + add;
@@ -104,28 +107,21 @@ static int append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t 
 }
 
 /**
- * @brief Додати один байт до буфера (обгортка над append_bytes).
- *
- * @param buf  Буфер.
- * @param len  Поточна довжина (оновлюється).
- * @param cap  Місткість (оновлюється).
- * @param value Байтове значення.
- * @return 0 при успіху; -1 при помилці памʼяті.
+ * @brief Додає один байт у динамічний буфер.
  */
 static int append_byte (uint8_t **buf, size_t *len, size_t *cap, uint8_t value) {
     return append_bytes (buf, len, cap, &value, 1);
 }
 
 /**
- * @brief Додати оброблений PNG-чанк (довжина + тип + CRC).
- *
- * @param buf      Буфер PNG-файла.
- * @param len      Поточна довжина (оновлюється).
- * @param cap      Місткість (оновлюється).
- * @param type     4-символьний тип чанку.
- * @param data     Дані чанку (може бути NULL, якщо data_len == 0).
- * @param data_len Кількість байтів у даних.
- * @return 0 при успіху; -1 при помилці памʼяті.
+ * @brief Додає PNG‑чанк у буфер: length + type + data + CRC.
+ * @param buf [in,out] Буфер PNG.
+ * @param len [in,out] Поточна довжина.
+ * @param cap [in,out] Ємність.
+ * @param type 4‑символьний тип ("IHDR", "IDAT", ...).
+ * @param data Тіло чанка (може бути `NULL` при `data_len==0`).
+ * @param data_len Довжина даних.
+ * @return 0 — успіх; -1 — помилка памʼяті.
  */
 static int append_chunk (
     uint8_t **buf,
@@ -149,16 +145,13 @@ static int append_chunk (
 }
 
 /**
- * @brief Намалювати відрізок Bresenhamʼом у растровому буфері (1 біт/піксель).
- *
- * @param pixels Буфер пікселів у відтінках сірого (0 — чорний).
- * @param width  Ширина растра, px.
- * @param height Висота растра, px.
- * @param scale  Коефіцієнт перетворення мм→px.
- * @param x0_mm  Початкова X у мм.
- * @param y0_mm  Початкова Y у мм.
- * @param x1_mm  Кінцева X у мм.
- * @param y1_mm  Кінцева Y у мм.
+ * @brief Рисує відрізок на растровому полотні чорним кольором (0).
+ * @param pixels Буфер пікселів у форматі 8‑біт сірого, рядок за рядком.
+ * @param width Ширина в пікселях.
+ * @param height Висота в пікселях.
+ * @param scale Множник перетворення мм→піксель.
+ * @param x0_mm,y0_mm Початкова точка у мм.
+ * @param x1_mm,y1_mm Кінцева точка у мм.
  */
 static void draw_line (
     uint8_t *pixels,
@@ -202,11 +195,7 @@ static void draw_line (
 }
 
 /**
- * @brief Згенерувати монохромний PNG-файл для заданої розкладки.
- *
- * @param layout Готова розкладка (в мм).
- * @param[out] out Буфер PNG (malloc, звільняє викликач).
- * @return 0 при успіху; 1 при помилці памʼяті чи некоректних параметрах.
+ * @copydoc png_render_layout
  */
 int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
     if (!layout || !out)
@@ -244,7 +233,7 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
     }
 
     for (int y = 0; y < height_px; ++y) {
-        raw[y * row_bytes] = 0; /* filter type none */
+        raw[y * row_bytes] = 0;
         memcpy (&raw[y * row_bytes + 1], &pixels[y * width_px], width_px);
     }
     free (pixels);
@@ -260,11 +249,11 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
     uint8_t ihdr[13];
     write_u32_be (&ihdr[0], (uint32_t)width_px);
     write_u32_be (&ihdr[4], (uint32_t)height_px);
-    ihdr[8] = 8;  /* bit depth */
-    ihdr[9] = 0;  /* grayscale */
-    ihdr[10] = 0; /* compression */
-    ihdr[11] = 0; /* filter */
-    ihdr[12] = 0; /* interlace */
+    ihdr[8] = 8;
+    ihdr[9] = 0;
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
     if (append_chunk (&png, &len, &cap, "IHDR", ihdr, sizeof (ihdr)) != 0)
         goto fail;
 
@@ -274,7 +263,6 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         goto fail;
     size_t zlen = 0;
 
-    /* zlib header: CMF/FLG */
     append_byte (&zdata, &zlen, &zcap, 0x78);
     append_byte (&zdata, &zlen, &zcap, 0x01);
 
@@ -285,7 +273,7 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         if (chunk > 65535)
             chunk = 65535;
         int final = (offset + chunk == raw_size) ? 1 : 0;
-        append_byte (&zdata, &zlen, &zcap, (uint8_t)(final)); /* BTYPE=00 */
+        append_byte (&zdata, &zlen, &zcap, (uint8_t)(final));
         uint16_t len16 = (uint16_t)chunk;
         uint16_t nlen = ~len16;
         append_byte (&zdata, &zlen, &zcap, len16 & 0xFF);

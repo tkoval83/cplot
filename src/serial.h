@@ -1,11 +1,13 @@
 /**
  * @file serial.h
- * @brief POSIX‑послідовний порт для зв’язку з EBB/AxiDraw.
- *
- * Надає мінімальний API для відкриття, читання/запису з тайм‑аутами
- * та допоміжні функції рядкового обміну з контролером EBB.
- *
- * Політика мови: усі коментарі та повідомлення українською.
+ * @brief Платформо-незалежний інтерфейс роботи з послідовним портом.
+ * @defgroup serial Serial
+ * @ingroup device
+ * @details
+ * Надає мінімальний набір операцій для відкриття/закриття, читання/запису та
+ * простих службових дій над POSIX‑сумісним серійним портом. Використовує
+ * неблокуючі дескриптори і `poll(2)` для тайм‑аутів. Усі повідомлення —
+ * українською. Порт відкривається у режимі raw без керування потоком.
  */
 #ifndef SERIAL_H
 #define SERIAL_H
@@ -18,82 +20,89 @@ extern "C" {
 #endif
 
 /**
- * Дескриптор послідовного порту.
+ * @brief Непрозорий дескриптор відкритого серійного порту.
  */
 typedef struct serial_port_s serial_port_t;
 
 /**
- * Відкрити послідовний порт і налаштувати 8N1 без керування потоком.
- *
- * @param path         Шлях до пристрою (наприклад, "/dev/tty.usbmodem*").
- * @param baud         Швидкість (напр., 9600, 115200).
- * @param read_timeout_ms Типовий тайм‑аут читання (мс) для рядкових/простих операцій.
- * @param errbuf       Буфер для тексту помилки (може бути NULL).
- * @param errlen       Розмір буфера помилки (0, якщо errbuf == NULL).
- * @return Вказівник на serial_port_t або NULL у разі помилки.
+ * @brief Відкриває серійний порт.
+ * @param path Шлях до пристрою (наприклад, `/dev/tty.usbmodem*`).
+ * @param baud Швидкість у бодах (9600, 115200, ...).
+ * @param read_timeout_ms Тайм‑аут читання за замовчуванням (мс; >0).
+ * @param errbuf [out] Якщо не `NULL` — буфер для тексту помилки.
+ * @param errlen Розмір `errbuf` у байтах.
+ * @return Дескриптор `serial_port_t*` або `NULL` у разі помилки (з повідомленням у `errbuf`).
  */
 serial_port_t *
 serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size_t errlen);
 
-/** Закрити порт і звільнити ресурс. */
+/**
+ * @brief Закриває серійний порт та вивільняє ресурси.
+ * @param sp Порт; `NULL` — no‑op.
+ */
 void serial_close (serial_port_t *sp);
 
 /**
- * Записати байти у порт із тайм‑аутом.
- * @param sp           Відкритий порт.
- * @param data         Дані для надсилання.
- * @param len          Довжина даних.
- * @param timeout_ms   Тайм‑аут (мс) на завершення запису (усі байти).
- * @return Кількість записаних байтів; -1 при помилці; 0 при тайм‑ауті без запису.
+ * @brief Пише дані у порт з тайм‑аутом.
+ * @param sp Порт.
+ * @param data Дані для запису.
+ * @param len Довжина даних у байтах.
+ * @param timeout_ms Тайм‑аут очікування готовності на запис (мс; >0).
+ * @return Кількість записаних байтів (може бути < `len` при тайм‑ауті) або -1 при помилці.
  */
 ssize_t serial_write (serial_port_t *sp, const void *data, size_t len, int timeout_ms);
 
 /**
- * Прочитати до len байтів із тайм‑аутом.
- * @param sp           Відкритий порт.
- * @param buf          Буфер призначення.
- * @param len          Максимальна кількість байтів.
- * @param timeout_ms   Загальний тайм‑аут (мс).
- * @return Кількість прочитаних байтів (>0), 0 при тайм‑ауті, -1 при помилці.
+ * @brief Зчитує дані з порту з тайм‑аутом.
+ * @param sp Порт.
+ * @param buf [out] Буфер призначення.
+ * @param len Розмір буфера.
+ * @param timeout_ms Тайм‑аут (мс; якщо <=0 — використовується значення з `serial_open`).
+ * @return Кількість прочитаних байтів (0 при тайм‑ауті) або -1 при помилці.
  */
 ssize_t serial_read (serial_port_t *sp, void *buf, size_t len, int timeout_ms);
 
-/** Скинути вхідний буфер (очистити все, що прийшло). */
+/**
+ * @brief Очищає вхідний буфер порту, дочитуючи наявні байти.
+ * @param sp Порт.
+ * @return Кількість відкинутих байтів (>=0) або -1 при помилці.
+ */
 int serial_flush_input (serial_port_t *sp);
 
 /**
- * Відправити рядок та завершаючий CR (\r).
- * @param sp           Відкритий порт.
- * @param s            Нуль‑термінований рядок без CR/LF.
- * @return 0 при успіху; -1 при помилці/тайм‑ауті.
+ * @brief Надсилає рядок та CR (\r) наприкінці.
+ * @param sp Порт.
+ * @param s Рядок ASCII.
+ * @return 0 — успіх; -1 — помилка.
  */
 int serial_write_line (serial_port_t *sp, const char *s);
 
 /**
- * Прочитати до символу кінця рядка (\r або \n). Кінцевий символ у буфер НЕ включається.
- * @param sp           Відкритий порт.
- * @param buf          Буфер призначення.
- * @param maxlen       Максимальна довжина (включно з нуль‑термінатором).
- * @param timeout_ms   Загальний тайм‑аут (мс).
- * @return Довжина рядка (без термінатора) при успіху; 0 при тайм‑ауті; -1 при помилці.
+ * @brief Зчитує рядок до CR/LF або тайм‑ауту.
+ * @param sp Порт.
+ * @param buf [out] Буфер для рядка (термінатор `\0` додається, якщо дозволяє розмір).
+ * @param maxlen Розмір буфера.
+ * @param timeout_ms Тайм‑аут (мс).
+ * @return Довжина рядка без термінатора; 0 — тайм‑аут; -1 — помилка.
  */
 ssize_t serial_read_line (serial_port_t *sp, char *buf, size_t maxlen, int timeout_ms);
 
 /**
- * Перевірка зв’язку з EBB: надіслати команду версії "V" та прочитати відповідь.
- * @param sp           Відкритий порт.
- * @param version_out  Буфер для відповіді (може бути NULL).
- * @param version_len  Розмір буфера (0, якщо version_out == NULL).
- * @return 0 при успіху (отримано рядок відповіді); -1 при помилці/тайм‑ауті.
+ * @brief Перевіряє наявність EBB (EggBot Board) — надсилає "V" і очікує відповідь.
+ * @param sp Порт.
+ * @param version_out [out] Буфер для рядка версії (може бути `NULL`).
+ * @param version_len Розмір буфера версії.
+ * @return 0 — успіх; -1 — помилка або тайм‑аут.
  */
 int serial_probe_ebb (serial_port_t *sp, char *version_out, size_t version_len);
 
 #ifdef __APPLE__
+
 /**
- * Спробувати знайти типовий порт AxiDraw на macOS (tty.usbmodem*).
- * @param out_path Буфер для шляху.
- * @param out_len  Довжина буфера.
- * @return 0 якщо знайдений і записаний у out_path; -1 якщо не знайдено.
+ * @brief Евристичний пошук шляху до порту AxiDraw (macOS).
+ * @param out_path [out] Буфер для шляху (наприклад, `/dev/tty.usbmodemXXXX`).
+ * @param out_len Розмір буфера.
+ * @return 0 — знайдено; -1 — не знайдено або помилка.
  */
 int serial_guess_axidraw_port (char *out_path, size_t out_len);
 #endif
@@ -102,4 +111,4 @@ int serial_guess_axidraw_port (char *out_path, size_t out_len);
 }
 #endif
 
-#endif /* SERIAL_H */
+#endif

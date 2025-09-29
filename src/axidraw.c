@@ -1,6 +1,7 @@
 /**
  * @file axidraw.c
- * @brief Реалізація високорівневого менеджера AxiDraw.
+ * @brief Реалізація взаємодії з AxiDraw та команд руху.
+ * @ingroup axidraw
  */
 
 #include "axidraw.h"
@@ -8,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +23,7 @@
 #define AXIDRAW_SERVO_MIN 7500
 #define AXIDRAW_SERVO_MAX 28000
 #define AXIDRAW_SERVO_SPEED_SCALE 5
+#define AXIDRAW_MAX_DURATION_MS 16777215u
 
 #include "log.h"
 #include "str.h"
@@ -36,19 +39,15 @@
 #define CLOCK_MONOTONIC 0
 #endif
 
-/**
- * @brief Вбудована таблиця підтримуваних профілів AxiDraw.
- */
 static const axidraw_device_profile_t k_axidraw_device_profiles[] = {
     { "minikit2", 160.0, 101.0, 254.0, 200.0, 80.0 },
     { "axidraw_v3", 300.0, 218.0, 381.0, 250.0, 80.0 },
 };
 
 /**
- * @brief Знайти опис профілю за ідентифікатором моделі (без урахування регістру).
- *
- * @param model Назва моделі, наприклад `"minikit2"`.
- * @return Вказівник на профіль або NULL, якщо не знайдено.
+ * @brief Пошук профілю пристрою за назвою моделі.
+ * @param model Назва моделі.
+ * @return Вказівник на профіль або NULL.
  */
 static const axidraw_device_profile_t *profile_lookup (const char *model) {
     if (model && *model) {
@@ -62,12 +61,8 @@ static const axidraw_device_profile_t *profile_lookup (const char *model) {
 }
 
 /**
- * @brief Отримати типовий профіль пристрою.
- *
- * Віддає пріоритет моделі `CONFIG_DEFAULT_MODEL`, а якщо її немає у таблиці —
- * повертає перший відомий профіль.
- *
- * @return Вказівник на статичний опис профілю.
+ * @brief Повертає типовий профіль пристрою за замовчуванням.
+ * @return Вказівник на профіль.
  */
 const axidraw_device_profile_t *axidraw_device_profile_default (void) {
     const axidraw_device_profile_t *profile = profile_lookup (CONFIG_DEFAULT_MODEL);
@@ -77,10 +72,9 @@ const axidraw_device_profile_t *axidraw_device_profile_default (void) {
 }
 
 /**
- * @brief Підібрати профіль для конкретної моделі.
- *
- * @param model Ідентифікатор моделі (може бути NULL).
- * @return Вказівник на знайдений профіль або дефолтний, якщо збігів немає.
+ * @brief Повертає профіль для вказаної моделі або типовий.
+ * @param model Назва моделі (напр., "minikit2").
+ * @return Вказівник на профіль.
  */
 const axidraw_device_profile_t *axidraw_device_profile_for_model (const char *model) {
     const axidraw_device_profile_t *profile = profile_lookup (model);
@@ -90,11 +84,9 @@ const axidraw_device_profile_t *axidraw_device_profile_for_model (const char *mo
 }
 
 /**
- * @brief Повністю застосувати профіль до конфігурації.
- *
- * @param[out] cfg     Конфігурація, яку слід оновити (не NULL).
- * @param profile      Профіль, що містить розміри та швидкісні параметри (може бути NULL —
- *                     використовуватиметься типовий).
+ * @brief Застосовує значення профілю до конфігурації.
+ * @param cfg Конфігурація для оновлення.
+ * @param profile Профіль або NULL, щоб взяти типовий.
  */
 void axidraw_device_profile_apply (config_t *cfg, const axidraw_device_profile_t *profile) {
     if (!cfg)
@@ -114,11 +106,10 @@ void axidraw_device_profile_apply (config_t *cfg, const axidraw_device_profile_t
 }
 
 /**
- * @brief Заповнити відсутні поля конфігурації значеннями з профілю.
- *
- * @param[in,out] cfg  Конфігурація, де лише нульові/невалідні поля будуть оновлені.
- * @param profile      Профіль, на який орієнтуватися (NULL → типовий).
- * @return `true`, якщо хоча б одне поле було змінено.
+ * @brief Заповнює відсутні значення конфігурації даними з профілю.
+ * @param cfg Конфігурація.
+ * @param profile Профіль або NULL.
+ * @return true — якщо щось змінено, false — без змін.
  */
 bool axidraw_device_profile_backfill (config_t *cfg, const axidraw_device_profile_t *profile) {
     if (!cfg)
@@ -154,9 +145,8 @@ bool axidraw_device_profile_backfill (config_t *cfg, const axidraw_device_profil
 }
 
 /**
- * @brief Скинути оперативний стан (таймери та лічильники) після підключення.
- *
- * @param dev Структура пристрою.
+ * @brief Скидає лічильники/стан черги команд для сеансу.
+ * @param dev Пристрій.
  */
 static void axidraw_reset_runtime (axidraw_device_t *dev) {
     if (!dev)
@@ -171,12 +161,8 @@ static int axidraw_require_connection (axidraw_device_t *dev);
 static const char *axidraw_lock_path (void);
 
 /**
- * @brief Побудувати шлях до lock-файла для взаємного виключення AxiDraw.
- *
- * Використовує TMPDIR, якщо змінна задана, інакше падає назад на /tmp. Значення
- * кешується у статичному буфері, оскільки воно не змінюється протягом життя процесу.
- *
- * @return Нуль-термінований рядок із шляхом lock-файла.
+ * @brief Обчислює шлях до lock-файлу у TMPDIR (кешується).
+ * @return Статичний буфер зі шляхом.
  */
 static const char *axidraw_lock_path (void) {
     static char path_buf[PATH_MAX];
@@ -199,9 +185,8 @@ static const char *axidraw_lock_path (void) {
 }
 
 /**
- * @brief Скинути структуру налаштувань до типового стану.
- *
- * @param settings Структура налаштувань для ініціалізації (не NULL).
+ * @brief Скидає структуру налаштувань до безпечних типових значень.
+ * @param settings Налаштування.
  */
 void axidraw_settings_reset (axidraw_settings_t *settings) {
     if (!settings)
@@ -218,14 +203,13 @@ void axidraw_settings_reset (axidraw_settings_t *settings) {
     settings->servo_timeout_s = -1;
     settings->speed_mm_s = 0.0;
     settings->accel_mm_s2 = 0.0;
-    settings->steps_per_mm = 0.0; /* буде заповнено з профілю пізніше */
+    settings->steps_per_mm = 0.0;
 }
 
 /**
- * @brief Отримати останні застосовані налаштування.
- *
- * @param dev Пристрій AxiDraw.
- * @return Вказівник на внутрішню структуру налаштувань або NULL.
+ * @brief Повертає поточні налаштування пристрою.
+ * @param dev Пристрій.
+ * @return Вказівник на налаштування або NULL.
  */
 const axidraw_settings_t *axidraw_device_settings (const axidraw_device_t *dev) {
     if (!dev)
@@ -234,12 +218,72 @@ const axidraw_settings_t *axidraw_device_settings (const axidraw_device_t *dev) 
 }
 
 /**
- * @brief Застосувати набір налаштувань на стороні хоста (rate/FIFO).
- *
- * Якщо пристрій уже підключено, додатково оновлює параметри через SC/SR-команди.
- *
- * @param dev      Пристрій.
- * @param settings Нові налаштування (не NULL).
+ * @brief Конвертує міліметри у кроки згідно з налаштуваннями.
+ * @param dev Пристрій (для steps_per_mm).
+ * @param mm Відстань у мм.
+ * @return Кроки (із насиченням до int32_t).
+ */
+static int32_t mm_to_steps (const axidraw_device_t *dev, double mm) {
+    const axidraw_settings_t *cfg = axidraw_device_settings (dev);
+    double spmm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
+    if (!(spmm > 0.0)) {
+        LOGE (AXIDRAW_LOG ("Коефіцієнт кроків на мм не встановлено — профіль не застосовано"));
+        return 0;
+    }
+    if (!(mm > -1e300 && mm < 1e300)) {
+        LOGW (AXIDRAW_LOG ("Некоректна відстань мм=%.2f — повертаю 0"), mm);
+        return 0;
+    }
+    double scaled = llround (mm * spmm);
+    if (scaled > (double)INT32_MAX)
+        return INT32_MAX;
+    if (scaled < (double)INT32_MIN)
+        return INT32_MIN;
+    return (int32_t)scaled;
+}
+
+/**
+ * @brief Обчислює тривалість руху з урахуванням швидкості.
+ * @param distance_mm Відстань у мм.
+ * @param speed_mm_s Швидкість у мм/с.
+ * @return Тривалість у мс (мінімум 1, обмежено).
+ */
+static uint32_t duration_from_mm_speed (double distance_mm, double speed_mm_s) {
+    if (!(distance_mm > 0.0) || !(speed_mm_s > 0.0))
+        return 1u;
+    double ms = ceil ((distance_mm / speed_mm_s) * 1000.0);
+    if (ms < 1.0)
+        ms = 1.0;
+    if (ms > (double)AXIDRAW_MAX_DURATION_MS)
+        ms = (double)AXIDRAW_MAX_DURATION_MS;
+    return (uint32_t)ms;
+}
+
+/**
+ * @brief Рух у міліметрах із заданою швидкістю.
+ * @param dev Пристрій.
+ * @param dx_mm Зсув по X (мм).
+ * @param dy_mm Зсув по Y (мм).
+ * @param speed_mm_s Швидкість (мм/с), 0 — використати налаштування.
+ * @return 0 — успіх, -1 — помилка.
+ */
+int axidraw_move_mm (axidraw_device_t *dev, double dx_mm, double dy_mm, double speed_mm_s) {
+    if (!dev)
+        return -1;
+    const axidraw_settings_t *cfg = axidraw_device_settings (dev);
+    double speed = (speed_mm_s > 0.0) ? speed_mm_s
+                                      : ((cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 75.0);
+    int32_t steps_x = mm_to_steps (dev, dx_mm);
+    int32_t steps_y = mm_to_steps (dev, dy_mm);
+    double distance = hypot (dx_mm, dy_mm);
+    uint32_t duration = duration_from_mm_speed (distance, speed);
+    return axidraw_move_xy (dev, duration, steps_x, steps_y);
+}
+
+/**
+ * @brief Застосовує налаштування до пристрою і синхронізує з контролером (якщо підключено).
+ * @param dev Пристрій.
+ * @param settings Джерело налаштувань.
  */
 void axidraw_apply_settings (axidraw_device_t *dev, const axidraw_settings_t *settings) {
     if (!dev || !settings)
@@ -252,9 +296,8 @@ void axidraw_apply_settings (axidraw_device_t *dev, const axidraw_settings_t *se
 }
 
 /**
- * @brief Ініціалізувати структуру пристрою типовими значеннями.
- *
- * @param[out] dev Структура `axidraw_device_t`, яку слід підготувати (не NULL).
+ * @brief Ініціалізує структуру стану пристрою до типових значень.
+ * @param dev Пристрій.
  */
 void axidraw_device_init (axidraw_device_t *dev) {
     if (!dev)
@@ -272,13 +315,12 @@ void axidraw_device_init (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Налаштувати параметри з’єднання перед підключенням до пристрою.
- *
- * @param dev                Структура пристрою (не NULL).
- * @param port_path          Шлях до серійного порту (може бути NULL).
- * @param baud               Бодова швидкість (9600 за замовчуванням).
- * @param timeout_ms         Тайм-аут операцій у мс (5000 за замовчуванням).
- * @param min_cmd_interval_ms Мінімальний інтервал між командами у мс (>= 0).
+ * @brief Налаштовує параметри доступу до серійного порту та інтервал команд.
+ * @param dev Пристрій.
+ * @param port_path Шлях до tty-порту (може бути NULL для збереження попереднього).
+ * @param baud Бодова швидкість (9600 тощо).
+ * @param timeout_ms Тайм-аут читання (мс).
+ * @param min_cmd_interval_ms Мінімальний інтервал між командами (мс, >=0).
  */
 void axidraw_device_config (
     axidraw_device_t *dev,
@@ -303,12 +345,11 @@ void axidraw_device_config (
 }
 
 /**
- * @brief Автоматично визначити порт AxiDraw (macOS).
- *
- * @param dev Структура пристрою.
- * @param buf Буфер для запису шляху.
+ * @brief Евристичний пошук порту AxiDraw (переважно macOS).
+ * @param dev Пристрій.
+ * @param buf [out] Буфер для шляху.
  * @param len Розмір буфера.
- * @return 0 при успіху; -1, якщо порт не знайдено.
+ * @return 0 — знайдено, інакше помилка.
  */
 static int axidraw_guess_port (axidraw_device_t *dev, char *buf, size_t len) {
     if (!dev)
@@ -330,12 +371,11 @@ static int axidraw_guess_port (axidraw_device_t *dev, char *buf, size_t len) {
 }
 
 /**
- * @brief Відкрити серійний порт та перевірити зв'язок із EBB.
- *
- * @param dev    Структура пристрою (не NULL).
- * @param errbuf Буфер для повідомлення про помилку (може бути NULL).
- * @param errlen Розмір буфера помилки.
- * @return 0 при успіху; -1, якщо неможливо підключитися або пройти перевірку.
+ * @brief Встановлює з'єднання з контролером EBB і перевіряє відповідь.
+ * @param dev Пристрій.
+ * @param errbuf [out] Буфер для тексту помилки (може бути NULL).
+ * @param errlen Довжина буфера.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) {
     if (!dev)
@@ -383,9 +423,8 @@ int axidraw_device_connect (axidraw_device_t *dev, char *errbuf, size_t errlen) 
 }
 
 /**
- * @brief Закрити серійний порт і скинути статус підключення.
- *
- * @param dev Структура пристрою (може бути NULL).
+ * @brief Розриває з'єднання з контролером і скидає стан.
+ * @param dev Пристрій.
  */
 void axidraw_device_disconnect (axidraw_device_t *dev) {
     if (!dev)
@@ -401,13 +440,9 @@ void axidraw_device_disconnect (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Отримати взаємне виключення доступу до пристрою.
- *
- * Створює (за потреби) lock-файл і робить неблокуючий LOCK_EX. У разі успіху
- * поверх файлу записується PID поточного процесу для діагностики.
- *
- * @param[out] out_fd Дескриптор lock-файла (для подальшого release).
- * @return 0 — успіх, -1 — ресурс зайнято або сталася помилка I/O.
+ * @brief Захоплює lock-файл для ексклюзивного доступу до пристрою.
+ * @param out_fd [out] Дескриптор lock-файлу.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_device_lock_acquire (int *out_fd) {
     if (!out_fd)
@@ -435,9 +470,8 @@ int axidraw_device_lock_acquire (int *out_fd) {
 }
 
 /**
- * @brief Зняти взаємне виключення, отримане axidraw_device_lock_acquire().
- *
- * @param fd Дескриптор lock-файла.
+ * @brief Звільняє lock-файл AxiDraw.
+ * @param fd Дескриптор, отриманий під час захоплення.
  */
 void axidraw_device_lock_release (int fd) {
     if (fd < 0)
@@ -448,17 +482,15 @@ void axidraw_device_lock_release (int fd) {
 }
 
 /**
- * @brief Повернути шлях до lock-файла, з яким працює менеджер.
- *
- * @return Нуль-термінований рядок (статичний буфер).
+ * @brief Повертає шлях до lock-файлу.
+ * @return C-рядок зі шляхом.
  */
 const char *axidraw_device_lock_file (void) { return axidraw_lock_path (); }
 
 /**
- * @brief Виконати аварійну зупинку пристрою (EM).
- *
- * @param dev Структура пристрою (не NULL).
- * @return 0 при успіху; -1, якщо команда недоступна або з’єднання відсутнє.
+ * @brief Виконує аварійну зупинку (наприклад, ES-команду) і скидає стан черги.
+ * @param dev Пристрій.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_emergency_stop (axidraw_device_t *dev) {
     if (axidraw_require_connection (dev) != 0)
@@ -474,18 +506,16 @@ int axidraw_emergency_stop (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Перевірити, чи пристрій у стані активного підключення.
- *
- * @param dev Структура пристрою.
- * @return `true`, якщо порт відкрито і прапор `connected` встановлений.
+ * @brief Перевіряє факт активного підключення до пристрою.
+ * @param dev Пристрій.
+ * @return true — підключено, false — ні.
  */
 bool axidraw_device_is_connected (const axidraw_device_t *dev) { return dev && dev->connected; }
 
 /**
- * @brief Встановити мінімальний інтервал між командами.
- *
- * @param dev Структура пристрою.
- * @param min_interval_ms Інтервал у мілісекундах (>= 0).
+ * @brief Встановлює мінімальний інтервал між командами (мс).
+ * @param dev Пристрій.
+ * @param min_interval_ms Мінімальний інтервал у мс.
  */
 void axidraw_set_rate_limit (axidraw_device_t *dev, double min_interval_ms) {
     if (!dev)
@@ -497,10 +527,9 @@ void axidraw_set_rate_limit (axidraw_device_t *dev, double min_interval_ms) {
 }
 
 /**
- * @brief Встановити максимальний розмір черги команд у пристрої.
- *
- * @param dev               Структура пристрою.
- * @param max_fifo_commands 0 → не обмежувати; інше — кількість команд у польоті.
+ * @brief Встановлює ліміт команд у FIFO (0 — без обмеження).
+ * @param dev Пристрій.
+ * @param max_fifo_commands Максимальна кількість активних+чергових команд.
  */
 void axidraw_set_fifo_limit (axidraw_device_t *dev, size_t max_fifo_commands) {
     if (!dev)
@@ -517,10 +546,9 @@ void axidraw_set_fifo_limit (axidraw_device_t *dev, size_t max_fifo_commands) {
 }
 
 /**
- * @brief Перетворити відсоткове положення у значення SC (одиниці 83.3 нс).
- *
- * @param percent Положення у відсотках (0..100).
- * @return Значення в діапазоні [1,65535], яке можна передати у SC,4/SC,5.
+ * @brief Перетворює відсоток (0–100) у імпульс серво (ticks).
+ * @param percent Значення у відсотках.
+ * @return Значення 1–65535.
  */
 static int axidraw_percent_to_servo (int percent) {
     if (percent < 0)
@@ -537,10 +565,9 @@ static int axidraw_percent_to_servo (int percent) {
 }
 
 /**
- * @brief Перетворити швидкість сервоприводу у значення SC,11/SC,12.
- *
- * @param speed_percent Швидкість у відсотках/с (очікуваний діапазон ≥ 0).
- * @return Значення у межах 0..65535 (після масштабування).
+ * @brief Перетворює швидкість у відсотках у rate для сервоприводу.
+ * @param speed_percent 0–100.
+ * @return Rate 0–65535.
  */
 static int axidraw_speed_to_rate (int speed_percent) {
     if (speed_percent < 0)
@@ -552,10 +579,9 @@ static int axidraw_speed_to_rate (int speed_percent) {
 }
 
 /**
- * @brief Переконатися, що пристрій підключено.
- *
- * @param dev Структура пристрою.
- * @return 0 якщо підключено; -1 інакше.
+ * @brief Перевіряє, що пристрій підключено та має порт.
+ * @param dev Пристрій.
+ * @return 0 — ок, -1 — немає зʼєднання.
  */
 static int axidraw_require_connection (axidraw_device_t *dev) {
     if (!dev || !dev->connected || !dev->port) {
@@ -567,10 +593,9 @@ static int axidraw_require_connection (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Оновити локальні дані про кількість команд у черзі EBB.
- *
- * @param dev Структура пристрою.
- * @return 0 при успіху; -1 при помилці читання QM.
+ * @brief Оновлює внутрішню оцінку зайнятості FIFO команд.
+ * @param dev Пристрій.
+ * @return 0 — успіх, -1 — помилка.
  */
 static int axidraw_refresh_queue (axidraw_device_t *dev) {
     if (!dev)
@@ -594,10 +619,9 @@ static int axidraw_refresh_queue (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Дочекатися наявності місця у FIFO EBB.
- *
- * @param dev Структура пристрою.
- * @return 0 при успіху; -1 при тайм-ауті або помилці опитування.
+ * @brief Очікує, доки зʼявиться місце у черзі команд.
+ * @param dev Пристрій.
+ * @return 0 — слот доступний, -1 — помилка/тайм-аут.
  */
 static int axidraw_wait_queue_slot (axidraw_device_t *dev) {
     if (!dev)
@@ -657,10 +681,9 @@ static int axidraw_wait_queue_slot (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Дочекатися, доки мине мінімальний інтервал між командами.
- *
- * @param dev Структура пристрою.
- * @return 0 при успіху; -1 якщо отримати час не вдалося.
+ * @brief Гарантує мінімальний інтервал між відправками команд.
+ * @param dev Пристрій.
+ * @return 0 — ок, -1 — помилка часу.
  */
 static int axidraw_wait_interval (axidraw_device_t *dev) {
     if (!dev)
@@ -695,10 +718,9 @@ static int axidraw_wait_interval (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Дочекатися доступного слота з урахуванням FIFO та інтервалу.
- *
- * @param dev Структура пристрою.
- * @return 0 при успіху; -1 при помилці очікування.
+ * @brief Композитне очікування: FIFO слот + інтервал.
+ * @param dev Пристрій.
+ * @return 0 — можна надсилати команду, -1 — помилка.
  */
 static int axidraw_wait_slot (axidraw_device_t *dev) {
     if (axidraw_wait_queue_slot (dev) != 0)
@@ -710,11 +732,8 @@ static int axidraw_wait_slot (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Зафіксувати успішне відправлення чергової команди.
- *
- * Оновлює мітку часу останньої команди та локальний лічильник очікуючих команд.
- *
- * @param dev Структура пристрою.
+ * @brief Позначає, що команда відправлена (оновлює last_cmd/FIFO).
+ * @param dev Пристрій.
  */
 static void axidraw_mark_dispatched (axidraw_device_t *dev) {
     if (!dev)
@@ -728,12 +747,8 @@ static void axidraw_mark_dispatched (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Синхронізувати налаштування з прошивкою EBB.
- *
- * Надсилає команди SC/SR для позицій пера, швидкостей та тайм-ауту сервоприводу.
- * Вимагає активного підключення.
- *
- * @param dev Пристрій AxiDraw.
+ * @brief Синхронізує налаштування AxiDraw з контролером EBB.
+ * @param dev Пристрій.
  */
 static void axidraw_sync_settings (axidraw_device_t *dev) {
     if (!dev)
@@ -745,7 +760,6 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
 
     log_print (LOG_DEBUG, "налаштування: синхронізація з пристроєм");
 
-    /* Завжди гарантуємо, що використовується сервопривід */
     if (ebb_configure_mode (dev->port, 1, 1, dev->timeout_ms) != 0) {
         LOGW (AXIDRAW_LOG ("Не вдалося активувати сервопривід (SC,1,1)"));
         log_print (LOG_WARN, "налаштування: SC,1,1 не виконано");
@@ -814,11 +828,10 @@ static void axidraw_sync_settings (axidraw_device_t *dev) {
 }
 
 /**
- * @brief Надіслати команду SP з урахуванням налаштувань затримки.
- *
- * @param dev    Структура пристрою.
- * @param pen_up true → підняти перо; false → опустити.
- * @return 0 при успіху; -1 при помилці/відсутності з’єднання.
+ * @brief Виконує команду підняття/опускання пера з урахуванням затримки.
+ * @param dev Пристрій.
+ * @param pen_up true — підняти, false — опустити.
+ * @return 0 — успіх, -1 — помилка.
  */
 static int axidraw_exec_pen (axidraw_device_t *dev, bool pen_up) {
     if (axidraw_require_connection (dev) != 0)
@@ -842,30 +855,27 @@ static int axidraw_exec_pen (axidraw_device_t *dev, bool pen_up) {
 }
 
 /**
- * @brief Підняти перо (SP,1).
- *
- * @param dev Структура пристрою.
- * @return 0 при успіху; -1 у разі помилки/відсутності підключення.
+ * @brief Піднімає перо (викликає EBB через pen_set).
+ * @param dev Пристрій.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_pen_up (axidraw_device_t *dev) { return axidraw_exec_pen (dev, true); }
 
 /**
- * @brief Опустити перо (SP,0).
- *
- * @param dev Структура пристрою.
- * @return 0 при успіху; -1 у разі помилки/відсутності підключення.
+ * @brief Опускає перо (викликає EBB через pen_set).
+ * @param dev Пристрій.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_pen_down (axidraw_device_t *dev) { return axidraw_exec_pen (dev, false); }
 
 /**
- * @brief Допоміжний виклик для рухових команд з двома параметрами.
- *
- * @param dev      Структура пристрою.
- * @param fn       Функція ebb_move_*.
+ * @brief Виконує одну SM-команду руху з тайм-аутом та FIFO-логікою.
+ * @param dev Пристрій.
+ * @param fn Функція надсилання (EBB).
  * @param duration Тривалість у мс.
- * @param a        Перший параметр (кроки).
- * @param b        Другий параметр (кроки).
- * @return Код повернення fn.
+ * @param a Параметр A/Step1.
+ * @param b Параметр B/Step2.
+ * @return 0 — успіх, -1 — помилка.
  */
 static int axidraw_exec_sm (
     axidraw_device_t *dev,
@@ -891,13 +901,12 @@ static int axidraw_exec_sm (
 }
 
 /**
- * @brief Виконати команду SM у декартових координатах.
- *
- * @param dev         Структура пристрою.
- * @param duration_ms Тривалість руху у мілісекундах.
- * @param steps_x     Кількість кроків по осі X.
- * @param steps_y     Кількість кроків по осі Y.
- * @return Код повернення драйвера EBB (0 → успіх).
+ * @brief Рух по осях X/Y на задану кількість кроків за визначений час.
+ * @param dev Пристрій.
+ * @param duration_ms Тривалість інтервалу (мс).
+ * @param steps_x Кроки по X.
+ * @param steps_y Кроки по Y.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_move_xy (
     axidraw_device_t *dev, uint32_t duration_ms, int32_t steps_x, int32_t steps_y) {
@@ -905,13 +914,12 @@ int axidraw_move_xy (
 }
 
 /**
- * @brief Виконати команду XM для CoreXY/H-bot кінематики.
- *
- * @param dev         Структура пристрою.
- * @param duration_ms Тривалість руху у мілісекундах.
- * @param steps_a     Кроки для мотору A.
- * @param steps_b     Кроки для мотору B.
- * @return Код повернення драйвера EBB (0 → успіх).
+ * @brief Рух у кінематиці CoreXY на задані кроки A/B.
+ * @param dev Пристрій.
+ * @param duration_ms Тривалість (мс).
+ * @param steps_a Кроки вздовж A.
+ * @param steps_b Кроки вздовж B.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_move_corexy (
     axidraw_device_t *dev, uint32_t duration_ms, int32_t steps_a, int32_t steps_b) {
@@ -932,17 +940,16 @@ int axidraw_move_corexy (
 }
 
 /**
- * @brief Виконати низькорівневу команду LM (кроки/ускорення).
- *
- * @param dev        Структура пристрою.
- * @param rate1      Початкова швидкість для мотору 1.
- * @param steps1     Кількість кроків для мотору 1.
- * @param accel1     Прискорення мотору 1.
- * @param rate2      Початкова швидкість для мотору 2.
- * @param steps2     Кількість кроків для мотору 2.
- * @param accel2     Прискорення мотору 2.
- * @param clear_flags Додаткові прапорці очищення FIFO.
- * @return Код повернення драйвера EBB (0 → успіх).
+ * @brief Низькорівнева команда руху з параметрами швидкості/прискорення для обох осей.
+ * @param dev Пристрій.
+ * @param rate1 Швидкість осі 1.
+ * @param steps1 Кроки осі 1.
+ * @param accel1 Прискорення осі 1.
+ * @param rate2 Швидкість осі 2.
+ * @param steps2 Кроки осі 2.
+ * @param accel2 Прискорення осі 2.
+ * @param clear_flags Прапори очищення (FIFO/лічильники).
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_move_lowlevel (
     axidraw_device_t *dev,
@@ -974,16 +981,15 @@ int axidraw_move_lowlevel (
 }
 
 /**
- * @brief Виконати низькорівневу команду LT (фіксований час інтервалів).
- *
- * @param dev        Структура пристрою.
- * @param intervals  Кількість інтервалів.
- * @param rate1      Швидкість мотору 1.
- * @param accel1     Прискорення мотору 1.
- * @param rate2      Швидкість мотору 2.
- * @param accel2     Прискорення мотору 2.
- * @param clear_flags Додаткові прапорці очищення FIFO.
- * @return Код повернення драйвера EBB (0 → успіх).
+ * @brief Низькорівневий рух з фіксованою кількістю інтервалів.
+ * @param dev Пристрій.
+ * @param intervals К-сть інтервалів.
+ * @param rate1 Швидкість осі 1.
+ * @param accel1 Прискорення осі 1.
+ * @param rate2 Швидкість осі 2.
+ * @param accel2 Прискорення осі 2.
+ * @param clear_flags Прапори очищення.
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_move_lowlevel_time (
     axidraw_device_t *dev,
@@ -1014,13 +1020,12 @@ int axidraw_move_lowlevel_time (
 }
 
 /**
- * @brief Виконати команду HM для повернення в базову позицію.
- *
- * @param dev       Структура пристрою.
- * @param step_rate Базова швидкість мікрошагів.
- * @param pos1      Цільова позиція для мотору 1 (може бути NULL).
- * @param pos2      Цільова позиція для мотору 2 (може бути NULL).
- * @return Код повернення драйвера EBB (0 → успіх).
+ * @brief Повернення у "home" позиції з заданою швидкістю кроків.
+ * @param dev Пристрій.
+ * @param step_rate Частота кроків.
+ * @param pos1 Ціль для осі 1 (може бути NULL).
+ * @param pos2 Ціль для осі 2 (може бути NULL).
+ * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_home (
     axidraw_device_t *dev, uint32_t step_rate, const int32_t *pos1, const int32_t *pos2) {
@@ -1044,5 +1049,3 @@ int axidraw_home (
     }
     return rc;
 }
-
-/* axidraw_status() вилучено: використовуйте прямі виклики ebb_query_* у вищих рівнях. */

@@ -1,10 +1,12 @@
 /**
  * @file jsw.h
- * @brief Примітивний ПОПИСУВАЧ JSON (writer) для потокового виводу.
- *
- * Дозволяє послідовно збирати JSON‑структури без ручного керування комами.
- * Підтримуються об’єкти, масиви, ключі та скалярні значення (рядок/число/булеве/null),
- * а також вставка сирого JSON‑фрагмента.
+ * @brief Примітивний JSON writer: побудова невеликих JSON-рядків.
+ * @defgroup jsw JSON Writer
+ * @ingroup util
+ * @details
+ * Легковаговий writer для побудови простих JSON‑обʼєктів у потік `FILE*` без
+ * зовнішніх залежностей. Форматує мінімізований JSON (без відступів/переносів)
+ * і автоматично керує комами між елементами обʼєктів та масивів.
  */
 #ifndef CPLOT_JSW_H
 #define CPLOT_JSW_H
@@ -17,60 +19,121 @@ extern "C" {
 #endif
 
 /**
- * Екранувати рядок для безпечного включення у JSON та записати у файл.
- *
- * Функція не додає початкових/кінцевих лапок. Керуючі символи та лапки
- * екрануються згідно стандарту JSON. Unicode‑послідовності не створюються,
- * виводиться буквально для байтів >= 0x20.
- *
- * @param f   Вказівник на відкритий потік виводу.
- * @param s   Вказівник на початок вхідного буфера.
- * @param len Довжина буфера у байтах.
+ * @brief Друкує рядок у файл із екрануванням JSON.
+ * @param f Потік виводу (не `NULL`).
+ * @param s Рядок джерела (може містити керівні символи).
+ * @param len Довжина рядка у байтах.
+ * @details Екранує `"`, `\\`, `\n`, `\r`, `\t` та будь‑які символи < 0x20 як `\uXXXX`.
  */
 void json_fprint_escaped (FILE *f, const char *s, size_t len);
 
+/** \brief Максимальна підтримувана глибина вкладеності JSON. */
+#define JSW_MAX_DEPTH 32
+
 /**
- * @brief Примітивний потоковий записувач JSON.
+ * @brief Стан JSON‑writerʼа поверх `FILE*`.
  */
 typedef struct json_writer {
-    FILE *f;                    /**< Потік виводу */
-    int depth;                  /**< Поточна глибина вкладення */
-    unsigned char type[32];     /**< Стек типів: 1=object, 2=array */
-    unsigned int count[32];     /**< Лічильник елементів на кожному рівні */
-    unsigned char key_open[32]; /**< Прапорець: у поточному об’єкті очікується значення після key */
+    FILE *f;                              /**< Цільовий потік. Власність не передається. */
+    int depth;                            /**< Поточна глибина стеку (0 — рівень верхівки). */
+    unsigned char type[JSW_MAX_DEPTH];    /**< Типи на стеці: 1 — обʼєкт, 2 — масив. */
+    unsigned int count[JSW_MAX_DEPTH];    /**< Кількість елементів у поточному контейнері. */
+    unsigned char key_open[JSW_MAX_DEPTH];/**< Прапорець: очікується значення після ключа. */
 } json_writer_t;
 
-/** Ініціалізувати записувач для виводу у вказаний потік. */
+/**
+ * @brief Ініціалізація writerʼа поверх `FILE*`.
+ * @param w [out] Writer, який буде очищено та привʼязано до потоку.
+ * @param f Потік виводу (власність лишається у викликувача).
+ */
 void jsonw_init (json_writer_t *w, FILE *f);
-/** Почати об’єкт ("{"). */
+
+/**
+ * @brief Починає обʼєкт `{}` у поточному контексті.
+ * @param w Writer.
+ * @note Дозволено викликати на верхньому рівні, у масиві або одразу після `jsonw_key`.
+ */
 void jsonw_begin_object (json_writer_t *w);
-/** Завершити поточний об’єкт ("}"). */
+
+/**
+ * @brief Завершує поточний обʼєкт `}`.
+ * @param w Writer.
+ */
 void jsonw_end_object (json_writer_t *w);
-/** Почати масив ("["). */
+
+/**
+ * @brief Починає масив `[` у поточному контексті.
+ * @param w Writer.
+ */
 void jsonw_begin_array (json_writer_t *w);
-/** Завершити поточний масив ("]"). */
+
+/**
+ * @brief Завершує поточний масив `]`.
+ * @param w Writer.
+ */
 void jsonw_end_array (json_writer_t *w);
 
-/** Задати ключ у поточному об’єкті: друкує "key": і очікує значення. */
+/**
+ * @brief Додає ключ обʼєкта (рядок + двокрапка).
+ * @param w Writer.
+ * @param key Імʼя ключа (C‑рядок).
+ * @note Коректно лише всередині обʼєкта; наступним викликом має бути додавання значення.
+ */
 void jsonw_key (json_writer_t *w, const char *key);
 
-/** Надрукувати рядок як значення (із екрануванням). */
+/**
+ * @brief Додає рядкове значення з явною довжиною.
+ * @param w Writer.
+ * @param s Вказівник на байти рядка (може містити керівні символи).
+ * @param len Довжина у байтах.
+ */
 void jsonw_string (json_writer_t *w, const char *s, size_t len);
-/** Зручність: надрукувати рядок C як значення. */
+
+/**
+ * @brief Додає нуль‑термінований C‑рядок як значення.
+ * @param w Writer.
+ * @param s C‑рядок.
+ */
 void jsonw_string_cstr (json_writer_t *w, const char *s);
-/** Надрукувати булеве значення. */
+
+/**
+ * @brief Додає булеве значення.
+ * @param w Writer.
+ * @param b Нуль/ненуль для false/true.
+ */
 void jsonw_bool (json_writer_t *w, int b);
-/** Надрукувати ціле значення. */
+
+/**
+ * @brief Додає ціле число десятковим форматом.
+ * @param w Writer.
+ * @param v Значення.
+ */
 void jsonw_int (json_writer_t *w, long long v);
-/** Надрукувати число з плаваючою крапкою. */
+
+/**
+ * @brief Додає число з плаваючою крапкою (`%g`).
+ * @param w Writer.
+ * @param v Значення.
+ */
 void jsonw_double (json_writer_t *w, double v);
-/** Надрукувати null. */
+
+/**
+ * @brief Додає значення `null`.
+ * @param w Writer.
+ */
 void jsonw_null (json_writer_t *w);
-/** Вставити сирий JSON‑фрагмент як значення (без екранування). */
+
+/**
+ * @brief Додає сирий JSON‑фрагмент без екранування.
+ * @param w Writer.
+ * @param raw Вказівник на байти JSON‑фрагмента.
+ * @param len Довжина у байтах.
+ * @warning Вставляється без перевірок/екранування — відповідальність на викликувачеві.
+ */
 void jsonw_raw (json_writer_t *w, const char *raw, size_t len);
 
 #ifdef __cplusplus
-} /* extern "C" */
+}
 #endif
 
-#endif /* CPLOT_JSW_H */
+#endif

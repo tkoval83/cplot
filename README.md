@@ -186,3 +186,9 @@ bin/cplot device list
 
 Проєкт розповсюджується за ліцензією MIT (див. `LICENSE`).
 
+## Документація API
+
+- Генерація документації Doxygen (HTML):
+  - `make docs` (потрібен `doxygen` у PATH)
+  - Вихід: `docs/api/html/index.html`
+

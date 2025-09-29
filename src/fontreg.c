@@ -1,6 +1,7 @@
 /**
  * @file fontreg.c
- * @brief Parse hershey/index.json and resolve bundled font faces.
+ * @brief Реалізація реєстру шрифтів Hershey.
+ * @ingroup fontreg
  */
 #include "fontreg.h"
 
@@ -19,9 +20,6 @@
 #define FONT_STYLE_ITALIC 0x02
 #define FONT_STYLE_BOLD 0x04
 
-/**
- * @brief Опис конкретного варіанта шрифту (гарнітура, стиль, покриття кодових точок).
- */
 typedef struct {
     font_face_t face;
     int style_flags;
@@ -29,9 +27,6 @@ typedef struct {
     size_t codepoint_count;
 } font_variant_info_t;
 
-/**
- * @brief Згруповані варіанти всередині однієї родини шрифтів.
- */
 typedef struct {
     char key[64];
     char display[96];
@@ -46,9 +41,6 @@ static size_t g_family_count = 0;
 static size_t g_family_cap = 0;
 static int g_catalog_ready = 0;
 
-/**
- * @brief Очистити кешований каталог сімейств/варіантів.
- */
 static void fontreg_catalog_clear (void) {
     for (size_t i = 0; i < g_family_count; ++i) {
         font_family_info_t *family = &g_families[i];
@@ -63,6 +55,12 @@ static void fontreg_catalog_clear (void) {
     g_catalog_ready = 0;
 }
 
+/**
+ * @brief Компаратор для qsort(uint32_t).
+ * @param a Вказівник на перший елемент (uint32_t*).
+ * @param b Вказівник на другий елемент (uint32_t*).
+ * @return <0 якщо a<b, >0 якщо a>b, 0 — рівні.
+ */
 static int cmp_uint32 (const void *a, const void *b) {
     uint32_t ua = *(const uint32_t *)a;
     uint32_t ub = *(const uint32_t *)b;
@@ -74,7 +72,9 @@ static int cmp_uint32 (const void *a, const void *b) {
 }
 
 /**
- * @brief Вилучити дублікати з відсортованого масиву кодових точок.
+ * @brief Усунення дублікатів у відсортованому масиві кодових точок.
+ * @param codes Масив кодових точок (відсортований, in-place).
+ * @param count [in,out] Кількість елементів (зменшується після дедуплікації).
  */
 static void dedupe_codepoints (uint32_t *codes, size_t *count) {
     if (!codes || !count || *count == 0)
@@ -88,7 +88,9 @@ static void dedupe_codepoints (uint32_t *codes, size_t *count) {
 }
 
 /**
- * @brief Перевірити, чи слово відповідає маркеру стилю (italic/bold тощо).
+ * @brief Перевіряє, чи є токеном стилю (bold/italic/...)
+ * @param token Слово у нижньому регістрі.
+ * @return 1 — так; 0 — ні.
  */
 static int is_style_token (const char *token) {
     static const char *k_tokens[]
@@ -102,7 +104,10 @@ static int is_style_token (const char *token) {
 }
 
 /**
- * @brief Побудувати читабельну назву сімейства, відкидаючи маркери стилю.
+ * @brief Формує «чисту» назву родини без суфіксів стилю.
+ * @param name Початкова назва обличчя.
+ * @param out [out] Буфер назви родини.
+ * @param out_len Розмір буфера.
  */
 static void build_family_display (const char *name, char *out, size_t out_len) {
     if (!out || out_len == 0)
@@ -135,7 +140,9 @@ static void build_family_display (const char *name, char *out, size_t out_len) {
 }
 
 /**
- * @brief Визначити стильові прапори (regular/bold/italic) з опису шрифту.
+ * @brief Визначає прапорці стилю для обличчя за його id/name.
+ * @param face Опис обличчя.
+ * @return Маска стильових прапорців FONT_STYLE_*.
  */
 static int style_flags_from_face (const font_face_t *face) {
     if (!face)
@@ -162,8 +169,11 @@ static int style_flags_from_face (const font_face_t *face) {
     return flags;
 }
 
+/** Видаляє суфікс у кінці рядка, якщо присутній. */
 /**
- * @brief Прибрати суфікс зі строкового ідентифікатора, якщо він присутній.
+ * @brief Видаляє суфікс у кінці рядка, якщо присутній.
+ * @param str Рядок для модифікації (in-place).
+ * @param suffix Скінчений суфікс, який шукаємо.
  */
 static void strip_suffix (char *str, const char *suffix) {
     size_t len = strlen (str);
@@ -173,9 +183,12 @@ static void strip_suffix (char *str, const char *suffix) {
 }
 
 /**
- * @brief Вивести нормалізований ключ сімейства та читабельну назву.
- *
- * Нормалізує `face->id`, прибираючи суфікси `_bold`, `_italic` тощо, і будує display-рядок.
+ * @brief Обчислює ключ родини та назву для показу на основі face.
+ * @param face Вхідне обличчя шрифту.
+ * @param out_key [out] Ключ родини (нижній регістр, без суфіксів).
+ * @param key_len Розмір буфера ключа.
+ * @param out_display [out] Назва родини для показу.
+ * @param display_len Розмір буфера назви.
  */
 static void derive_family_key (
     const font_face_t *face, char *out_key, size_t key_len, char *out_display, size_t display_len) {
@@ -186,13 +199,7 @@ static void derive_family_key (
         strip_suffix (tmp, "_bold_italic");
         strip_suffix (tmp, "_italic");
         strip_suffix (tmp, "_bold");
-        /*
-         * Normalize common weight/style suffixes to derive a stable family key.
-         * Some bundled fonts use a shortened "_med" suffix instead of
-         * "_medium" (e.g., hershey_serif_med). Handle both forms to ensure
-         * variants like Regular/Italic (Med) and Bold/Italic group under the
-         * same family key ("hershey_serif").
-         */
+
         strip_suffix (tmp, "_medium");
         strip_suffix (tmp, "_med");
         strip_suffix (tmp, "_regular");
@@ -211,8 +218,11 @@ static void derive_family_key (
         build_family_display (face->name, out_display, display_len);
 }
 
+/** Пошук родини у кеші за ключем. */
 /**
- * @brief Знайти сімейство у кеші за нормалізованим ключем.
+ * @brief Пошук родини у кеші за ключем.
+ * @param key Ключ родини.
+ * @return Вказівник на запис родини або NULL.
  */
 static font_family_info_t *find_family_by_key (const char *key) {
     if (!key)
@@ -225,7 +235,10 @@ static font_family_info_t *find_family_by_key (const char *key) {
 }
 
 /**
- * @brief Повернути наявне сімейство або створити новий запис.
+ * @brief Гарантує наявність запису родини (створює за потреби).
+ * @param key Ключ родини.
+ * @param display Назва родини для показу.
+ * @return Вказівник на запис родини або NULL при помилці памʼяті.
  */
 static font_family_info_t *ensure_family (const char *key, const char *display) {
     font_family_info_t *family = find_family_by_key (key);
@@ -248,7 +261,9 @@ static font_family_info_t *ensure_family (const char *key, const char *display) 
 }
 
 /**
- * @brief Додати новий варіант шрифту у сімейство, розширивши масив.
+ * @brief Додає порожній варіант у родину, розширюючи масив.
+ * @param family Родина, куди додаємо.
+ * @return Вказівник на новий варіант або NULL при помилці памʼяті.
  */
 static font_variant_info_t *append_variant (font_family_info_t *family) {
     if (!family)
@@ -268,9 +283,8 @@ static font_variant_info_t *append_variant (font_family_info_t *family) {
 }
 
 /**
- * @brief Лениво побудувати каталог сімейств/варіантів із hershey/index.json.
- *
- * @return 0 при успіху; -1 якщо не вдалося зчитати дані.
+ * @brief Будує кеш каталогу родин та варіантів із індексу шрифтів.
+ * @return 0 — успіх; -1 — помилка/порожній каталог.
  */
 static int fontreg_ensure_catalog (void) {
     if (g_catalog_ready)
@@ -332,7 +346,9 @@ static int fontreg_ensure_catalog (void) {
 }
 
 /**
- * @brief Порахувати кількість встановлених бітів у масці стилів.
+ * @brief Підрахунок встановлених бітів у масці.
+ * @param mask Ціле зі встановленими бітами.
+ * @return Кількість встановлених бітів.
  */
 static int popcount_int (int mask) {
     int count = 0;
@@ -344,7 +360,9 @@ static int popcount_int (int mask) {
 }
 
 /**
- * @brief Визначити пріоритет стилю для сортування (regular → bold → italic).
+ * @brief Визначає пріоритет стилю (менше — краще).
+ * @param flags Маска стилів FONT_STYLE_*.
+ * @return Пріоритет стилю.
  */
 static int style_priority (int flags) {
     if (flags & FONT_STYLE_REGULAR)
@@ -357,12 +375,18 @@ static int style_priority (int flags) {
 }
 
 /**
- * @brief Перевірити, чи увімкнено стильовий прапор у масці.
+ * @brief Перевірка наявності прапорця у масці стилів.
+ * @param mask Маска стилів.
+ * @param flag Прапорець для перевірки.
+ * @return 1 — встановлено; 0 — ні.
  */
 static int has_style_flag (int mask, int flag) { return (mask & flag) ? 1 : 0; }
 
 /**
- * @brief Перевірити, чи містить варіант конкретну кодову точку (бінарний пошук).
+ * @brief Бінарний пошук кодової точки у списку варіанту.
+ * @param variant Варіант обличчя.
+ * @param cp Кодова точка Unicode.
+ * @return 1 — знайдено; 0 — ні.
  */
 static int variant_contains_codepoint (const font_variant_info_t *variant, uint32_t cp) {
     if (!variant || variant->codepoint_count == 0)
@@ -383,7 +407,11 @@ static int variant_contains_codepoint (const font_variant_info_t *variant, uint3
 }
 
 /**
- * @brief Порахувати кількість кодових точок, які покриває варіант.
+ * @brief Кількість кодових точок із набору, які покриває варіант.
+ * @param variant Варіант обличчя.
+ * @param codepoints Набір кодових точок.
+ * @param codepoint_count Кількість кодових точок у наборі.
+ * @return Кількість покритих кодових точок.
  */
 static size_t variant_coverage (
     const font_variant_info_t *variant, const uint32_t *codepoints, size_t codepoint_count) {
@@ -397,9 +425,6 @@ static size_t variant_coverage (
     return covered;
 }
 
-/**
- * @brief Проміжні результати оцінки сімейства для підбору шрифту.
- */
 typedef struct {
     const font_family_info_t *family;
     const font_variant_info_t *best_variant;
@@ -413,7 +438,11 @@ typedef struct {
 } family_eval_t;
 
 /**
- * @brief Оцінити сімейство щодо набору кодових точок і стилів.
+ * @brief Обчислює показники покриття/пріоритету для родини.
+ * @param family Родина для оцінювання.
+ * @param codepoints Набір кодових точок.
+ * @param codepoint_count Кількість кодових точок.
+ * @param out [out] Заповнений результат оцінювання.
  */
 static void evaluate_family (
     const font_family_info_t *family,
@@ -460,7 +489,10 @@ static void evaluate_family (
 }
 
 /**
- * @brief Порівняти два сімейства, коли обидва повністю покривають текст.
+ * @brief Критерій «краще» при повному покритті набора символів.
+ * @param candidate Кандидат.
+ * @param current Поточний найкращий.
+ * @return 1 — кандидат кращий; 0 — ні.
  */
 static int family_full_better (const family_eval_t *candidate, const family_eval_t *current) {
     int cap_c = popcount_int (candidate->capability_mask);
@@ -487,7 +519,10 @@ static int family_full_better (const family_eval_t *candidate, const family_eval
 }
 
 /**
- * @brief Порівняти два сімейства при частковому покритті тексту.
+ * @brief Критерій «краще» при частковому покритті набора символів.
+ * @param candidate Кандидат.
+ * @param current Поточний найкращий.
+ * @return 1 — кандидат кращий; 0 — ні.
  */
 static int family_partial_better (const family_eval_t *candidate, const family_eval_t *current) {
     if (candidate->best_variant_cover != current->best_variant_cover)
@@ -507,9 +542,6 @@ static int family_partial_better (const family_eval_t *candidate, const family_e
     return strcmp (candidate->family->display, current->family->display) < 0;
 }
 
-/**
- * @brief Знайти індекс сімейства, що містить варіант з указаним ID.
- */
 static int
 find_family_index_by_variant_id (const char *id, family_eval_t *evals, size_t eval_count) {
     if (!id)
@@ -524,20 +556,9 @@ find_family_index_by_variant_id (const char *id, family_eval_t *evals, size_t ev
     return -1;
 }
 
-/**
- * Зберігає базовий каталог із ресурсами Hershey.
- *
- * Використовується для пошуку hershey/index.json та окремих SVG-файлів при
- * запуску з пакетів, де дані розміщено не поруч із бінарником.
- */
 static char g_font_root[PATH_MAX];
 static int g_font_root_initialized = 0;
 
-/**
- * @brief Встановити базовий каталог, відносно якого шукати hershey/.
- *
- * @param path Абсолютний шлях до каталогу з ресурсами або NULL для скидання.
- */
 void fontreg_set_root (const char *path) {
     fontreg_catalog_clear ();
     g_font_root_initialized = 1;
@@ -555,14 +576,7 @@ void fontreg_set_root (const char *path) {
     log_print (LOG_INFO, "реєстр шрифтів: встановлено базовий каталог → %s", g_font_root);
 }
 
-/**
- * @brief Отримати фактичний базовий каталог, враховуючи CPLOT_DATA_DIR.
- *
- * Вперше ініціалізується під час виклику, використовуючи змінну середовища або значення,
- * задане через `fontreg_set_root()`.
- *
- * @return Вказівник на встановлений каталог або NULL, якщо використовується CWD.
- */
+/** Повертає активний кореневий каталог зі шрифтами (із кешем/ENV). */
 static const char *fontreg_effective_root (void) {
     if (!g_font_root_initialized) {
         const char *env = getenv ("CPLOT_DATA_DIR");
@@ -571,17 +585,7 @@ static const char *fontreg_effective_root (void) {
     return (g_font_root_initialized && g_font_root[0] != '\0') ? g_font_root : NULL;
 }
 
-/**
- * @brief Зчитати список усіх доступних SVG-шрифтів із `hershey/index.json`.
- *
- * Читає файл повністю та проходить по верхньорівневих ключах JSON (див. hershey/index.json),
- * використовуючи утиліти `jsr`. Результат — масив `font_face_t`, який викликач звільняє через
- * `free()`.
- *
- * @param[out] faces Масив описів (malloc).
- * @param[out] count Кількість записів.
- * @return 0 при успіху; від'ємний код при помилці I/O/парсингу.
- */
+/** @copydoc fontreg_list */
 int fontreg_list (font_face_t **faces, size_t *count) {
     if (!faces || !count)
         return -1;
@@ -606,7 +610,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             root ? root : "<робочий каталог>");
         return -2;
     }
-    /* Зчитати увесь файл у пам'ять */
+
     if (fseek (fp, 0, SEEK_END) != 0) {
         fclose (fp);
         return -3;
@@ -634,7 +638,6 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         return -3;
     }
 
-    /* Ітерація по ключах верхнього рівня */
     const char *p = json_skip_ws (json);
     if (*p != '{') {
         free (arr);
@@ -647,10 +650,10 @@ int fontreg_list (font_face_t **faces, size_t *count) {
     while (1) {
         p = json_skip_ws (p);
         if (*p == '}') {
-            break; /* кінець об’єкта */
+            break;
         }
         if (*p != '"') {
-            /* пропустити непридатний символ до наступної коми/закриття */
+
             while (*p && *p != ',' && *p != '}')
                 p++;
             if (*p == ',') {
@@ -660,7 +663,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             if (*p == '}')
                 break;
         }
-        /* Зняти ключ у лапках (без ескейпів для спрощення: у файлі вони відсутні) */
+
         p++;
         const char *kbeg = p;
         while (*p && *p != '"')
@@ -673,10 +676,10 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             klen = sizeof (key) - 1;
         memcpy (key, kbeg, klen);
         key[klen] = '\0';
-        p++; /* після закритих лапок */
+        p++;
         p = json_skip_ws (p);
         if (*p != ':') {
-            /* Спробувати продовжити */
+
             while (*p && *p != ',' && *p != '}')
                 p++;
             if (*p == ',') {
@@ -686,14 +689,13 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             if (*p == '}')
                 break;
         }
-        p++; /* на початок значення */
+        p++;
         p = json_skip_ws (p);
 
-        /* Отримати сирий фрагмент значення за допомогою jsr (пошук від початку json) */
         const char *vptr = NULL;
         size_t vlen = 0;
         if (!json_get_raw (json, key, &vptr, &vlen)) {
-            /* пропустити значення вручну */
+
             int depth = 0, in_str = 0;
             const char *q = p;
             while (*q) {
@@ -724,7 +726,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
                 p++;
             continue;
         }
-        /* Значення — об’єкт із полями file та name */
+
         char *file = json_get_string (vptr, "file", NULL);
         char *name = json_get_string (vptr, "name", NULL);
         if (file && name) {
@@ -760,7 +762,6 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         free (file);
         free (name);
 
-        /* Продовжити після значення */
         p = vptr + vlen;
         p = json_skip_ws (p);
         if (*p == ',') {
@@ -778,6 +779,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
     return 0;
 }
 
+/** @copydoc fontreg_list_families */
 int fontreg_list_families (font_family_name_t **families, size_t *count) {
     if (!families || !count)
         return -1;
@@ -800,15 +802,7 @@ int fontreg_list_families (font_family_name_t **families, size_t *count) {
     return 0;
 }
 
-/**
- * @brief Обрати шрифт, що найкраще покриває задані кодові точки.
- *
- * @param preferred_family Бажана родина (може бути NULL).
- * @param codepoints       Масив кодових точок.
- * @param codepoint_count  Кількість кодових точок.
- * @param[out] out_face    Результат (повний опис шрифту).
- * @return 0 при успіху; 1 якщо не знайдено; -1 при помилці.
- */
+/** @copydoc fontreg_select_face_for_codepoints */
 int fontreg_select_face_for_codepoints (
     const char *preferred_family,
     const uint32_t *codepoints,
@@ -818,10 +812,7 @@ int fontreg_select_face_for_codepoints (
         return -1;
     if (fontreg_ensure_catalog () != 0)
         return -1;
-    /* Якщо користувач явно вказав конкретний шрифт (ідентифікатор face.id),
-     * використати його без подальшого підбору за родиною/стилем. Це дозволяє
-     * задавати індивідуальні гарнітури в конфігурації (font_family=face_id) і
-     * будувати прев’ю для кожного окремого шрифту. */
+
     if (preferred_family && *preferred_family) {
         font_face_t exact;
         if (fontreg_resolve (preferred_family, &exact) == 0) {
@@ -899,22 +890,7 @@ int fontreg_select_face_for_codepoints (
     return rc;
 }
 
-/**
- * Знайти шрифт за ідентифікатором або частковим збігом імені (case-insensitive).
- *
- * Якщо @p query порожній, повертає шрифт за замовчуванням "ems_nixish".
- *
- * @param query Пошуковий рядок (може бути NULL або порожнім).
- * @param out   Вихід: знайдений шрифт.
- * @return 0 у разі успіху; -3 якщо не знайдено; інші від'ємні коди — помилки читання списку.
- */
-/**
- * @brief Знайти шрифт за ідентифікатором або відображуваною назвою.
- *
- * @param query Ідентифікатор/назва (регістр не важливий).
- * @param[out] out Опис шрифту.
- * @return 0 при успіху; 1 якщо не знайдено; -1 при помилці.
- */
+/** @copydoc fontreg_resolve */
 int fontreg_resolve (const char *query, font_face_t *out) {
     if (!out)
         return -1;
@@ -926,7 +902,7 @@ int fontreg_resolve (const char *query, font_face_t *out) {
         log_print (LOG_ERROR, "реєстр шрифтів: дані недоступні");
         return -2;
     }
-    /* Default to ems_nixish when query is NULL/empty */
+
     const char *fallback_id = "ems_nixish";
     int found = 0;
     if (query && *query) {

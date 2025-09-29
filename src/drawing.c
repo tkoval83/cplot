@@ -1,6 +1,7 @@
 /**
  * @file drawing.c
- * @brief Побудова розкладки тексту, превʼю та планів руху.
+ * @brief Реалізація побудови розкладки та превʼю (SVG/PNG).
+ * @ingroup drawing
  */
 
 #include "drawing.h"
@@ -16,13 +17,14 @@
 #include <string.h>
 
 /**
- * @brief Побудувати полілінії символів Hershey для переданого тексту.
- *
- * @param input        Вхідний рядок для відтворення.
- * @param font_family  Назва родини шрифту або NULL для типового.
- * @param out_paths    Вихідні шляхи у координатах мм (не NULL).
- * @param info         Структура з метаданими рендерингу (може бути NULL).
- * @return 0 успіх; 1 — помилка виділення пам’яті чи рендеру.
+ * @brief Рендерить текст у контури з урахуванням ширини рамки.
+ * @param input Вхідний текст.
+ * @param font_family Родина шрифтів (може бути NULL для типових).
+ * @param font_size_pt Кегль, пт (<=0 — типове значення).
+ * @param frame_width_mm Ширина рамки для верстки, мм.
+ * @param out_paths [out] Контури (у мм).
+ * @param info [out] Інформація про рендеринг (може бути NULL).
+ * @return 0 — успіх, 1 — помилка.
  */
 static int build_text_paths (
     string_t input,
@@ -64,13 +66,13 @@ static int build_text_paths (
 }
 
 /**
- * @brief Побудувати розкладку тексту у координатах пристрою.
- *
- * @param page        Параметри сторінки та полів (не NULL).
- * @param font_family Назва родини шрифту або NULL.
- * @param input       Текст для відтворення.
- * @param layout      Вихідна структура з геометрією та метаданими (не NULL).
- * @return 0 успіх; 1 — помилка рендерингу; 2 — некоректні параметри полотна.
+ * @brief Побудова розкладки на основі тексту.
+ * @param page Параметри сторінки.
+ * @param font_family Родина шрифтів.
+ * @param font_size_pt Розмір шрифту, пт.
+ * @param input Вхідний текст.
+ * @param layout [out] Розкладка.
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_build_layout (
     const drawing_page_t *page,
@@ -128,7 +130,11 @@ int drawing_build_layout (
 }
 
 /**
- * @brief Побудувати розкладку з уже наявних шляхів (фігури, криві тощо).
+ * @brief Побудова розкладки з готових контурів.
+ * @param page Параметри сторінки.
+ * @param source_paths Вхідні контури.
+ * @param layout [out] Розкладка.
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_build_layout_from_paths (
     const drawing_page_t *page, const geom_paths_t *source_paths, drawing_layout_t *layout) {
@@ -163,11 +169,6 @@ int drawing_build_layout_from_paths (
     return 0;
 }
 
-/**
- * @brief Звільнити ресурси, повʼязані з готовою розкладкою.
- *
- * @param layout Структура для очищення (може бути NULL).
- */
 void drawing_layout_dispose (drawing_layout_t *layout) {
     if (!layout)
         return;
@@ -176,11 +177,10 @@ void drawing_layout_dispose (drawing_layout_t *layout) {
 }
 
 /**
- * @brief Згенерувати SVG-превʼю для розкладки.
- *
- * @param layout Розкладка з геометрією (не NULL).
- * @param out    Буфер із байтами SVG (не NULL; результат потребує free()).
- * @return 0 успіх; 1 — некоректні аргументи або помилка рендерингу.
+ * @brief Генерує SVG із розкладки.
+ * @param layout Розкладка.
+ * @param out [out] Буфер SVG (bytes/len).
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_preview_svg (const drawing_layout_t *layout, bytes_t *out) {
     if (!layout || !out)
@@ -189,11 +189,10 @@ int drawing_preview_svg (const drawing_layout_t *layout, bytes_t *out) {
 }
 
 /**
- * @brief Згенерувати PNG-превʼю для розкладки.
- *
- * @param layout Розкладка з геометрією (не NULL).
- * @param out    Буфер із байтами PNG (не NULL; результат потребує free()).
- * @return 0 успіх; 1 — некоректні аргументи або помилка рендерингу.
+ * @brief Генерує PNG із розкладки.
+ * @param layout Розкладка.
+ * @param out [out] Буфер PNG (bytes/len).
+ * @return 0 — успіх, інакше помилка.
  */
 int drawing_preview_png (const drawing_layout_t *layout, bytes_t *out) {
     if (!layout || !out)
@@ -202,13 +201,12 @@ int drawing_preview_png (const drawing_layout_t *layout, bytes_t *out) {
 }
 
 /**
- * @brief Забезпечити достатню ємність масиву сегментів.
- *
- * @param segs  Вказівник на масив сегментів (не NULL).
- * @param len   Поточна кількість елементів.
- * @param cap   Поточна ємність (оновлюється).
- * @param extra Кількість додаткових елементів, що потребують місця.
- * @return 0 успіх; -1 — помилка виділення памʼяті.
+ * @brief Гарантує ємність для масиву сегментів планувальника.
+ * @param segs [in,out] Масив сегментів (realloc).
+ * @param len [in,out] Поточна довжина.
+ * @param cap [in,out] Поточна ємність.
+ * @param extra Додаткові елементи.
+ * @return 0 — успіх, -1 — помилка виділення.
  */
 static int segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap, size_t extra) {
     size_t need = *len + extra;
@@ -226,15 +224,14 @@ static int segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap,
 }
 
 /**
- * @brief Додати сегмент руху до динамічного масиву.
- *
- * @param segs    Масив сегментів (розширюється за потреби).
- * @param len     Кількість уже доданих елементів.
- * @param cap     Поточна ємність масиву.
- * @param target  Цільові координати кінця сегмента (мм).
- * @param feed_mm_s Робоча швидкість сегмента (мм/с).
- * @param pen_down true → перо опущене в сегменті.
- * @return 0 успіх; -1 — помилка виділення памʼяті.
+ * @brief Додає один сегмент до масиву.
+ * @param segs [in,out] Масив сегментів.
+ * @param len [in,out] Довжина.
+ * @param cap [in,out] Ємність.
+ * @param target Координата цілі [x,y].
+ * @param feed_mm_s Лінійна швидкість, мм/с.
+ * @param pen_down true — перо опущене (малювання), false — переміщення.
+ * @return 0 — успіх, -1 — помилка виділення.
  */
 static int add_segment (
     planner_segment_t **segs,
@@ -254,13 +251,12 @@ static int add_segment (
 }
 
 /**
- * @brief Побудувати рух AxiDraw на основі розкладки.
- *
- * @param layout      Розкладка, що містить контури у мм.
- * @param limits      Обмеження планувальника або NULL для значень за замовчуванням.
- * @param out_blocks  Вихід: масив блоків руху (виділяється, потребує free()).
- * @param out_count   Вихід: кількість блоків у масиві.
- * @return 0 успіх; 1 — помилка ініціалізації чи виділення памʼяті.
+ * @brief Генерує план руху з розкладки.
+ * @param layout Розкладка, що містить шляхи у мм.
+ * @param limits Ліміти планування (NULL — з конфігурації).
+ * @param out_blocks [out] Масив блоків руху (mallocʼиться).
+ * @param out_count [out] Кількість блоків.
+ * @return 0 — успіх, 1 — помилка.
  */
 int drawing_generate_motion_plan (
     const drawing_layout_t *layout,

@@ -1,6 +1,8 @@
 /**
  * @file font.h
- * @brief Інтерфейс для завантаження та доступу до SVG-шрифтів.
+ * @brief Робота з шрифтами Hershey: пошук, метрики, контури гліфів.
+ * @defgroup font Шрифти
+ * @ingroup text
  */
 #ifndef FONT_H
 #define FONT_H
@@ -16,88 +18,89 @@
 extern "C" {
 #endif
 
-/** Непрозорий дескриптор шрифту. */
+/**
+ * @brief Непрозорий обʼєкт шрифту Hershey, завантажений із SVG.
+ */
 typedef struct font font_t;
 
-/** Базові метрики шрифту. */
+/**
+ * @brief Базові метрики шрифту в одиницях шрифту.
+ */
 typedef struct font_metrics {
-    double units_per_em; /**< Значення units-per-em. */
-    double ascent;       /**< Верхній відступ. */
-    double descent;      /**< Нижній відступ (від’ємний для SVG). */
-    double cap_height;   /**< Висота великих літер. */
-    double x_height;     /**< Висота малих літер. */
+    double units_per_em;  /**< Кількість одиниць шрифту на ем. */
+    double ascent;        /**< Висота над базовою лінією. */
+    double descent;       /**< Глибина під базовою лінією (відʼємне або додатне значення). */
+    double cap_height;    /**< Висота прописних літер. */
+    double x_height;      /**< Висота малих літер (x-height). */
 } font_metrics_t;
 
+/**
+ * @brief Контекст рендерингу для конкретного обличчя/розміру шрифту.
+ */
 typedef struct font_render_context {
-    font_face_t face;
-    font_t *font;
-    font_metrics_t metrics;
-    double scale;
-    double line_height_units;
-    double space_advance_units;
-    double hyphen_advance_units;
-    geom_units_t units;
+    font_face_t face;              /**< Обране обличчя (джерело файлу). */
+    font_t *font;                  /**< Завантажений шрифт. */
+    font_metrics_t metrics;        /**< Метрики обличчя. */
+    double scale;                  /**< Масштаб одиниць шрифту → вибрані одиниці (мм/дюйми). */
+    double line_height_units;      /**< Рекомендований інтерліньяж у одиницях шрифту. */
+    double space_advance_units;    /**< Ширина пробілу (advance), од. шрифту. */
+    double hyphen_advance_units;   /**< Ширина дефісу (advance), од. шрифту. */
+    geom_units_t units;            /**< Вихідні одиниці (GEOM_UNITS_*) для контурів. */
 } font_render_context_t;
 
 /**
- * Завантажити SVG-шрифт із файлу.
- *
- * @param path     Шлях до файлу SVG.
- * @param out_font Вихідний об’єкт шрифту.
- * @return 0 при успіху; -1 при помилці введення/виведення; -2 при некоректних аргументах.
+ * @brief Завантажує шрифт Hershey з файлу.
+ * @param path Шлях до файлу шрифту.
+ * @param out_font [out] Вихідний обʼєкт шрифту.
+ * @return 0 — успіх, інакше помилка.
  */
 int font_load_from_file (const char *path, font_t **out_font);
 
 /**
- * Отримати ідентифікатор шрифту (атрибут font id).
- *
- * @param font    Шрифт.
- * @param buffer  Буфер для запису id (може бути NULL для запиту довжини).
- * @param buflen  Розмір буфера у байтах.
- * @return Довжина id у символах (без NUL) або від’ємний код помилки.
+ * @brief Отримує стабільний ідентифікатор шрифту (атрибут font id).
+ * @param font Обʼєкт шрифту.
+ * @param buffer [out] Буфер для копії ідентифікатора (може бути NULL, щоб отримати довжину).
+ * @param buflen Розмір буфера.
+ * @return Довжина вихідного рядка (без NUL) або -1 при помилці.
  */
 int font_get_id (const font_t *font, char *buffer, size_t buflen);
 
 /**
- * Отримати відображувану назву шрифту (font-family).
- *
- * @param font    Шрифт.
- * @param buffer  Буфер для запису назви (може бути NULL для запиту довжини).
- * @param buflen  Розмір буфера у байтах.
- * @return Довжина назви без урахування NUL або від’ємний код помилки.
+ * @brief Отримує відображувану назву родини шрифту (font-family).
+ * @param font Обʼєкт шрифту.
+ * @param buffer [out] Буфер для назви (може бути NULL, щоб дізнатись довжину).
+ * @param buflen Розмір буфера.
+ * @return Довжина вихідного рядка (без NUL) або -1 при помилці.
  */
 int font_get_family_name (const font_t *font, char *buffer, size_t buflen);
 
 /**
- * Отримати метрики шрифту.
- *
- * @param font Шрифт.
- * @param out  Структура для заповнення.
- * @return 0 при успіху; -1 при некоректних аргументах.
+ * @brief Заповнює основні метрики шрифту.
+ * @param font Обʼєкт шрифту.
+ * @param out [out] Структура метрик.
+ * @return 0 — успіх, -1 — помилка.
  */
 int font_get_metrics (const font_t *font, font_metrics_t *out);
 
 /**
- * Знайти гліф за кодовою точкою.
- *
- * @param font      Шрифт.
- * @param codepoint Юнікод-значення.
- * @param out_glyph Повернений гліф (посилання зберігає власник шрифту; не звільняти).
- * @return 0 при успіху; 1 якщо гліф відсутній; від’ємний код при помилці.
+ * @brief Знаходить гліф за кодовою точкою.
+ * @param font Обʼєкт шрифту.
+ * @param codepoint Юнікод кодова точка.
+ * @param out_glyph [out] Вказівник на гліф.
+ * @return 0 — знайдено, 1 — відсутній, -1 — помилка.
  */
 int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out_glyph);
 
 /**
- * Відрендерити гліф у колекцію шляхів.
- *
- * @param font          Шрифт.
- * @param codepoint     Юнікод-значення гліфа.
- * @param origin_x      Початковий зсув X у одиницях шрифту.
- * @param baseline_y    Базова лінія Y у одиницях шрифту (позитивні значення вгору).
- * @param scale         Масштаб до вихідних одиниць (наприклад, мм).
- * @param out           Колекція шляхів для доповнення (не NULL).
- * @param advance_units Вихід: advance-width у вихідних одиницях шрифту (може бути NULL).
- * @return 0 успіх; 1 якщо гліф відсутній; -1 при помилці аргументів або памʼяті.
+ * @brief Емітує контури гліфа у вихідні шляхи.
+ * @param font Шрифт.
+ * @param codepoint Кодова точка Unicode.
+ * @param origin_x Початкова X-позиція (одиниці шрифту).
+ * @param baseline_y Базова лінія Y (мм).
+ * @param scale Масштаб із одиниць шрифту в цільові одиниці.
+ * @param out [out] Кінцеві шляхи.
+ * @param advance_units [out] Просування пера в одиницях шрифту.
+ * @return 0 — успіх, 1 — гліф відсутній, -1 — помилка.
  */
 int font_emit_glyph_paths (
     const font_t *font,
@@ -108,38 +111,79 @@ int font_emit_glyph_paths (
     geom_paths_t *out,
     double *advance_units);
 
+/**
+ * @brief Готує контекст рендерингу для конкретного обличчя шрифту.
+ * @param ctx [out] Контекст рендерингу.
+ * @param face Опис обличчя шрифту.
+ * @param size_pt Кегль у пунктах (<=0 — типове значення).
+ * @param units Вихідні одиниці (мм/дюйми).
+ * @return 0 — успіх, -1 — помилка.
+ */
 int font_render_context_init (
     font_render_context_t *ctx, const font_face_t *face, double size_pt, geom_units_t units);
 
+/** Звільняє ресурси контексту рендерингу. */
 void font_render_context_dispose (font_render_context_t *ctx);
 
+/**
+ * @brief Обличчя для fallback-рендерингу.
+ */
 typedef struct font_fallback_face {
-    char face_id[64];
-    font_render_context_t ctx;
+    char face_id[64];             /**< Ідентифікатор обличчя. */
+    font_render_context_t ctx;    /**< Контекст рендерингу для цього обличчя. */
 } font_fallback_face_t;
 
+/**
+ * @brief Мапа кодових точок на індекс обличчя у fallback-списку.
+ */
 typedef struct font_fallback_map {
-    uint32_t codepoint;
-    size_t face_index;
+    uint32_t codepoint;  /**< Кодова точка. */
+    size_t face_index;   /**< Індекс у масиві faces (або SIZE_MAX — відсутній). */
 } font_fallback_map_t;
 
+/**
+ * @brief Стан механізму підстановки гліфів.
+ */
 typedef struct font_fallback {
-    char preferred[96];
-    double size_pt;
-    geom_units_t units;
-    font_fallback_face_t *faces;
-    size_t face_count;
-    size_t face_cap;
-    font_fallback_map_t *map;
-    size_t map_count;
-    size_t map_cap;
+    char preferred[96];           /**< Бажана родина. */
+    double size_pt;               /**< Кегль у пунктах. */
+    geom_units_t units;           /**< Вихідні одиниці. */
+    font_fallback_face_t *faces;  /**< Динамічний список підключених облич. */
+    size_t face_count;            /**< Кількість облич. */
+    size_t face_cap;              /**< Ємність масиву faces. */
+    font_fallback_map_t *map;     /**< Відображення кодових точок на обличчя. */
+    size_t map_count;             /**< Кількість записів map. */
+    size_t map_cap;               /**< Ємність масиву map. */
 } font_fallback_t;
 
+/**
+ * @brief Ініціалізує механізм підстановки для відсутніх гліфів.
+ * @param fallback [out] Структура стану.
+ * @param preferred_family Бажана родина (може бути NULL).
+ * @param size_pt Кегль у пунктах.
+ * @param units Вихідні одиниці.
+ * @return 0 — успіх, -1 — помилка.
+ */
 int font_fallback_init (
     font_fallback_t *fallback, const char *preferred_family, double size_pt, geom_units_t units);
 
+/**
+ * @brief Звільняє ресурси fallback-механізму.
+ * @param fallback Структура для очищення.
+ */
 void font_fallback_dispose (font_fallback_t *fallback);
 
+/**
+ * @brief Емітує контури гліфа з fallback-родинами.
+ * @param fallback Стан fallback.
+ * @param primary_ctx Первинний контекст рендерингу.
+ * @param codepoint Кодова точка Unicode.
+ * @param pen_x_units Поточна X-позиція пера (одиниці шрифту).
+ * @param baseline_mm Базова лінія (мм).
+ * @param out [out] Кінцеві шляхи.
+ * @param advance_units [out] Просування пера.
+ * @param used_family [out] Назва використаної родини.
+ */
 int font_fallback_emit (
     font_fallback_t *fallback,
     const font_render_context_t *primary_ctx,
@@ -151,39 +195,29 @@ int font_fallback_emit (
     const char **used_family);
 
 /**
- * Отримати список кодових точок, присутніх у шрифті.
- *
- * @param font       Шрифт.
- * @param out_codes  Вихід: масив кодових точок (malloc, сортування не гарантується).
- * @param out_count  Кількість елементів у масиві.
- * @return 0 успіх; -1 при помилці або некоректних аргументах.
+ * @brief Перелічує кодові точки, присутні в шрифті.
+ * @param font Обʼєкт шрифту.
+ * @param out_codes [out] Масив кодових точок (mallocʼиться всередині; викликальник звільняє).
+ * @param out_count [out] Кількість кодових точок.
+ * @return 0 — успіх, -1 — помилка.
  */
 int font_list_codepoints (const font_t *font, uint32_t **out_codes, size_t *out_count);
 
 /**
- * Звільнити ресурси шрифту.
- *
- * @param font Шрифт для звільнення (може бути NULL).
- * @return 0 при успіху.
+ * @brief Вивільняє обʼєкт шрифту та повʼязані ресурси.
+ * @param font Обʼєкт для знищення (може бути NULL).
+ * @return 0 — успіх.
  */
 int font_release (font_t *font);
 
 /**
- * @brief Розв'язати найкращий контекст рендерингу для бажаного стилю.
- *
- * Порядок підбору:
- *  - bold+italic → "<family> Bold Italic"; якщо немає, то Italic; якщо немає — Regular
- *  - italic      → "<family> Italic"; якщо немає — Regular
- *  - bold        → "<family> Bold";   якщо немає — Regular
- *  - none        → Regular ("<family>")
- *
- * @param preferred_family Дисплейна назва родини (напр., ctx.face.name).
- * @param size_pt          Кегль у пунктах.
- * @param units            Одиниці вихідних координат.
- * @param style_flags      Бітова маска з text.h (TEXT_STYLE_*).
- * @param out_ctx          Вихідний контекст (ініціалізується; викликач звільняє через
- *                         font_render_context_dispose()).
- * @return 0 при успіху; ненульове при помилці.
+ * @brief Розвʼязує стиль/родину у готовий контекст рендерингу.
+ * @param preferred_family Бажана родина (може бути NULL).
+ * @param size_pt Кегль у пунктах.
+ * @param units Вихідні одиниці.
+ * @param style_flags Біти стилю (TEXT_STYLE_*).
+ * @param out_ctx [out] Готовий контекст.
+ * @return 0 — успіх, -1 — помилка.
  */
 int font_style_context_resolve (
     const char *preferred_family,
@@ -196,4 +230,4 @@ int font_style_context_resolve (
 }
 #endif
 
-#endif /* FONT_H */
+#endif

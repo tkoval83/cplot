@@ -1,6 +1,7 @@
 /**
  * @file config.c
- * @brief Minimal JSON-backed persistent configuration implementation.
+ * @brief Реалізація читання/запису конфігурації та її валідації.
+ * @ingroup config
  */
 #include "config.h"
 
@@ -15,17 +16,18 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+/** Роздільник шляху у файловій системі. */
 #define PATH_SEP '/'
 
+/** Поточна версія формату конфігурації. */
 #define CONFIG_VERSION 4
 
 #include "log.h"
 
 /**
- * Перевірити, чи існує каталог за заданим шляхом.
- *
+ * @brief Перевіряє, чи існує директорія.
  * @param p Шлях до каталогу.
- * @return 1, якщо існує і це каталог; 0 інакше.
+ * @return 1 — існує, 0 — ні.
  */
 static int dir_exists (const char *p) {
     struct stat st;
@@ -35,10 +37,9 @@ static int dir_exists (const char *p) {
 }
 
 /**
- * Рекурсивно створити каталоги за шляхом (аналог `mkdir -p`).
- *
- * @param path Повний шлях до каталогу, який слід створити.
- * @return 0 у разі успіху; -1 при помилці.
+ * @brief Рекурсивно створює усі проміжні каталоги (аналог `mkdir -p`).
+ * @param path Повний шлях до каталогу/файлу.
+ * @return 0 — успіх, -1 — помилка створення.
  */
 static int mkdir_p (const char *path) {
     if (!path || !path[0])
@@ -68,6 +69,11 @@ static int mkdir_p (const char *path) {
     return 0;
 }
 
+/**
+ * @brief Записує рядок у JSON зі екрануванням.
+ * @param fp Файл.
+ * @param value Рядок (може бути NULL).
+ */
 static void json_write_string (FILE *fp, const char *value) {
     fputc ('"', fp);
     if (value) {
@@ -94,10 +100,9 @@ static void json_write_string (FILE *fp, const char *value) {
 }
 
 /**
- * Переконатися, що існує батьківський каталог для вказаного шляху файлу.
- *
- * @param path Повний шлях до файлу (не NULL).
- * @return 0, якщо каталог існує або створений; -1 при помилці.
+ * @brief Забезпечує існування батьківського каталогу для шляху.
+ * @param path Повний шлях до файлу.
+ * @return 0 — ок, -1 — помилка.
  */
 static int ensure_parent_dir (const char *path) {
     if (!path || !*path)
@@ -120,10 +125,10 @@ static int ensure_parent_dir (const char *path) {
 }
 
 /**
- * Заповнити структуру конфігурації типовими (заводськими) значеннями.
- *
- * @param c Вказівник на конфігурацію для ініціалізації (безпечно передавати NULL — нічого не
- * робить).
+ * @brief Заповнює конфіг значеннями за замовчуванням та застосовує профіль моделі.
+ * @param c [out] Конфігурація.
+ * @param device_model Модель (NULL — типова).
+ * @return 0 — успіх, -1 — помилка.
  */
 int config_factory_defaults (config_t *c, const char *device_model) {
     if (!c)
@@ -157,13 +162,10 @@ int config_factory_defaults (config_t *c, const char *device_model) {
 }
 
 /**
- * Визначити шлях до файлу конфігурації користувача.
- *
- * Повертає шлях за XDG_CONFIG_HOME, або $HOME/.config/cplot/config.json, або ./config.json.
- *
- * @param buf    Буфер для запису шляху.
- * @param buflen Розмір буфера в байтах.
- * @return 0 у разі успіху; -1, якщо буфер надто малий або buf==NULL.
+ * @brief Обчислює XDG-шлях до файлу конфігурації.
+ * @param buf [out] Буфер для шляху.
+ * @param buflen Довжина буфера.
+ * @return 0 — успіх, -1 — помилка/замалий буфер.
  */
 int config_get_path (char *buf, size_t buflen) {
     if (!buf || buflen < 8)
@@ -202,14 +204,10 @@ int config_get_path (char *buf, size_t buflen) {
 }
 
 /**
- * Дуже простий розбірник JSON для наших ключів.
- *
- * Використовує пошук підрядків і перетворення чисел; призначений лише для файлу
- * конфігурації цього застосунку.
- *
- * @param s Рядок JSON.
- * @param c Конфігурація для заповнення значеннями (не NULL).
- * @return 0 у разі успіху; -1 при некоректних вхідних параметрах.
+ * @brief Дуже простий парсер JSON (плоскі поля) для конфігурації.
+ * @param s Вміст JSON.
+ * @param c [out] Конфігурація.
+ * @return 0 — успіх, -1 — помилка.
  */
 static int parse_json (const char *s, config_t *c) {
     if (!s || !c)
@@ -352,11 +350,10 @@ static int parse_json (const char *s, config_t *c) {
 }
 
 /**
- * Записати конфігурацію у файл у форматі JSON.
- *
- * @param fp Відкритий файловий дескриптор для запису (у текстовому режимі).
- * @param c  Конфігурація для серіалізації (не NULL).
- * @return 0 у разі успіху; -1 при помилці в fprintf.
+ * @brief Записує конфігурацію у JSON-формат у файл.
+ * @param fp Відкритий файл для запису.
+ * @param c Конфігурація.
+ * @return 0 — успіх, -1 — помилка IO.
  */
 static int write_json (FILE *fp, const config_t *c) {
     int n = fprintf (
@@ -398,12 +395,11 @@ static int write_json (FILE *fp, const config_t *c) {
 }
 
 /**
- * Перевірити валідність значень конфігурації.
- *
- * @param c      Конфігурація для перевірки (не NULL).
- * @param err    Буфер для тексту помилки українською (може бути NULL).
- * @param errlen Розмір буфера помилки.
- * @return 0 — валідно; <0 — код помилки, а err (якщо надано) містить опис.
+ * @brief Перевіряє коректність значень конфігурації та межі.
+ * @param c Конфігурація.
+ * @param err [out] Повідомлення (може бути NULL).
+ * @param errlen Довжина буфера повідомлення.
+ * @return 0 — валідно, відʼємний код — помилка.
  */
 int config_validate (const config_t *c, char *err, size_t errlen) {
     if (!c)
@@ -471,13 +467,9 @@ int config_validate (const config_t *c, char *err, size_t errlen) {
 }
 
 /**
- * Завантажити конфігурацію з диску.
- *
- * За відсутності файлу повертає типові значення (factory defaults). Після
- * читання перевіряє валідність і за потреби повертає значення за замовчуванням.
- *
- * @param out Вказівник на конфігурацію для заповнення.
- * @return 0 у разі успіху; від'ємний код помилки інакше.
+ * @brief Завантажує конфігурацію з диска або застосовує типові значення.
+ * @param out [out] Конфігурація.
+ * @return 0 — успіх, відʼємний код — помилка IO/формату.
  */
 int config_load (config_t *out) {
     if (!out)
@@ -488,7 +480,7 @@ int config_load (config_t *out) {
         return -2;
     FILE *fp = fopen (path, "rb");
     if (!fp) {
-        /* no file: keep defaults */
+
         LOGI ("файл конфігурації не знайдено — використано типові значення");
         log_print (LOG_INFO, "конфігурація: файл %s відсутній — застосовано типові значення", path);
         return 0;
@@ -513,9 +505,9 @@ int config_load (config_t *out) {
     (void)parse_json (buf, out);
     free (buf);
     out->version = CONFIG_VERSION;
-    /* Validate */
+
     if (config_validate (out, NULL, 0) != 0) {
-        /* If invalid, fall back to factory */
+
         config_factory_defaults (out, CONFIG_DEFAULT_MODEL);
         LOGW ("конфігурацію визнано невалідною — застосовано значення за замовчуванням");
         log_print (LOG_WARN, "конфігурація: файл %s містив некоректні дані", path);
@@ -526,10 +518,9 @@ int config_load (config_t *out) {
 }
 
 /**
- * Зберегти конфігурацію на диск атомарно (через тимчасовий файл і rename).
- *
- * @param cfg Конфігурація для збереження (не NULL).
- * @return 0 у разі успіху; від'ємний код помилки інакше.
+ * @brief Зберігає конфігурацію як JSON у XDG-шляху.
+ * @param cfg Конфігурація.
+ * @return 0 — успіх, відʼємний код — помилка IO.
  */
 int config_save (const config_t *cfg) {
     if (!cfg)
@@ -541,7 +532,6 @@ int config_save (const config_t *cfg) {
     if (ensure_parent_dir (path) != 0)
         return -7;
 
-    /* Write to temp then rename */
     char tmp[576];
     snprintf (tmp, sizeof (tmp), "%s.tmp", path);
     FILE *fp = fopen (tmp, "wb");
@@ -575,9 +565,8 @@ int config_save (const config_t *cfg) {
 }
 
 /**
- * Скинути конфігурацію до заводських налаштувань та зберегти її.
- *
- * @return 0 у разі успіху; від'ємний код помилки інакше.
+ * @brief Скидає конфігурацію до типових значень і зберігає на диск.
+ * @return 0 — успіх, відʼємний код — помилка.
  */
 int config_reset (void) {
     config_t c;

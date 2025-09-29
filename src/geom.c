@@ -1,6 +1,10 @@
 /**
  * @file geom.c
- * @brief Реалізація базових операцій над колекціями геометричних шляхів.
+ * @brief Геометричні операції над шляхами та сегментами.
+ * @ingroup geom
+ * @details Реалізація примітивних операцій: керування памʼяттю контейнерів,
+ * трансформації (зсув/масштаб/обертання), конвертація одиниць, bbox, довжини
+ * та допоміжні утиліти (порівняння, хешування).
  */
 
 #include "geom.h"
@@ -11,8 +15,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** \brief FNV‑1a 64‑біт: початкове значення (offset basis). */
+#define GEOM_FNV64_OFFSET_BASIS 1469598103934665603ULL
+/** \brief FNV‑1a 64‑біт: множник (prime). */
+#define GEOM_FNV64_PRIME 1099511628211ULL
+/** \brief Кількість мікрометрів у 1 міліметрі (для квантування). */
+#define GEOM_MICROMETER_PER_MM 1000.0
+
 /**
- * @brief Звільнити ресурси одного геометричного шляху.
+ * @brief Звільняє внутрішні ресурси шляху.
+ * @param p Шлях; `NULL` ігнорується. Після виклику `p->pts==NULL`, `len==0`.
  */
 static void geom_path_free (geom_path_t *p) {
     if (!p)
@@ -24,11 +36,7 @@ static void geom_path_free (geom_path_t *p) {
 }
 
 /**
- * @brief Ініціалізувати колекцію шляхів порожнім станом.
- *
- * @param[out] ps    Структура шляхів.
- * @param units      Одиниці вимірювання координат.
- * @return 0 при успіху; -1 якщо ps == NULL.
+ * @copydoc geom_paths_init
  */
 int geom_paths_init (geom_paths_t *ps, geom_units_t units) {
     if (!ps)
@@ -41,7 +49,7 @@ int geom_paths_init (geom_paths_t *ps, geom_units_t units) {
 }
 
 /**
- * @brief Звільнити всі шляхи та обнулити структуру.
+ * @copydoc geom_paths_free
  */
 void geom_paths_free (geom_paths_t *ps) {
     if (!ps)
@@ -55,11 +63,7 @@ void geom_paths_free (geom_paths_t *ps) {
 }
 
 /**
- * @brief Ініціалізувати окремий шлях із попередньою місткістю.
- *
- * @param[out] p   Шлях для ініціалізації.
- * @param cap0     Початкова місткість (0 → без алокації).
- * @return 0 при успіху; -1 при помилці памʼяті або якщо p == NULL.
+ * @copydoc geom_path_init
  */
 int geom_path_init (geom_path_t *p, size_t cap0) {
     if (!p)
@@ -77,7 +81,7 @@ int geom_path_init (geom_path_t *p, size_t cap0) {
 }
 
 /**
- * @brief Забезпечити щонайменше `new_cap` точок у буфері шляху.
+ * @copydoc geom_path_reserve
  */
 int geom_path_reserve (geom_path_t *p, size_t new_cap) {
     if (!p)
@@ -96,7 +100,7 @@ int geom_path_reserve (geom_path_t *p, size_t new_cap) {
 }
 
 /**
- * @brief Забезпечити достатню кількість елементів у масиві шляхів.
+ * @copydoc geom_paths_reserve
  */
 int geom_paths_reserve (geom_paths_t *ps, size_t new_cap) {
     if (!ps)
@@ -117,7 +121,7 @@ int geom_paths_reserve (geom_paths_t *ps, size_t new_cap) {
 }
 
 /**
- * @brief Додати точку до шляху.
+ * @copydoc geom_path_push
  */
 int geom_path_push (geom_path_t *p, double x, double y) {
     if (!p)
@@ -131,7 +135,7 @@ int geom_path_push (geom_path_t *p, double x, double y) {
 }
 
 /**
- * @brief Додати новий шлях у колекцію (копіює вхідні точки).
+ * @copydoc geom_paths_push_path
  */
 int geom_paths_push_path (geom_paths_t *ps, const geom_point_t *pts, size_t len) {
     if (!ps || (len > 0 && !pts))
@@ -150,7 +154,7 @@ int geom_paths_push_path (geom_paths_t *ps, const geom_point_t *pts, size_t len)
 }
 
 /**
- * @brief Створити глибоку копію набору шляхів.
+ * @copydoc geom_paths_deep_copy
  */
 int geom_paths_deep_copy (const geom_paths_t *src, geom_paths_t *dst) {
     if (!src || !dst)
@@ -175,7 +179,11 @@ int geom_paths_deep_copy (const geom_paths_t *src, geom_paths_t *dst) {
 }
 
 /**
- * @brief Внутрішня утиліта: скопіювати шляхи з використанням `geom_paths_deep_copy`.
+ * @brief Клонує контейнер шляхів (внутрішня утиліта).
+ * @details Еквівалент `geom_paths_deep_copy` з копіюванням одиниць виміру.
+ * @param src Джерело.
+ * @param dst [out] Призначення.
+ * @return 0 — успіх; -1 — помилка аргументів або виділення памʼяті.
  */
 static int geom_paths_clone (const geom_paths_t *src, geom_paths_t *dst) {
     if (geom_paths_deep_copy (src, dst) != 0) {
@@ -187,7 +195,7 @@ static int geom_paths_clone (const geom_paths_t *src, geom_paths_t *dst) {
 }
 
 /**
- * @brief Перенести всі точки на вектор (dx, dy).
+ * @copydoc geom_paths_translate
  */
 int geom_paths_translate (const geom_paths_t *a, double dx, double dy, geom_paths_t *out) {
     if (!a || !out)
@@ -205,7 +213,7 @@ int geom_paths_translate (const geom_paths_t *a, double dx, double dy, geom_path
 }
 
 /**
- * @brief Масштабувати всі точки із коефіцієнтами `sx` і `sy`.
+ * @copydoc geom_paths_scale
  */
 int geom_paths_scale (const geom_paths_t *a, double sx, double sy, geom_paths_t *out) {
     if (!a || !out)
@@ -223,7 +231,7 @@ int geom_paths_scale (const geom_paths_t *a, double sx, double sy, geom_paths_t 
 }
 
 /**
- * @brief Повернути всі точки навколо центру `(cx, cy)` на заданий кут.
+ * @copydoc geom_paths_rotate
  */
 int geom_paths_rotate (
     const geom_paths_t *a, double radians, double cx, double cy, geom_paths_t *out) {
@@ -248,7 +256,7 @@ int geom_paths_rotate (
 }
 
 /**
- * @brief Обчислити обмежувальний прямокутник одного шляху.
+ * @copydoc geom_bbox_of_path
  */
 int geom_bbox_of_path (const geom_path_t *p, geom_bbox_t *out) {
     if (!p || !out || p->len == 0)
@@ -277,7 +285,7 @@ int geom_bbox_of_path (const geom_path_t *p, geom_bbox_t *out) {
 }
 
 /**
- * @brief Обчислити обмежувальний прямокутник множини шляхів.
+ * @copydoc geom_bbox_of_paths
  */
 int geom_bbox_of_paths (const geom_paths_t *ps, geom_bbox_t *out) {
     if (!ps || !out || ps->len == 0)
@@ -318,7 +326,7 @@ int geom_bbox_of_paths (const geom_paths_t *ps, geom_bbox_t *out) {
 }
 
 /**
- * @brief Обчислити довжину ламаної шляху.
+ * @copydoc geom_path_length
  */
 double geom_path_length (const geom_path_t *p) {
     if (!p || p->len < 2)
@@ -333,7 +341,7 @@ double geom_path_length (const geom_path_t *p) {
 }
 
 /**
- * @brief Обчислити сумарну довжину всіх шляхів.
+ * @copydoc geom_paths_length
  */
 double geom_paths_length (const geom_paths_t *ps) {
     if (!ps)
@@ -345,7 +353,7 @@ double geom_paths_length (const geom_paths_t *ps) {
 }
 
 /**
- * @brief Встановити одиниці вимірювання для колекції шляхів.
+ * @copydoc geom_paths_set_units
  */
 int geom_paths_set_units (geom_paths_t *ps, geom_units_t units) {
     if (!ps)
@@ -355,7 +363,10 @@ int geom_paths_set_units (geom_paths_t *ps, geom_units_t units) {
 }
 
 /**
- * @brief Отримати коефіцієнт перерахунку між одиницями довжини.
+ * @brief Обчислює коефіцієнт масштабування між одиницями виміру.
+ * @param from Джерельні одиниці.
+ * @param to Цільові одиниці.
+ * @return Множник, яким слід домножити координати.
  */
 static double unit_scale (geom_units_t from, geom_units_t to) {
     if (from == to)
@@ -368,7 +379,7 @@ static double unit_scale (geom_units_t from, geom_units_t to) {
 }
 
 /**
- * @brief Перевести шляхи у нові одиниці вимірювання.
+ * @copydoc geom_paths_convert
  */
 int geom_paths_convert (const geom_paths_t *a, geom_units_t to, geom_paths_t *out) {
     if (!a || !out)
@@ -390,7 +401,7 @@ int geom_paths_convert (const geom_paths_t *a, geom_units_t to, geom_paths_t *ou
 }
 
 /**
- * @brief Створити копію шляхів без зміни координат (зручна обгортка над clone).
+ * @copydoc geom_paths_normalize
  */
 int geom_paths_normalize (const geom_paths_t *a, geom_paths_t *out) {
     if (!a || !out)
@@ -399,7 +410,7 @@ int geom_paths_normalize (const geom_paths_t *a, geom_paths_t *out) {
 }
 
 /**
- * @brief Перевірити близькість двох точок із заданою толерантністю.
+ * @copydoc geom_point_eq
  */
 int geom_point_eq (const geom_point_t *a, const geom_point_t *b, double tol) {
     if (!a || !b)
@@ -408,22 +419,25 @@ int geom_point_eq (const geom_point_t *a, const geom_point_t *b, double tol) {
 }
 
 /**
- * @brief Обчислити FNV-1a-хеш шляхів, квантованих у мікроміліметрах.
+ * @copydoc geom_paths_hash_micro_mm
+ * @details Використовує FNV‑1a 64‑біт із константами
+ * GEOM_FNV64_OFFSET_BASIS та GEOM_FNV64_PRIME; координати квантуються
+ * до мікрометрів множенням на GEOM_MICROMETER_PER_MM та округленням.
  */
 uint64_t geom_paths_hash_micro_mm (const geom_paths_t *ps) {
     if (!ps)
         return 0;
-    uint64_t hash = 1469598103934665603ULL; /* FNV-1a offset */
-    const double scale = 1000.0;            /* мікроміліметри */
+    uint64_t hash = GEOM_FNV64_OFFSET_BASIS;
+    const double scale = GEOM_MICROMETER_PER_MM;
     for (size_t i = 0; i < ps->len; ++i) {
         const geom_path_t *p = &ps->items[i];
         for (size_t j = 0; j < p->len; ++j) {
             uint64_t xi = (uint64_t)llabs ((long long)llround (p->pts[j].x * scale));
             uint64_t yi = (uint64_t)llabs ((long long)llround (p->pts[j].y * scale));
             hash ^= xi;
-            hash *= 1099511628211ULL;
+            hash *= GEOM_FNV64_PRIME;
             hash ^= yi;
-            hash *= 1099511628211ULL;
+            hash *= GEOM_FNV64_PRIME;
         }
     }
     return hash;

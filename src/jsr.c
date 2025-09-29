@@ -1,6 +1,10 @@
 /**
  * @file jsr.c
- * @brief Мінімальні утиліти ЧИТАННЯ JSON: пошук значень та розекранування рядків.
+ * @brief Реалізація простого читача JSON.
+ * @ingroup jsr
+ * @details
+ * Мінімалістична реалізація пошуку та вилучення значень за ключами верхнього
+ * рівня без повної перевірки синтаксису JSON. Придатна для невеликих конфігів.
  */
 
 #include "jsr.h"
@@ -10,10 +14,7 @@
 #include <string.h>
 
 /**
- * Пропустити послідовність пробільних символів у JSON‑тексті.
- *
- * @param p Вказівник на початок ділянки для сканування.
- * @return Вказівник на перший непробільний символ (може вказувати на NUL).
+ * @copydoc json_skip_ws
  */
 const char *json_skip_ws (const char *p) {
     while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
@@ -22,15 +23,7 @@ const char *json_skip_ws (const char *p) {
 }
 
 /**
- * Знайти початок значення за іменем ключа у плоскому JSON‑об’єкті.
- *
- * Пошук виконується за першим входженням "key" у лапках, після чого очікується ':'
- * і саме значення. Пропуски навколо ':' і перед значенням пропускаються.
- *
- * @param json Повний JSON‑рядок.
- * @param key  Ім’я ключа (без лапок).
- * @return Вказівник на перший символ значення або NULL, якщо ключ не знайдено.
- * @note Це спрощений пошук без повної валідації структури JSON.
+ * @copydoc json_find_value
  */
 const char *json_find_value (const char *json, const char *key) {
     size_t klen = strlen (key);
@@ -50,16 +43,7 @@ const char *json_find_value (const char *json, const char *key) {
 }
 
 /**
- * Отримати сирий фрагмент значення для ключа як підрядок вхідного JSON.
- *
- * Функція враховує рядки та вкладені фігурні/квадратні дужки, щоб коректно
- * знайти межі значення, і зупиняється на комі верхнього рівня або закритті об’єкта.
- *
- * @param json     Повний JSON‑рядок.
- * @param key      Ім’я ключа (без лапок).
- * @param out_ptr  Вихід: початок фрагмента значення (всередину json).
- * @param out_len  Вихід: довжина фрагмента у байтах.
- * @return 1 при успіху, 0 якщо ключ не знайдено.
+ * @copydoc json_get_raw
  */
 int json_get_raw (const char *json, const char *key, const char **out_ptr, size_t *out_len) {
     const char *v = json_find_value (json, key);
@@ -103,16 +87,7 @@ int json_get_raw (const char *json, const char *key, const char **out_ptr, size_
 }
 
 /**
- * Прочитати рядкове значення за ключем і розекранувати стандартні послідовності.
- *
- * Підтримуються: \n, \r, \t, \", \\, \/, \uXXXX (спрощено → '?').
- * Пам’ять під результат виділяється через malloc() і повинна бути звільнена
- * викликачем через free().
- *
- * @param json     Повний JSON‑рядок.
- * @param key      Ім’я ключа (без лапок).
- * @param out_len  Вихід: довжина рядка без NUL (може бути NULL).
- * @return Вказівник на новий буфер або NULL, якщо ключ не знайдено чи значення не є рядком.
+ * @copydoc json_get_string
  */
 char *json_get_string (const char *json, const char *key, size_t *out_len) {
     const char *v = json_find_value (json, key);
@@ -126,6 +101,10 @@ char *json_get_string (const char *json, const char *key, size_t *out_len) {
     if (!buf)
         return NULL;
 
+/**
+ * \brief Локальний макрос гарантує достатню ємність буфера `buf`.
+ * @param extra Скільки додаткових байтів потрібно вмістити.
+ */
 #define ENSURE_CAP(extra)                                                                          \
     do {                                                                                           \
         if (len + (extra) >= cap) {                                                                \
@@ -202,12 +181,7 @@ fail:
 }
 
 /**
- * Прочитати булеве значення (true/false) за ключем.
- *
- * @param json    Повний JSON‑рядок.
- * @param key     Ім’я ключа (без лапок).
- * @param defval  Типове значення, що повертається у разі відсутності ключа або помилки.
- * @return 1 для true, 0 для false, або defval при неоднозначності.
+ * @copydoc json_get_bool
  */
 int json_get_bool (const char *json, const char *key, int defval) {
     const char *v = json_find_value (json, key);
@@ -221,12 +195,7 @@ int json_get_bool (const char *json, const char *key, int defval) {
 }
 
 /**
- * Прочитати число з плаваючою крапкою (double) за ключем.
- *
- * @param json    Повний JSON‑рядок.
- * @param key     Ім’я ключа (без лапок).
- * @param defval  Типове значення, що повертається при збої розбору або відсутності ключа.
- * @return Розібране значення або defval, якщо розбір неможливий.
+ * @copydoc json_get_double
  */
 double json_get_double (const char *json, const char *key, double defval) {
     const char *v = json_find_value (json, key);
