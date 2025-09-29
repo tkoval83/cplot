@@ -18,6 +18,54 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Внутрішні константи/хелпери для LowLevel-руху (EBB специфіка) */
+/** Період таймера EBB LowLevelMove, секунди (40 мкс). */
+static const double AXIDRAW_LL_INTERVAL_SEC = 0.00004;
+/** Масштаб для перетворення кроків/с у фіксовану частоту EBB. */
+static const double AXIDRAW_LL_RATE_SCALE = (2147483648.0 * 0.00004);
+
+/**
+ * @brief Перетворює швидкість у кроках/сек на фіксовану частоту EBB.
+ *
+ * Обчислення: `rate = steps_per_sec * (2^31 * 40µs)` із насиченням до діапазону
+ * 32‑бітного знакового цілого (використовується протоколом LowLevelMove). Невід’ємні
+ * та нечислові значення нормалізуються до нуля.
+ *
+ * @param steps_per_sec Позитивна швидкість у кроках за секунду.
+ * @return Беззнакове значення частоти для LM (0, якщо швидкість некоректна/нульова).
+ */
+static uint32_t ax_rate_from_steps_per_sec (double steps_per_sec) {
+    if (!(steps_per_sec > 0.0))
+        return 0u;
+    double rate = steps_per_sec * AXIDRAW_LL_RATE_SCALE;
+    if (!isfinite (rate) || rate < 0.0)
+        rate = 0.0;
+    if (rate > 2147483647.0)
+        rate = 2147483647.0;
+    return (uint32_t)llround (rate);
+}
+
+/**
+ * @brief Насичує значення до діапазону int32_t.
+ *
+ * Перетворює дійсне число у 32‑бітне ціле з насиченням: значення, що
+ * виходять за межі `INT32_MIN..INT32_MAX`, обрізаються до найближньої межі.
+ * Не число або нескінченність повертає 0.
+ *
+ * @param value Вхідне значення (double).
+ * @return Ціле зі зрізом до діапазону int32_t.
+ */
+static int32_t ax_clamp_i32 (double value) {
+    if (!isfinite (value))
+        return 0;
+    if (value > (double)INT32_MAX)
+        return INT32_MAX;
+    if (value < (double)INT32_MIN)
+        return INT32_MIN;
+    return (int32_t)llround (value);
+}
+
+
 #define AXIDRAW_DEFAULT_FIFO_LIMIT 3
 #define AXIDRAW_DEFAULT_MIN_INTERVAL_MS 5.0
 #define AXIDRAW_SERVO_MIN 7500
@@ -278,6 +326,108 @@ int axidraw_move_mm (axidraw_device_t *dev, double dx_mm, double dy_mm, double s
     double distance = hypot (dx_mm, dy_mm);
     uint32_t duration = duration_from_mm_speed (distance, speed);
     return axidraw_move_xy (dev, duration, steps_x, steps_y);
+}
+
+/**
+ * @brief Надсилає одну фазу LowLevel‑руху, конвертуючи швидкості в одиниці EBB.
+ *
+ * Обчислення виконується окремо для кожної осі (A і B):
+ * - Кількість інтервалів LL: intervals = round(duration_s / 40µs).
+ * - Оцінка кроків/мм у фазі: steps_per_mm = steps_axis / distance_mm.
+ * - Перетворення швидкостей: steps/s = |speed_mm_s| * steps_per_mm.
+ * - Швидкість у фіксованій комі EBB: rate = steps/s * (2^31 * 40µs), з насиченням до int32_t.
+ * - Прискорення у "rate/інтервал": accel = (rate_end - rate_start) / intervals, з насиченням
+ *   до int32_t; у разі нульового округлення, але різних rate, встановлюється ±1.
+ *
+ * Потім викликається `axidraw_move_lowlevel()` із розрахованими параметрами. Пристрій має бути
+ * підключений; інакше повертається помилка.
+ *
+ * @param dev Пристрій AxiDraw (підключений).
+ * @param distance_mm Довжина фази в міліметрах (>0).
+ * @param start_speed_mm_s Початкова швидкість (мм/с).
+ * @param end_speed_mm_s Кінцева швидкість (мм/с).
+ * @param steps_a Кроки вздовж осі A в межах фази (можуть бути відʼємні).
+ * @param steps_b Кроки вздовж осі B в межах фази (можуть бути відʼємні).
+ * @param duration_s Тривалість фази у секундах (>0).
+ * @return 0 — успіх; -1 — некоректні параметри або помилка відправлення/підключення.
+ */
+int axidraw_move_lowlevel_phase (
+    axidraw_device_t *dev,
+    double distance_mm,
+    double start_speed_mm_s,
+    double end_speed_mm_s,
+    int32_t steps_a,
+    int32_t steps_b,
+    double duration_s) {
+    if (!dev)
+        return -1;
+    if (!(duration_s > 0.0) || !(distance_mm > 0.0))
+        return -1;
+
+    uint32_t intervals = (uint32_t)llround (duration_s / AXIDRAW_LL_INTERVAL_SEC);
+    if (intervals == 0)
+        intervals = 1u;
+
+    uint32_t rate1 = 0u, rate2 = 0u;
+    int32_t accel1 = 0, accel2 = 0;
+
+    if (steps_a != 0) {
+        double steps_per_mm_a = (double)steps_a / distance_mm;
+        double start_rate_a = fabs (start_speed_mm_s * steps_per_mm_a);
+        double end_rate_a = fabs (end_speed_mm_s * steps_per_mm_a);
+        rate1 = ax_rate_from_steps_per_sec (start_rate_a);
+        uint32_t rate1_end = ax_rate_from_steps_per_sec (end_rate_a);
+        double accel_a = ((double)rate1_end - (double)rate1) / (double)intervals;
+        accel1 = ax_clamp_i32 (accel_a);
+        if (accel1 == 0 && rate1_end != rate1)
+            accel1 = (rate1_end > rate1) ? 1 : -1;
+    }
+
+    if (steps_b != 0) {
+        double steps_per_mm_b = (double)steps_b / distance_mm;
+        double start_rate_b = fabs (start_speed_mm_s * steps_per_mm_b);
+        double end_rate_b = fabs (end_speed_mm_s * steps_per_mm_b);
+        rate2 = ax_rate_from_steps_per_sec (start_rate_b);
+        uint32_t rate2_end = ax_rate_from_steps_per_sec (end_rate_b);
+        double accel_b = ((double)rate2_end - (double)rate2) / (double)intervals;
+        accel2 = ax_clamp_i32 (accel_b);
+        if (accel2 == 0 && rate2_end != rate2)
+            accel2 = (rate2_end > rate2) ? 1 : -1;
+    }
+
+    return axidraw_move_lowlevel (dev, rate1, steps_a, accel1, rate2, steps_b, accel2, 0);
+}
+
+/**
+ * @brief Відправляє фазу, задану у координатах X/Y, із внутрішнім мапінгом CoreXY.
+ *
+ * Виконує лінійне перетворення X/Y → A/B (CoreXY):
+ *   A = X + Y;  B = X − Y
+ *
+ * Далі делегує у `axidraw_phase_lowlevel()` для розрахунку швидкостей/прискорень та відправлення
+ * LowLevel‑команди. Див. документацію до `axidraw_phase_lowlevel()` для деталей розрахунків.
+ *
+ * @param dev Пристрій AxiDraw (підключений).
+ * @param distance_mm Довжина фази, мм (>0).
+ * @param start_speed_mm_s Початкова швидкість, мм/с.
+ * @param end_speed_mm_s Кінцева швидкість, мм/с.
+ * @param steps_x Кроки по X у межах фази.
+ * @param steps_y Кроки по Y у межах фази.
+ * @param duration_s Тривалість фази, с (>0).
+ * @return 0 — успіх; -1 — помилка параметрів або відправлення.
+ */
+int axidraw_move_lowlevel_phase_xy (
+    axidraw_device_t *dev,
+    double distance_mm,
+    double start_speed_mm_s,
+    double end_speed_mm_s,
+    int32_t steps_x,
+    int32_t steps_y,
+    double duration_s) {
+    int32_t steps_a = steps_x + steps_y;
+    int32_t steps_b = steps_x - steps_y;
+    return axidraw_move_lowlevel_phase (
+        dev, distance_mm, start_speed_mm_s, end_speed_mm_s, steps_a, steps_b, duration_s);
 }
 
 /**

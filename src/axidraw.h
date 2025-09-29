@@ -239,6 +239,47 @@ int axidraw_move_mm (axidraw_device_t *dev, double dx_mm, double dy_mm, double s
  */
 int32_t axidraw_mm_to_steps (const axidraw_device_t *dev, double mm);
 
+/**
+ * @brief Відправляє одну фазу руху у LowLevel режимі на основі параметрів фази.
+ * @param dev Пристрій (має бути підключений).
+ * @param distance_mm Довжина фази, мм (використовується для перетворення швидкості у кроки/с).
+ * @param start_speed_mm_s Початкова швидкість, мм/с.
+ * @param end_speed_mm_s Кінцева швидкість, мм/с.
+ * @param steps_a Кроки вздовж осі A у цій фазі.
+ * @param steps_b Кроки вздовж осі B у цій фазі.
+ * @param duration_s Тривалість фази, секунди.
+ * @return 0 — успіх; -1 — помилка або некоректні параметри.
+ */
+/* ===== Рух: фази LowLevel (Public API) ===== */
+int axidraw_move_lowlevel_phase (
+    axidraw_device_t *dev,
+    double distance_mm,
+    double start_speed_mm_s,
+    double end_speed_mm_s,
+    int32_t steps_a,
+    int32_t steps_b,
+    double duration_s);
+
+/**
+ * @brief Відправляє фазу руху у координатах X/Y (CoreXY мапінг всередині).
+ * @param dev Пристрій.
+ * @param distance_mm Довжина фази, мм.
+ * @param start_speed_mm_s Початкова швидкість, мм/с.
+ * @param end_speed_mm_s Кінцева швидкість, мм/с.
+ * @param steps_x Кроки по осі X у фазі.
+ * @param steps_y Кроки по осі Y у фазі.
+ * @param duration_s Тривалість фази, с.
+ * @return 0 — успіх; -1 — помилка.
+ */
+int axidraw_move_lowlevel_phase_xy (
+    axidraw_device_t *dev,
+    double distance_mm,
+    double start_speed_mm_s,
+    double end_speed_mm_s,
+    int32_t steps_x,
+    int32_t steps_y,
+    double duration_s);
+
 #ifdef __cplusplus
 }
 #endif

@@ -21,10 +21,6 @@
 #define STEPPER_EPS_MM 1e-6
 /** \brief Допуск для перевірки нульових швидкостей. */
 #define SPEED_EPS 1e-6
-/** \brief Період таймера EBB LowLevelMove, секунди (40 мкс). */
-#define LM_INTERVAL_SEC 0.00004
-/** \brief Масштаб для перетворення кроків/с у фіксовану частоту EBB. */
-#define LM_RATE_SCALE (2147483648.0 * LM_INTERVAL_SEC)
 
 /**
  * @brief Одна фаза руху всередині блоку (розгін/круїз/гальмування).
@@ -44,16 +40,7 @@ typedef struct {
 /**
  * @brief Перетворює кроки/с на EBB‑частоту у фіксованій комі.
  */
-static uint32_t rate_from_steps_per_sec (double steps_per_sec) {
-    if (!(steps_per_sec > 0.0))
-        return 0u;
-    double rate = steps_per_sec * LM_RATE_SCALE;
-    if (!isfinite (rate) || rate < 0.0)
-        rate = 0.0;
-    if (rate > 2147483647.0)
-        rate = 2147483647.0;
-    return (uint32_t)llround (rate);
-}
+/* конверсія кроків/с у пристрій‑специфічні величини перенесена до axidraw */
 
 /** \brief Безпечно зводить double до int32 з насиченням. */
 static int32_t clamp_i32 (double value) {
@@ -101,54 +88,21 @@ stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase, bool s
         return false;
     }
 
-    uint32_t intervals = (uint32_t)llround (duration_s / LM_INTERVAL_SEC);
-    if (intervals == 0)
-        intervals = 1;
-
-    uint32_t rate1 = 0u;
-    uint32_t rate2 = 0u;
-    int32_t accel1 = 0;
-    int32_t accel2 = 0;
-
-    if (phase->steps_a != 0) {
-        double steps_per_mm = (double)phase->steps_a / phase->distance_mm;
-        double start_rate = fabs (phase->start_speed_mm_s * steps_per_mm);
-        double end_rate = fabs (phase->end_speed_mm_s * steps_per_mm);
-        rate1 = rate_from_steps_per_sec (start_rate);
-        uint32_t rate1_end = rate_from_steps_per_sec (end_rate);
-        double accel = ((double)rate1_end - (double)rate1) / (double)intervals;
-        accel1 = clamp_i32 (accel);
-        if (accel1 == 0 && rate1_end != rate1)
-            accel1 = (rate1_end > rate1) ? 1 : -1;
-    }
-
-    if (phase->steps_b != 0) {
-        double steps_per_mm = (double)phase->steps_b / phase->distance_mm;
-        double start_rate = fabs (phase->start_speed_mm_s * steps_per_mm);
-        double end_rate = fabs (phase->end_speed_mm_s * steps_per_mm);
-        rate2 = rate_from_steps_per_sec (start_rate);
-        uint32_t rate2_end = rate_from_steps_per_sec (end_rate);
-        double accel = ((double)rate2_end - (double)rate2) / (double)intervals;
-        accel2 = clamp_i32 (accel);
-        if (accel2 == 0 && rate2_end != rate2)
-            accel2 = (rate2_end > rate2) ? 1 : -1;
-    }
-
     const char *mode = (send_command && ctx->cfg.dev != NULL) ? "відправка" : "імітація";
     log_print (
         LOG_DEBUG,
         "крокувач.фаза: блок №%lu фаза %zu/%zu режим=%s відстань=%.4f початок=%.3f кінець=%.3f "
-        "крокиA=%d крокиB=%d швидкістьA=%u прискоренняA=%d швидкістьB=%u прискоренняB=%d "
-        "інтервалів=%u тривалість=%.4f",
+        "крокиA=%d крокиB=%d тривалість=%.4f",
         phase->block_seq, phase->phase_index + 1, phase->phase_count, mode, phase->distance_mm,
-        phase->start_speed_mm_s, phase->end_speed_mm_s, phase->steps_a, phase->steps_b, rate1,
-        accel1, rate2, accel2, intervals, duration_s);
+        phase->start_speed_mm_s, phase->end_speed_mm_s, phase->steps_a, phase->steps_b,
+        duration_s);
 
     if (!send_command || ctx->cfg.dev == NULL)
         return true;
 
-    int rc = axidraw_move_lowlevel (
-        ctx->cfg.dev, rate1, phase->steps_a, accel1, rate2, phase->steps_b, accel2, 0);
+    int rc = axidraw_move_lowlevel_phase_xy (
+        ctx->cfg.dev, phase->distance_mm, phase->start_speed_mm_s, phase->end_speed_mm_s,
+        phase->steps_a, phase->steps_b, duration_s);
     if (rc != 0) {
         LOGE ("Не вдалося відправити рух до пристрою (код %d)", rc);
 #ifdef DEBUG
@@ -200,11 +154,9 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
     if (block->length_mm < STEPPER_EPS_MM)
         return true;
 
-    int32_t steps_x = 0;
-    int32_t steps_y = 0;
-    mm_to_steps (ctx, block, &steps_x, &steps_y);
-    int32_t steps_a_total = steps_x + steps_y;
-    int32_t steps_b_total = steps_x - steps_y;
+    int32_t steps_x_total = 0;
+    int32_t steps_y_total = 0;
+    mm_to_steps (ctx, block, &steps_x_total, &steps_y_total);
 
     stepper_phase_t phases[3];
     size_t phase_count = 0;
@@ -256,22 +208,22 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
 
     double total_length = block->length_mm;
     double total_duration_s = 0.0;
-    int64_t used_steps_a = 0;
-    int64_t used_steps_b = 0;
+    int64_t used_steps_x = 0;
+    int64_t used_steps_y = 0;
 
     for (size_t i = 0; i < phase_count; ++i) {
         stepper_phase_t *phase = &phases[i];
         double fraction
             = (total_length > STEPPER_EPS_MM) ? (phase->distance_mm / total_length) : 0.0;
         if (i + 1 == phase_count) {
-            phase->steps_a = steps_a_total - (int32_t)used_steps_a;
-            phase->steps_b = steps_b_total - (int32_t)used_steps_b;
+            phase->steps_a = steps_x_total - (int32_t)used_steps_x;
+            phase->steps_b = steps_y_total - (int32_t)used_steps_y;
         } else {
-            phase->steps_a = clamp_i32 ((double)steps_a_total * fraction);
-            phase->steps_b = clamp_i32 ((double)steps_b_total * fraction);
+            phase->steps_a = clamp_i32 ((double)steps_x_total * fraction);
+            phase->steps_b = clamp_i32 ((double)steps_y_total * fraction);
         }
-        used_steps_a += phase->steps_a;
-        used_steps_b += phase->steps_b;
+        used_steps_x += phase->steps_a;
+        used_steps_y += phase->steps_b;
 
         double duration
             = phase_duration_s (phase->distance_mm, phase->start_speed_mm_s, phase->end_speed_mm_s);
@@ -293,8 +245,8 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
         "Крокувач: блок %lu зміщення=(%.3f,%.3f) довжина=%.3f перо=%s", block->seq,
         block->delta_mm[0], block->delta_mm[1], block->length_mm, block->pen_down ? "так" : "ні");
     LOGD (
-        "Крокувач: кроки X=%d Y=%d A=%d B=%d, тривалість≈%u мс", steps_x, steps_y, steps_a_total,
-        steps_b_total, approx_duration_ms);
+        "Крокувач: кроки X=%d Y=%d, тривалість≈%u мс", steps_x_total, steps_y_total,
+        approx_duration_ms);
     log_print (
         LOG_DEBUG, "крокувач: блок=%lu довжина=%.3f крейсер=%.3f кількість_фаз=%zu", block->seq,
         block->length_mm, block->cruise_speed_mm_s, phase_count);
