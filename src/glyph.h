@@ -28,8 +28,8 @@ typedef struct glyph glyph_t;
  * Базова інформація про гліф.
  */
 typedef struct glyph_info {
-    uint32_t codepoint;     /**< Юнікод кодова точка гліфа. */
-    double advance_width;   /**< Просування пера після гліфа (од. шрифту). */
+    uint32_t codepoint;   /**< Юнікод кодова точка гліфа. */
+    double advance_width; /**< Просування пера після гліфа (од. шрифту). */
 } glyph_info_t;
 
 /**

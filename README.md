@@ -99,7 +99,7 @@ bin/cplot fonts --font-family   # лише родини
 - `--output PATH` — з `--preview`: зберегти у файл замість stdout
 - `--format markdown` — інтерпретувати вхід як Markdown
 
-Примітка: у поточній версії `print` не надсилає дані на пристрій; використовуються попередній перегляд та перевірка розкладки.
+Примітка: `print` надсилає траєкторію на пристрій (якщо підключено). Для перевірки без обладнання скористайтесь `--preview` (SVG/PNG) або `--dry-run`.
 
 ### device — робота з AxiDraw через EBB
 
@@ -191,4 +191,3 @@ bin/cplot device list
 - Генерація документації Doxygen (HTML):
   - `make docs` (потрібен `doxygen` у PATH)
   - Вихід: `docs/api/html/index.html`
-

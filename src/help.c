@@ -164,8 +164,8 @@ static int add_group_marker (const char *group_key, const char **printed, size_t
  * @param printed_count Кількість елементів у `printed`.
  * @return 1 — вже надрукована; 0 — ще ні.
  */
-static int group_already_printed (
-    const char *group_key, const char **printed, size_t printed_count) {
+static int
+group_already_printed (const char *group_key, const char **printed, size_t printed_count) {
     if (!group_key)
         group_key = "";
     for (size_t i = 0; i < printed_count; ++i) {

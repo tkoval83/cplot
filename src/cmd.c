@@ -36,7 +36,10 @@
 #include "proginfo.h"
 #include "svg.h"
 
+#include "canvas.h"
+#include "plot.h"
 #include "serial.h"
+#include "stepper.h"
 #include "str.h"
 #include <ctype.h>
 #include <glob.h>
@@ -487,8 +490,9 @@ static int device_home_cb (axidraw_device_t *dev, void *ctx) {
     double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 150.0;
     double steps_per_mm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
     if (!(steps_per_mm > 0.0)) {
-        LOGE ("Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
-              "позицію");
+        LOGE (
+            "Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
+            "позицію");
         return -1;
     }
     double steps_per_sec = speed * steps_per_mm;
@@ -1719,8 +1723,10 @@ cmd_result_t cmd_print_execute (
             return 1;
         }
         geom_paths_free (&md_paths);
+
+        int rc = plot_canvas_execute (&layout_info.layout, model, dry_run, verbose);
         drawing_layout_dispose (&layout_info);
-        return 0;
+        return rc;
     } else {
         drawing_layout_t layout_info = { 0 };
         if (drawing_build_layout (&page, family, font_size, input, &layout_info) != 0)
@@ -1744,8 +1750,9 @@ cmd_result_t cmd_print_execute (
                     return 1;
             }
         }
+        int rc = plot_canvas_execute (&layout_info.layout, model, dry_run, verbose);
         drawing_layout_dispose (&layout_info);
-        return 0;
+        return rc;
     }
 }
 

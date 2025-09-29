@@ -69,16 +69,16 @@ typedef enum {
  * @brief Опції верстки текстового блоку.
  */
 typedef struct {
-    const char *family;     /**< Базова родина шрифту. */
-    double size_pt;         /**< Кегль у пунктах. */
-    unsigned style_flags;   /**< Базові стилі (`TEXT_STYLE_*`). */
-    geom_units_t units;     /**< Одиниці вихідних контурів. */
+    const char *family;   /**< Базова родина шрифту. */
+    double size_pt;       /**< Кегль у пунктах. */
+    unsigned style_flags; /**< Базові стилі (`TEXT_STYLE_*`). */
+    geom_units_t units;   /**< Одиниці вихідних контурів. */
 
-    double frame_width;     /**< Ширина рамки для переносу рядків (у відповідних одиницях). */
-    text_align_t align;     /**< Вирівнювання рядків. */
-    int hyphenate;          /**< Дозволити перенос по дефісу (1/0). */
-    double line_spacing;    /**< Множник міжрядкового інтервалу (1.0..). */
-    int break_long_words;   /**< Примусово ламати надто довгі слова (1/0). */
+    double frame_width;   /**< Ширина рамки для переносу рядків (у відповідних одиницях). */
+    text_align_t align;   /**< Вирівнювання рядків. */
+    int hyphenate;        /**< Дозволити перенос по дефісу (1/0). */
+    double line_spacing;  /**< Множник міжрядкового інтервалу (1.0..). */
+    int break_long_words; /**< Примусово ламати надто довгі слова (1/0). */
 } text_layout_opts_t;
 
 /**

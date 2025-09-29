@@ -65,7 +65,6 @@ static int32_t ax_clamp_i32 (double value) {
     return (int32_t)llround (value);
 }
 
-
 #define AXIDRAW_DEFAULT_FIFO_LIMIT 3
 #define AXIDRAW_DEFAULT_MIN_INTERVAL_MS 5.0
 #define AXIDRAW_SERVO_MIN 7500

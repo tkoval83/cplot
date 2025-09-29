@@ -23,14 +23,14 @@ extern "C" {
  * @brief Конфігурація крокувача.
  */
 typedef struct {
-    axidraw_device_t *dev;   /**< Відкритий пристрій AxiDraw або `NULL` для dry‑run. */
+    axidraw_device_t *dev; /**< Відкритий пристрій AxiDraw або `NULL` для dry‑run. */
 } stepper_config_t;
 
 /**
  * @brief Поточний стан крокувача.
  */
 typedef struct {
-    stepper_config_t cfg;     /**< Активна конфігурація. */
+    stepper_config_t cfg;         /**< Активна конфігурація. */
     unsigned long emitted_blocks; /**< Лічильник успішно оброблених блоків. */
 } stepper_context_t;
 

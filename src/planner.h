@@ -22,10 +22,11 @@ extern "C" {
  * @brief Глобальні обмеження для планування рухів.
  */
 typedef struct {
-    double max_speed_mm_s;        /**< Максимальна лінійна швидкість, мм/с. */
-    double max_accel_mm_s2;       /**< Максимальне прискорення, мм/с². */
-    double cornering_distance_mm; /**< Ефективна довжина заокруглення на стиках, мм. 0 — жорстка зупинка. */
-    double min_segment_mm;        /**< Мінімальна довжина сегмента; коротші можуть зливатися, мм. */
+    double max_speed_mm_s;  /**< Максимальна лінійна швидкість, мм/с. */
+    double max_accel_mm_s2; /**< Максимальне прискорення, мм/с². */
+    double cornering_distance_mm; /**< Ефективна довжина заокруглення на стиках, мм. 0 — жорстка
+                                     зупинка. */
+    double min_segment_mm; /**< Мінімальна довжина сегмента; коротші можуть зливатися, мм. */
 } planner_limits_t;
 
 /**
@@ -41,19 +42,19 @@ typedef struct {
  * @brief Розкладений блок плану з профілями швидкості.
  */
 typedef struct {
-    unsigned long seq;       /**< Порядковий номер блоку (зростаючий). */
-    double delta_mm[2];      /**< Вектор зміщення (X,Y) у мм. */
-    double length_mm;        /**< Довжина сегмента у мм. */
-    double unit_vec[2];      /**< Одиничний напрямний вектор (X,Y). */
-    double start_speed_mm_s; /**< Швидкість на початку сегмента, мм/с. */
-    double cruise_speed_mm_s;/**< Крейсерська швидкість (плато), мм/с. */
-    double end_speed_mm_s;   /**< Швидкість у кінці сегмента, мм/с. */
-    double nominal_speed_mm_s;/**< Номінальна (обмежена feed/лімітами) швидкість, мм/с. */
-    double accel_mm_s2;      /**< Використане прискорення/гальмування, мм/с². */
-    double accel_distance_mm;/**< Довжина розгону, мм. */
-    double cruise_distance_mm;/**< Довжина крейсерської ділянки, мм. */
-    double decel_distance_mm;/**< Довжина гальмування, мм. */
-    bool pen_down;           /**< Стан пера для сегмента. */
+    unsigned long seq;         /**< Порядковий номер блоку (зростаючий). */
+    double delta_mm[2];        /**< Вектор зміщення (X,Y) у мм. */
+    double length_mm;          /**< Довжина сегмента у мм. */
+    double unit_vec[2];        /**< Одиничний напрямний вектор (X,Y). */
+    double start_speed_mm_s;   /**< Швидкість на початку сегмента, мм/с. */
+    double cruise_speed_mm_s;  /**< Крейсерська швидкість (плато), мм/с. */
+    double end_speed_mm_s;     /**< Швидкість у кінці сегмента, мм/с. */
+    double nominal_speed_mm_s; /**< Номінальна (обмежена feed/лімітами) швидкість, мм/с. */
+    double accel_mm_s2;        /**< Використане прискорення/гальмування, мм/с². */
+    double accel_distance_mm;  /**< Довжина розгону, мм. */
+    double cruise_distance_mm; /**< Довжина крейсерської ділянки, мм. */
+    double decel_distance_mm;  /**< Довжина гальмування, мм. */
+    bool pen_down;             /**< Стан пера для сегмента. */
 } plan_block_t;
 
 /**
@@ -62,7 +63,8 @@ typedef struct {
  * @param start_position_mm Початкова позиція (X,Y) у мм; може бути `NULL` (вважається 0,0).
  * @param segments Масив вхідних сегментів.
  * @param segment_count Кількість елементів у `segments`.
- * @param out_blocks [out] Вказівник на масив результатних блоків (виділяється всередині; звільняє викликач через `free`).
+ * @param out_blocks [out] Вказівник на масив результатних блоків (виділяється всередині; звільняє
+ * викликач через `free`).
  * @param out_count [out] Кількість блоків у масиві `out_blocks`.
  * @return true — успіх; false — помилка параметрів або виділення памʼяті.
  */

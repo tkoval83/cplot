@@ -110,8 +110,8 @@ static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *o
 
 /** \brief Запис підрахунку використання гліфів родини шрифту. */
 typedef struct {
-    char name[96];  /**< Назва родини. */
-    size_t glyphs;  /**< Кількість гліфів, відрендерених цією родиною. */
+    char name[96]; /**< Назва родини. */
+    size_t glyphs; /**< Кількість гліфів, відрендерених цією родиною. */
 } font_usage_entry_t;
 
 /** \brief Підсумкова статистика використання родин шрифтів. */

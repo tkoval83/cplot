@@ -250,7 +250,6 @@ int32_t axidraw_mm_to_steps (const axidraw_device_t *dev, double mm);
  * @param duration_s Тривалість фази, секунди.
  * @return 0 — успіх; -1 — помилка або некоректні параметри.
  */
-/* ===== Рух: фази LowLevel (Public API) ===== */
 int axidraw_move_lowlevel_phase (
     axidraw_device_t *dev,
     double distance_mm,

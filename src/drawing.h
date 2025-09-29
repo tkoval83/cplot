@@ -42,17 +42,17 @@ typedef struct {
  * @brief Підтримувані кодування рядків вводу.
  */
 typedef enum {
-    STR_ENC_UTF8 = 0,  /**< Вхідний текст — UTF-8. */
-    STR_ENC_ASCII = 1  /**< Вхідний текст — ASCII. */
+    STR_ENC_UTF8 = 0, /**< Вхідний текст — UTF-8. */
+    STR_ENC_ASCII = 1 /**< Вхідний текст — ASCII. */
 } string_encoding_t;
 
 /**
  * @brief Представлення рядка без копіювання.
  */
 typedef struct string_view {
-    const char *chars;       /**< Вказівник на символи (може не бути завершено \0). */
-    size_t len;              /**< Довжина у байтах. */
-    string_encoding_t enc;   /**< Кодування. */
+    const char *chars;     /**< Вказівник на символи (може не бути завершено \0). */
+    size_t len;            /**< Довжина у байтах. */
+    string_encoding_t enc; /**< Кодування. */
 } string_t;
 
 /**
@@ -118,11 +118,6 @@ int drawing_preview_png (const drawing_layout_t *layout, bytes_t *out);
  * @param out_count [out] Кількість блоків.
  * @return 0 — успіх, інакше помилка.
  */
-int drawing_generate_motion_plan (
-    const drawing_layout_t *layout,
-    const planner_limits_t *limits,
-    plan_block_t **out_blocks,
-    size_t *out_count);
 
 #ifdef __cplusplus
 }

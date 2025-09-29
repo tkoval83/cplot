@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "geom.h"
+#include "planner.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +67,20 @@ canvas_status_t canvas_layout_document (
  * @param layout Макет, отриманий з canvas_layout_document().
  */
 void canvas_layout_dispose (canvas_layout_t *layout);
+
+/**
+ * @brief Генерує план руху (послідовність блоків) із фінальних шляхів полотна.
+ * @param layout Макет полотна з нормалізованими шляхами у мм.
+ * @param limits Обмеження планувальника (NULL — з конфігурації профілю).
+ * @param out_blocks [out] Масив блоків (malloc; викликач звільняє через free).
+ * @param out_count [out] Кількість блоків.
+ * @return 0 — успіх, 1 — помилка параметрів/виділення.
+ */
+int canvas_generate_motion_plan (
+    const canvas_layout_t *layout,
+    const planner_limits_t *limits,
+    plan_block_t **out_blocks,
+    size_t *out_count);
 
 #ifdef __cplusplus
 }

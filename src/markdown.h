@@ -23,9 +23,9 @@ extern "C" {
  * @brief Опції рендерингу Markdown.
  */
 typedef struct markdown_opts {
-    const char *family;      /**< Родина шрифтів Hershey для тексту (може бути `NULL`). */
-    double base_size_pt;     /**< Базовий кегль у пунктах; якщо <=0 — використовується 14 pt. */
-    double frame_width_mm;   /**< Ширина кадру для переносу рядків (мм). */
+    const char *family;    /**< Родина шрифтів Hershey для тексту (може бути `NULL`). */
+    double base_size_pt;   /**< Базовий кегль у пунктах; якщо <=0 — використовується 14 pt. */
+    double frame_width_mm; /**< Ширина кадру для переносу рядків (мм). */
 } markdown_opts_t;
 
 /**

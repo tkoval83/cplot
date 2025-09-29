@@ -27,25 +27,25 @@ typedef struct font font_t;
  * @brief Базові метрики шрифту в одиницях шрифту.
  */
 typedef struct font_metrics {
-    double units_per_em;  /**< Кількість одиниць шрифту на ем. */
-    double ascent;        /**< Висота над базовою лінією. */
-    double descent;       /**< Глибина під базовою лінією (відʼємне або додатне значення). */
-    double cap_height;    /**< Висота прописних літер. */
-    double x_height;      /**< Висота малих літер (x-height). */
+    double units_per_em; /**< Кількість одиниць шрифту на ем. */
+    double ascent;       /**< Висота над базовою лінією. */
+    double descent;      /**< Глибина під базовою лінією (відʼємне або додатне значення). */
+    double cap_height;   /**< Висота прописних літер. */
+    double x_height;     /**< Висота малих літер (x-height). */
 } font_metrics_t;
 
 /**
  * @brief Контекст рендерингу для конкретного обличчя/розміру шрифту.
  */
 typedef struct font_render_context {
-    font_face_t face;              /**< Обране обличчя (джерело файлу). */
-    font_t *font;                  /**< Завантажений шрифт. */
-    font_metrics_t metrics;        /**< Метрики обличчя. */
-    double scale;                  /**< Масштаб одиниць шрифту → вибрані одиниці (мм/дюйми). */
-    double line_height_units;      /**< Рекомендований інтерліньяж у одиницях шрифту. */
-    double space_advance_units;    /**< Ширина пробілу (advance), од. шрифту. */
-    double hyphen_advance_units;   /**< Ширина дефісу (advance), од. шрифту. */
-    geom_units_t units;            /**< Вихідні одиниці (GEOM_UNITS_*) для контурів. */
+    font_face_t face;            /**< Обране обличчя (джерело файлу). */
+    font_t *font;                /**< Завантажений шрифт. */
+    font_metrics_t metrics;      /**< Метрики обличчя. */
+    double scale;                /**< Масштаб одиниць шрифту → вибрані одиниці (мм/дюйми). */
+    double line_height_units;    /**< Рекомендований інтерліньяж у одиницях шрифту. */
+    double space_advance_units;  /**< Ширина пробілу (advance), од. шрифту. */
+    double hyphen_advance_units; /**< Ширина дефісу (advance), од. шрифту. */
+    geom_units_t units;          /**< Вихідні одиниці (GEOM_UNITS_*) для контурів. */
 } font_render_context_t;
 
 /**
@@ -129,31 +129,31 @@ void font_render_context_dispose (font_render_context_t *ctx);
  * @brief Обличчя для fallback-рендерингу.
  */
 typedef struct font_fallback_face {
-    char face_id[64];             /**< Ідентифікатор обличчя. */
-    font_render_context_t ctx;    /**< Контекст рендерингу для цього обличчя. */
+    char face_id[64];          /**< Ідентифікатор обличчя. */
+    font_render_context_t ctx; /**< Контекст рендерингу для цього обличчя. */
 } font_fallback_face_t;
 
 /**
  * @brief Мапа кодових точок на індекс обличчя у fallback-списку.
  */
 typedef struct font_fallback_map {
-    uint32_t codepoint;  /**< Кодова точка. */
-    size_t face_index;   /**< Індекс у масиві faces (або SIZE_MAX — відсутній). */
+    uint32_t codepoint; /**< Кодова точка. */
+    size_t face_index;  /**< Індекс у масиві faces (або SIZE_MAX — відсутній). */
 } font_fallback_map_t;
 
 /**
  * @brief Стан механізму підстановки гліфів.
  */
 typedef struct font_fallback {
-    char preferred[96];           /**< Бажана родина. */
-    double size_pt;               /**< Кегль у пунктах. */
-    geom_units_t units;           /**< Вихідні одиниці. */
-    font_fallback_face_t *faces;  /**< Динамічний список підключених облич. */
-    size_t face_count;            /**< Кількість облич. */
-    size_t face_cap;              /**< Ємність масиву faces. */
-    font_fallback_map_t *map;     /**< Відображення кодових точок на обличчя. */
-    size_t map_count;             /**< Кількість записів map. */
-    size_t map_cap;               /**< Ємність масиву map. */
+    char preferred[96];          /**< Бажана родина. */
+    double size_pt;              /**< Кегль у пунктах. */
+    geom_units_t units;          /**< Вихідні одиниці. */
+    font_fallback_face_t *faces; /**< Динамічний список підключених облич. */
+    size_t face_count;           /**< Кількість облич. */
+    size_t face_cap;             /**< Ємність масиву faces. */
+    font_fallback_map_t *map;    /**< Відображення кодових точок на обличчя. */
+    size_t map_count;            /**< Кількість записів map. */
+    size_t map_cap;              /**< Ємність масиву map. */
 } font_fallback_t;
 
 /**

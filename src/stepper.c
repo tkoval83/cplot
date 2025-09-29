@@ -26,21 +26,16 @@
  * @brief Одна фаза руху всередині блоку (розгін/круїз/гальмування).
  */
 typedef struct {
-    double distance_mm;        /**< Довжина цієї фази, мм. */
-    double start_speed_mm_s;   /**< Початкова швидкість, мм/с. */
-    double end_speed_mm_s;     /**< Кінцева швидкість, мм/с. */
-    int32_t steps_a;           /**< Кроки на вісь A у фазі. */
-    int32_t steps_b;           /**< Кроки на вісь B у фазі. */
-    double duration_s;         /**< Тривалість фази, с. */
-    unsigned long block_seq;   /**< Порядковий номер блоку. */
-    size_t phase_index;        /**< Індекс фази в межах блоку. */
-    size_t phase_count;        /**< Кількість фаз у блоці. */
+    double distance_mm;      /**< Довжина цієї фази, мм. */
+    double start_speed_mm_s; /**< Початкова швидкість, мм/с. */
+    double end_speed_mm_s;   /**< Кінцева швидкість, мм/с. */
+    int32_t steps_a;         /**< Кроки на вісь A у фазі. */
+    int32_t steps_b;         /**< Кроки на вісь B у фазі. */
+    double duration_s;       /**< Тривалість фази, с. */
+    unsigned long block_seq; /**< Порядковий номер блоку. */
+    size_t phase_index;      /**< Індекс фази в межах блоку. */
+    size_t phase_count;      /**< Кількість фаз у блоці. */
 } stepper_phase_t;
-
-/**
- * @brief Перетворює кроки/с на EBB‑частоту у фіксованій комі.
- */
-/* конверсія кроків/с у пристрій‑специфічні величини перенесена до axidraw */
 
 /** \brief Безпечно зводить double до int32 з насиченням. */
 static int32_t clamp_i32 (double value) {
@@ -94,8 +89,7 @@ stepper_emit_phase (stepper_context_t *ctx, const stepper_phase_t *phase, bool s
         "крокувач.фаза: блок №%lu фаза %zu/%zu режим=%s відстань=%.4f початок=%.3f кінець=%.3f "
         "крокиA=%d крокиB=%d тривалість=%.4f",
         phase->block_seq, phase->phase_index + 1, phase->phase_count, mode, phase->distance_mm,
-        phase->start_speed_mm_s, phase->end_speed_mm_s, phase->steps_a, phase->steps_b,
-        duration_s);
+        phase->start_speed_mm_s, phase->end_speed_mm_s, phase->steps_a, phase->steps_b, duration_s);
 
     if (!send_command || ctx->cfg.dev == NULL)
         return true;
@@ -129,15 +123,16 @@ void stepper_init (stepper_context_t *ctx, const stepper_config_t *cfg) {
 
 /** \brief Конвертує зміщення блоку у кроки по осях X/Y через AxiDraw. */
 static void mm_to_steps (
-    const stepper_context_t *ctx, const plan_block_t *block, int32_t *steps_x_out,
+    const stepper_context_t *ctx,
+    const plan_block_t *block,
+    int32_t *steps_x_out,
     int32_t *steps_y_out) {
     int32_t sx = 0, sy = 0;
     if (ctx && ctx->cfg.dev) {
         sx = axidraw_mm_to_steps (ctx->cfg.dev, block->delta_mm[0]);
         sy = axidraw_mm_to_steps (ctx->cfg.dev, block->delta_mm[1]);
     } else {
-        LOGE (
-            "крокувач: відсутній пристрій для конвертації мм→кроки (потрібен профіль пристрою)");
+        LOGE ("крокувач: відсутній пристрій для конвертації мм→кроки (потрібен профіль пристрою)");
     }
     if (steps_x_out)
         *steps_x_out = sx;

@@ -455,7 +455,8 @@ static int read_entire_file (const char *path, char **out_data, size_t *out_len)
  * @param out_len [out] Довжина сегмента.
  * @return 0 — знайдено; 1 — не знайдено; <0 — помилка.
  */
-static int find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
+static int
+find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
     if (!data || !tag || !out_start || !out_len)
         return -2;
     const char *start = strstr (data, tag);
@@ -480,7 +481,8 @@ static int find_tag_segment (const char *data, const char *tag, const char **out
  * @param out_value [out] Скопійоване значення (mallocʼиться) або NULL, якщо відсутній.
  * @return 0 — знайдено; 1 — відсутній; <0 — помилка.
  */
-static int extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
+static int
+extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
     if (!segment || !attr || !out_value)
         return -2;
     size_t attr_len = strlen (attr);
@@ -518,8 +520,8 @@ static int extract_attribute (const char *segment, size_t seg_len, const char *a
 /**
  * @brief Зчитує число подвійної точності з атрибута або повертає запасне значення.
  */
-static double parse_double_with_default (
-    const char *segment, size_t seg_len, const char *attr, double fallback) {
+static double
+parse_double_with_default (const char *segment, size_t seg_len, const char *attr, double fallback) {
     char *value = NULL;
     double result = fallback;
     int rc = extract_attribute (segment, seg_len, attr, &value);

@@ -34,11 +34,11 @@ void json_fprint_escaped (FILE *f, const char *s, size_t len);
  * @brief Стан JSON‑writerʼа поверх `FILE*`.
  */
 typedef struct json_writer {
-    FILE *f;                              /**< Цільовий потік. Власність не передається. */
-    int depth;                            /**< Поточна глибина стеку (0 — рівень верхівки). */
-    unsigned char type[JSW_MAX_DEPTH];    /**< Типи на стеці: 1 — обʼєкт, 2 — масив. */
-    unsigned int count[JSW_MAX_DEPTH];    /**< Кількість елементів у поточному контейнері. */
-    unsigned char key_open[JSW_MAX_DEPTH];/**< Прапорець: очікується значення після ключа. */
+    FILE *f;                               /**< Цільовий потік. Власність не передається. */
+    int depth;                             /**< Поточна глибина стеку (0 — рівень верхівки). */
+    unsigned char type[JSW_MAX_DEPTH];     /**< Типи на стеці: 1 — обʼєкт, 2 — масив. */
+    unsigned int count[JSW_MAX_DEPTH];     /**< Кількість елементів у поточному контейнері. */
+    unsigned char key_open[JSW_MAX_DEPTH]; /**< Прапорець: очікується значення після ключа. */
 } json_writer_t;
 
 /**
