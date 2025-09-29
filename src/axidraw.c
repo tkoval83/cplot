@@ -430,6 +430,79 @@ int axidraw_move_lowlevel_phase_xy (
 }
 
 /**
+ * @brief Очікує на завершення активних рухів та спорожнення FIFO.
+ *
+ * Періодично опитує контролер командою `QM` і перевіряє, що:
+ *  - не виконується активна команда (`command_active == 0`),
+ *  - обидва мотори неактивні (`motor1_active == 0`, `motor2_active == 0`),
+ *  - у FIFO відсутні відкладені команди (`fifo_pending == 0`).
+ * Між опитуваннями витримується пауза ~20 мс. Кількість ітерацій
+ * обмежується параметром `max_attempts`.
+ *
+ * @param dev Підключений пристрій AxiDraw.
+ * @param max_attempts Максимальна кількість опитувань (крок ≈ 20 мс).
+ * @return 0 — пристрій у стані простою; -1 — тайм-аут або помилка запиту.
+ */
+int axidraw_wait_for_idle (axidraw_device_t *dev, int max_attempts) {
+    if (!dev || max_attempts <= 0)
+        return -1;
+    struct timespec pause = { .tv_sec = 0, .tv_nsec = 20 * 1000000L };
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
+        ebb_motion_status_t ms = { 0 };
+        if (ebb_query_motion (dev->port, &ms, dev->timeout_ms) != 0)
+            return -1;
+        if (!ms.command_active && !ms.motor1_active && !ms.motor2_active && !ms.fifo_pending)
+            return 0;
+        nanosleep (&pause, NULL);
+    }
+    LOGW (AXIDRAW_LOG ("Очікування простою пристрою перевищило ліміт"));
+    return -1;
+}
+
+/**
+ * @brief Повернення у базову позицію з параметрами за замовчуванням.
+ *
+ * Використовує `steps_per_mm` та `speed_mm_s` із налаштувань пристрою для
+ * обчислення частоти кроків. Частота обмежується у межах [100; 25000] крок/с
+ * і не менше 2 крок/інтервал. Виконує послідовність:
+ *  1) Увімкнення моторів (`EM`).
+ *  2) Команда повернення у «home» (`HM`) з розрахованою частотою.
+ *  3) Очікування простою (`axidraw_wait_for_idle`).
+ *  4) Скидання лічильників кроків (`CS`).
+ *
+ * @param dev Підключений пристрій AxiDraw.
+ * @return 0 — успіх; -1 — помилка параметрів (steps_per_mm) або виконання.
+ */
+int axidraw_home_default (axidraw_device_t *dev) {
+    if (!dev)
+        return -1;
+    const axidraw_settings_t *cfg = axidraw_device_settings (dev);
+    double spmm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
+    if (!(spmm > 0.0))
+        return -1;
+    double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 150.0;
+    double steps_per_sec = speed * spmm;
+    if (steps_per_sec < 100.0)
+        steps_per_sec = 100.0;
+    if (steps_per_sec > 25000.0)
+        steps_per_sec = 25000.0;
+    uint32_t step_rate = (uint32_t)steps_per_sec;
+    if (step_rate < 2u)
+        step_rate = 2u;
+
+    int rc = ebb_enable_motors (dev->port, EBB_MOTOR_STEP_16, EBB_MOTOR_STEP_16, dev->timeout_ms);
+    if (rc != 0)
+        return rc;
+    rc = axidraw_home (dev, step_rate, NULL, NULL);
+    if (rc != 0)
+        return rc;
+    if (axidraw_wait_for_idle (dev, 200) != 0)
+        return -1;
+    (void)ebb_clear_steps (dev->port, dev->timeout_ms);
+    return 0;
+}
+
+/**
  * @brief Застосовує налаштування до пристрою і синхронізує з контролером (якщо підключено).
  * @param dev Пристрій.
  * @param settings Джерело налаштувань.

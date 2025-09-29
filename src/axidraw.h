@@ -279,6 +279,21 @@ int axidraw_move_lowlevel_phase_xy (
     int32_t steps_y,
     double duration_s);
 
+/**
+ * @brief Очікує, доки пристрій стане неактивним (без рухів/команд у FIFO).
+ * @param dev Підключений пристрій.
+ * @param max_attempts Кількість ітерацій очікування (крок ~20 мс).
+ * @return 0 — пристрій простійний; -1 — тайм-аут або помилка запиту.
+ */
+int axidraw_wait_for_idle (axidraw_device_t *dev, int max_attempts);
+
+/**
+ * @brief Виконує повернення у базову позицію з безпечними швидкісними параметрами.
+ * @param dev Підключений пристрій.
+ * @return 0 — успіх; -1 — помилка параметрів/виконання.
+ */
+int axidraw_home_default (axidraw_device_t *dev);
+
 #ifdef __cplusplus
 }
 #endif

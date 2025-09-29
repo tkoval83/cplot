@@ -160,9 +160,6 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
 }
 
 /** Максимальна тривалість сегмента руху у мілісекундах (обмеження EBB). */
-#define AXIDRAW_MAX_DURATION_MS 16777215u
-/** Кількість ітерацій очікування простою пристрою між опитуваннями. */
-#define AXIDRAW_IDLE_WAIT_ATTEMPTS 200
 
 /**
  * @brief Попереджає про зайнятість пристрою, читаючи інформацію з lock-файлу.
@@ -240,26 +237,6 @@ static int build_print_page (
     double margin_left_mm,
     int orientation);
 
-/**
- * @brief Очікує, доки пристрій завершить активні рухи (з тайм-бюджетом).
- * @param dev Підключений пристрій.
- * @return 0 — готово/без руху, -1 — тайм-аут/помилка.
- */
-static int wait_for_device_idle (axidraw_device_t *dev) {
-    if (!dev)
-        return -1;
-    struct timespec pause = { .tv_sec = 0, .tv_nsec = 20 * 1000000L };
-    for (int attempt = 0; attempt < AXIDRAW_IDLE_WAIT_ATTEMPTS; ++attempt) {
-        ebb_motion_status_t ms = { 0 };
-        if (ebb_query_motion (dev->port, &ms, dev->timeout_ms) != 0)
-            return -1;
-        if (!ms.command_active && !ms.motor1_active && !ms.motor2_active && !ms.fifo_pending)
-            return 0;
-        nanosleep (&pause, NULL);
-    }
-    LOGW ("Пристрій не завершив рух протягом очікуваного часу");
-    return -1;
-}
 
 /**
  * @brief Тип колбека дії над підключеним пристроєм AxiDraw.
@@ -326,7 +303,7 @@ static int with_axidraw_device (
 
     int idle_rc = 0;
     if (rc == 0 && wait_idle)
-        idle_rc = wait_for_device_idle (&dev);
+        idle_rc = axidraw_wait_for_idle (&dev, 200);
 
     (void)action_name;
 
@@ -458,7 +435,7 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
     const axidraw_settings_t *cfg = axidraw_device_settings (dev);
     double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 75.0;
     rc = axidraw_move_mm (dev, dx, dy, speed);
-    if (rc == 0 && wait_for_device_idle (dev) == 0) {
+    if (rc == 0 && axidraw_wait_for_idle (dev, 200) == 0) {
         int32_t s1 = 0, s2 = 0;
         if (ebb_query_steps (dev->port, &s1, &s2, dev->timeout_ms) == 0) {
             double spmm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
@@ -486,40 +463,10 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
  */
 static int device_home_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
-    const axidraw_settings_t *cfg = axidraw_device_settings (dev);
-    double speed = (cfg && cfg->speed_mm_s > 0.0) ? cfg->speed_mm_s : 150.0;
-    double steps_per_mm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
-    if (!(steps_per_mm > 0.0)) {
-        LOGE (
-            "Коефіцієнт кроків на міліметр не встановлено — перериваємо повернення у базову "
-            "позицію");
-        return -1;
-    }
-    double steps_per_sec = speed * steps_per_mm;
-    if (steps_per_sec < 100.0)
-        steps_per_sec = 100.0;
-    if (steps_per_sec > 25000.0)
-        steps_per_sec = 25000.0;
-    uint32_t step_rate = (uint32_t)steps_per_sec;
-    if (step_rate < 2u)
-        step_rate = 2u;
-
-    int rc = ebb_enable_motors (dev->port, EBB_MOTOR_STEP_16, EBB_MOTOR_STEP_16, dev->timeout_ms);
-    if (rc != 0)
-        return rc;
-
-    rc = axidraw_home (dev, step_rate, NULL, NULL);
-    if (rc != 0)
-        return rc;
-
-    if (wait_for_device_idle (dev) != 0)
-        return -1;
-
-    if (ebb_clear_steps (dev->port, dev->timeout_ms) != 0)
-        LOGW ("Не вдалося скинути лічильники кроків");
-
-    fprintf (CMD_OUT, "Домашнє позиціювання завершено\n");
-    return 0;
+    int rc = axidraw_home_default (dev);
+    if (rc == 0)
+        fprintf (CMD_OUT, "Домашнє позиціювання завершено\n");
+    return rc;
 }
 
 /**
@@ -623,7 +570,7 @@ static int device_reset_cb (axidraw_device_t *dev, void *ctx) {
     int rc = axidraw_pen_up (dev);
     if (rc != 0)
         return rc;
-    if (wait_for_device_idle (dev) != 0)
+    if (axidraw_wait_for_idle (dev, 200) != 0)
         return -1;
     if (ebb_clear_steps (dev->port, dev->timeout_ms) != 0)
         LOGW ("Не вдалося скинути лічильники кроків");
