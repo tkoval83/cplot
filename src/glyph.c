@@ -34,7 +34,7 @@ int glyph_create_from_svg_path (
         return -1;
     glyph->codepoint = codepoint;
     glyph->advance_width = advance_width;
-    if (string_duplicate (path_data, &glyph->path_data) != 0) {
+    if (str_string_duplicate (path_data, &glyph->path_data) != 0) {
         free (glyph);
         return -1;
     }

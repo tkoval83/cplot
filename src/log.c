@@ -48,7 +48,7 @@ void log_set_use_colors (bool use) {
 }
 
 /** \brief Повертає локалізований рядок мітки рівня. */
-static const char *level_label (log_level_t lv) {
+static const char *log_level_label (log_level_t lv) {
     switch (lv) {
     case LOG_ERROR:
         return "помилка";
@@ -64,7 +64,7 @@ static const char *level_label (log_level_t lv) {
 }
 
 /** \brief Повертає ANSI‑колір для рівня з урахуванням `use_colors`. */
-static const char *level_color (log_level_t lv) {
+static const char *log_level_color (log_level_t lv) {
     if (!g_cfg.use_colors)
         return "";
     switch (lv) {
@@ -90,8 +90,8 @@ void log_vprint (log_level_t level, const char *fmt, va_list ap) {
 
     if (level > g_cfg.level)
         return;
-    const char *col = level_color (level);
-    const char *lab = level_label (level);
+    const char *col = log_level_color (level);
+    const char *lab = log_level_label (level);
     if (g_cfg.use_colors && col[0])
         fprintf (stderr, "%s[%s]%s ", col, lab, NO_COLOR);
     else

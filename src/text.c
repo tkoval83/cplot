@@ -30,7 +30,7 @@
 #endif
 
 /** \brief Порівняння `uint32_t` для `qsort`. */
-static int cmp_uint32 (const void *a, const void *b) {
+static int fontreg_cmp_uint32 (const void *a, const void *b) {
     uint32_t ua = *(const uint32_t *)a;
     uint32_t ub = *(const uint32_t *)b;
     if (ua < ub)
@@ -43,7 +43,7 @@ static int cmp_uint32 (const void *a, const void *b) {
 /**
  * @brief Гарантує ємність масиву кодових точок.
  */
-static int ensure_codepoints_capacity (uint32_t **arr, size_t *cap, size_t needed) {
+static int text_ensure_codepoints_capacity (uint32_t **arr, size_t *cap, size_t needed) {
     if (!arr || !cap)
         return -1;
     if (*cap >= needed)
@@ -66,7 +66,7 @@ static int ensure_codepoints_capacity (uint32_t **arr, size_t *cap, size_t neede
  * @param out_count [out] Кількість елементів у `out_codes`.
  * @return 0 — успіх; -1 — помилка памʼяті/аргументів.
  */
-static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *out_count) {
+static int text_collect_codepoints (const char *text, uint32_t **out_codes, size_t *out_count) {
     if (!out_codes || !out_count)
         return -1;
     *out_codes = NULL;
@@ -85,7 +85,7 @@ static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *o
             ++cursor;
             continue;
         }
-        if (ensure_codepoints_capacity (&codes, &cap, count + 1) != 0) {
+        if (text_ensure_codepoints_capacity (&codes, &cap, count + 1) != 0) {
             free (codes);
             return -1;
         }
@@ -94,7 +94,7 @@ static int collect_codepoints (const char *text, uint32_t **out_codes, size_t *o
     }
 
     if (count > 0) {
-        qsort (codes, count, sizeof (*codes), cmp_uint32);
+        qsort (codes, count, sizeof (*codes), fontreg_cmp_uint32);
         size_t unique = 0;
         for (size_t i = 0; i < count; ++i) {
             if (i == 0 || codes[i] != codes[i - 1])
@@ -122,14 +122,14 @@ typedef struct {
 } font_usage_stats_t;
 
 /** \brief Ініціалізує структуру статистики. */
-static void font_usage_stats_init (font_usage_stats_t *stats) {
+static void text_font_usage_stats_init (font_usage_stats_t *stats) {
     if (!stats)
         return;
     memset (stats, 0, sizeof (*stats));
 }
 
 /** \brief Вивільняє ресурси статистики. */
-static void font_usage_stats_dispose (font_usage_stats_t *stats) {
+static void text_font_usage_stats_dispose (font_usage_stats_t *stats) {
     if (!stats)
         return;
     free (stats->entries);
@@ -139,7 +139,7 @@ static void font_usage_stats_dispose (font_usage_stats_t *stats) {
 }
 
 /** \brief Збільшує лічильник використання для вказаної родини. */
-static int font_usage_stats_increment (font_usage_stats_t *stats, const char *name) {
+static int text_font_usage_stats_increment (font_usage_stats_t *stats, const char *name) {
     if (!stats || !name || !*name)
         return 0;
     for (size_t i = 0; i < stats->count; ++i) {
@@ -164,7 +164,7 @@ static int font_usage_stats_increment (font_usage_stats_t *stats, const char *na
 }
 
 /** \brief Повертає родину з найбільшою кількістю гліфів. */
-static const font_usage_entry_t *font_usage_stats_dominant (const font_usage_stats_t *stats) {
+static const font_usage_entry_t *text_font_usage_stats_dominant (const font_usage_stats_t *stats) {
     if (!stats || stats->count == 0)
         return NULL;
     const font_usage_entry_t *best = &stats->entries[0];
@@ -179,7 +179,7 @@ static const font_usage_entry_t *font_usage_stats_dominant (const font_usage_sta
 }
 
 /** \brief Загальна кількість відрендерених гліфів у статистиці. */
-static size_t font_usage_stats_total (const font_usage_stats_t *stats) {
+static size_t text_font_usage_stats_total (const font_usage_stats_t *stats) {
     if (!stats)
         return 0;
     size_t total = 0;
@@ -229,7 +229,7 @@ typedef struct {
 } text_token_t;
 
 /** \brief Звільняє масив токенів разом із сегментами гліфів. */
-static void tokens_dispose (text_token_t *toks, size_t count) {
+static void text_tokens_dispose (text_token_t *toks, size_t count) {
     if (!toks)
         return;
     for (size_t i = 0; i < count; ++i)
@@ -238,7 +238,7 @@ static void tokens_dispose (text_token_t *toks, size_t count) {
 }
 
 /** \brief Токенізує вхідний текст на слова/пропуски/переноси. */
-static int tokenize_text (const char *input, text_token_t **out, size_t *out_count) {
+static int text_tokenize_text (const char *input, text_token_t **out, size_t *out_count) {
     if (!out || !out_count)
         return -1;
     *out = NULL;
@@ -325,7 +325,7 @@ static int tokenize_text (const char *input, text_token_t **out, size_t *out_cou
     return 0;
 }
 
-static int build_word_segments (
+static int text_build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
     size_t word_len,
@@ -336,7 +336,7 @@ static int build_word_segments (
     bool *ascii_only_out);
 
 static int
-shape_measure_words (const font_render_context_t *ctx, text_token_t *toks, size_t count) {
+text_shape_measure_words (const font_render_context_t *ctx, text_token_t *toks, size_t count) {
     if (!ctx || !toks)
         return -1;
     for (size_t i = 0; i < count; ++i) {
@@ -346,7 +346,7 @@ shape_measure_words (const font_render_context_t *ctx, text_token_t *toks, size_
         bool ascii_only = true;
         glyph_segment_t *segs = NULL;
         size_t seg_count = 0;
-        if (build_word_segments (
+        if (text_build_word_segments (
                 ctx, toks[i].ptr, toks[i].len, &segs, &seg_count, &width, NULL, &ascii_only)
             != 0)
             return -1;
@@ -367,7 +367,7 @@ typedef struct {
     bool inserted_hyphen;
 } split_result_t;
 
-static int build_word_segments (
+static int text_build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
     size_t word_len,
@@ -376,7 +376,7 @@ static int build_word_segments (
     double *width_units_out,
     size_t *missing_out,
     bool *ascii_only_out);
-static int split_segments (
+static int text_split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
     double available_units,
@@ -384,14 +384,14 @@ static int split_segments (
     bool ascii_only,
     bool allow_hyphenation,
     split_result_t *out);
-static int force_split_segments (
+static int text_force_split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
     double available_units,
     const font_render_context_t *ctx,
     split_result_t *out);
 
-static void free_lines (layout_line_t *lines, size_t count) {
+static void text_free_lines (layout_line_t *lines, size_t count) {
     if (!lines)
         return;
     for (size_t i = 0; i < count; ++i)
@@ -399,7 +399,7 @@ static void free_lines (layout_line_t *lines, size_t count) {
     free (lines);
 }
 
-static int line_reserve (layout_line_t *line, size_t needed) {
+static int text_line_reserve (layout_line_t *line, size_t needed) {
     if (!line)
         return -1;
     if (line->cap >= needed)
@@ -415,22 +415,22 @@ static int line_reserve (layout_line_t *line, size_t needed) {
     return 0;
 }
 
-static int line_append_char (layout_line_t *line, char c) {
+static int text_line_append_char (layout_line_t *line, char c) {
     if (!line)
         return -1;
-    if (line_reserve (line, line->len + 2) != 0)
+    if (text_line_reserve (line, line->len + 2) != 0)
         return -1;
     line->text[line->len++] = c;
     line->text[line->len] = '\0';
     return 0;
 }
 
-static int line_append_bytes (layout_line_t *line, const char *data, size_t len) {
+static int text_line_append_bytes (layout_line_t *line, const char *data, size_t len) {
     if (!line)
         return -1;
     if (len == 0)
         return 0;
-    if (line_reserve (line, line->len + len + 1) != 0)
+    if (text_line_reserve (line, line->len + len + 1) != 0)
         return -1;
     memcpy (line->text + line->len, data, len);
     line->len += len;
@@ -439,7 +439,7 @@ static int line_append_bytes (layout_line_t *line, const char *data, size_t len)
 }
 
 static layout_line_t *
-add_new_line (layout_line_t **lines, size_t *count, size_t *cap, size_t start_index) {
+text_add_new_line (layout_line_t **lines, size_t *count, size_t *cap, size_t start_index) {
     if (!lines || !count || !cap)
         return NULL;
     if (*cap <= *count) {
@@ -462,7 +462,7 @@ add_new_line (layout_line_t **lines, size_t *count, size_t *cap, size_t start_in
     return line;
 }
 
-static void split_result_dispose (split_result_t *res) {
+static void text_split_result_dispose (split_result_t *res) {
     if (!res)
         return;
     free (res->prefix);
@@ -470,7 +470,7 @@ static void split_result_dispose (split_result_t *res) {
     memset (res, 0, sizeof (*res));
 }
 
-static void assign_layout_positions (
+static void text_assign_layout_positions (
     const text_layout_opts_t *opts,
     const font_render_context_t *ctx,
     layout_line_t *lines,
@@ -494,7 +494,7 @@ static void assign_layout_positions (
     }
 }
 
-static int break_tokens_into_lines (
+static int text_break_tokens_into_lines (
     const text_layout_opts_t *opts,
     const font_render_context_t *ctx,
     const text_token_t *toks,
@@ -508,7 +508,7 @@ static int break_tokens_into_lines (
     size_t line_count = 0, line_cap = 0;
     size_t consumed_input_total = 0;
     size_t assigned_input_current = 0;
-    layout_line_t *current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+    layout_line_t *current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
     if (!current)
         return -1;
 
@@ -521,9 +521,9 @@ static int break_tokens_into_lines (
         if (tk->type == TK_NEWLINE) {
             consumed_input_total += assigned_input_current + 1;
             assigned_input_current = 0;
-            current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+            current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
             if (!current) {
-                free_lines (lines, line_count);
+                text_free_lines (lines, line_count);
                 return -1;
             }
             pending_space = false;
@@ -553,12 +553,12 @@ static int break_tokens_into_lines (
             if (available_units < 0.0 && current->len > 0) {
                 consumed_input_total += assigned_input_current;
                 assigned_input_current = 0;
-                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
                 if (!current) {
                     if (segments_owned)
                         free (pending_segments);
                     free (owned_ptr);
-                    free_lines (lines, line_count);
+                    text_free_lines (lines, line_count);
                     return -1;
                 }
                 pending_space = false;
@@ -568,21 +568,21 @@ static int break_tokens_into_lines (
 
             if (pending_word_width <= available_units || current->len == 0) {
                 if (insert_space) {
-                    if (line_append_char (current, ' ') != 0) {
+                    if (text_line_append_char (current, ' ') != 0) {
                         if (segments_owned)
                             free (pending_segments);
                         free (owned_ptr);
-                        free_lines (lines, line_count);
+                        text_free_lines (lines, line_count);
                         return -1;
                     }
                     current->width_units += space_width_units;
                     assigned_input_current += 1;
                 }
-                if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
+                if (text_line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
                     if (segments_owned)
                         free (pending_segments);
                     free (owned_ptr);
-                    free_lines (lines, line_count);
+                    text_free_lines (lines, line_count);
                     return -1;
                 }
                 current->width_units += pending_word_width;
@@ -599,27 +599,27 @@ static int break_tokens_into_lines (
             }
 
             split_result_t split;
-            if (split_segments (
+            if (text_split_segments (
                     pending_segments, pending_seg_count, available_units, ctx, pending_ascii_only,
                     opts->hyphenate, &split)) {
                 if (insert_space) {
-                    if (line_append_char (current, ' ') != 0) {
-                        split_result_dispose (&split);
+                    if (text_line_append_char (current, ' ') != 0) {
+                        text_split_result_dispose (&split);
                         if (segments_owned)
                             free (pending_segments);
                         free (owned_ptr);
-                        free_lines (lines, line_count);
+                        text_free_lines (lines, line_count);
                         return -1;
                     }
                     current->width_units += space_width_units;
                     assigned_input_current += 1;
                 }
-                if (line_append_bytes (current, split.prefix, split.prefix_len) != 0) {
-                    split_result_dispose (&split);
+                if (text_line_append_bytes (current, split.prefix, split.prefix_len) != 0) {
+                    text_split_result_dispose (&split);
                     if (segments_owned)
                         free (pending_segments);
                     free (owned_ptr);
-                    free_lines (lines, line_count);
+                    text_free_lines (lines, line_count);
                     return -1;
                 }
                 current->width_units += split.prefix_width_units;
@@ -631,13 +631,13 @@ static int break_tokens_into_lines (
                 else
                     consumed_input_total += assigned_input_current;
                 assigned_input_current = 0;
-                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
                 if (!current) {
-                    split_result_dispose (&split);
+                    text_split_result_dispose (&split);
                     if (segments_owned)
                         free (pending_segments);
                     free (owned_ptr);
-                    free_lines (lines, line_count);
+                    text_free_lines (lines, line_count);
                     return -1;
                 }
                 pending_space = false;
@@ -655,7 +655,7 @@ static int break_tokens_into_lines (
                 split.suffix = NULL;
                 free (split.prefix);
                 split.prefix = NULL;
-                split_result_dispose (&split);
+                text_split_result_dispose (&split);
                 owned_ptr = next_owned;
                 pending_word_ptr = owned_ptr ? owned_ptr : "";
                 pending_word_len = next_len;
@@ -664,12 +664,12 @@ static int break_tokens_into_lines (
                     pending_word_width = 0.0;
                     break;
                 }
-                if (build_word_segments (
+                if (text_build_word_segments (
                         ctx, pending_word_ptr, pending_word_len, &pending_segments,
                         &pending_seg_count, &pending_word_width, NULL, &pending_ascii_only)
                     != 0) {
                     free (owned_ptr);
-                    free_lines (lines, line_count);
+                    text_free_lines (lines, line_count);
                     return -1;
                 }
                 segments_owned = 1;
@@ -678,26 +678,26 @@ static int break_tokens_into_lines (
 
             if (opts->break_long_words) {
                 split_result_t fsplit;
-                if (force_split_segments (
+                if (text_force_split_segments (
                         pending_segments, pending_seg_count, available_units, ctx, &fsplit)) {
                     if (insert_space) {
-                        if (line_append_char (current, ' ') != 0) {
-                            split_result_dispose (&fsplit);
+                        if (text_line_append_char (current, ' ') != 0) {
+                            text_split_result_dispose (&fsplit);
                             if (segments_owned)
                                 free (pending_segments);
                             free (owned_ptr);
-                            free_lines (lines, line_count);
+                            text_free_lines (lines, line_count);
                             return -1;
                         }
                         current->width_units += space_width_units;
                         assigned_input_current += 1;
                     }
-                    if (line_append_bytes (current, fsplit.prefix, fsplit.prefix_len) != 0) {
-                        split_result_dispose (&fsplit);
+                    if (text_line_append_bytes (current, fsplit.prefix, fsplit.prefix_len) != 0) {
+                        text_split_result_dispose (&fsplit);
                         if (segments_owned)
                             free (pending_segments);
                         free (owned_ptr);
-                        free_lines (lines, line_count);
+                        text_free_lines (lines, line_count);
                         return -1;
                     }
                     current->width_units += fsplit.prefix_width_units;
@@ -706,13 +706,13 @@ static int break_tokens_into_lines (
 
                     consumed_input_total += assigned_input_current;
                     assigned_input_current = 0;
-                    current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                    current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
                     if (!current) {
-                        split_result_dispose (&fsplit);
+                        text_split_result_dispose (&fsplit);
                         if (segments_owned)
                             free (pending_segments);
                         free (owned_ptr);
-                        free_lines (lines, line_count);
+                        text_free_lines (lines, line_count);
                         return -1;
                     }
                     pending_space = false;
@@ -730,7 +730,7 @@ static int break_tokens_into_lines (
                     fsplit.suffix = NULL;
                     free (fsplit.prefix);
                     fsplit.prefix = NULL;
-                    split_result_dispose (&fsplit);
+                    text_split_result_dispose (&fsplit);
                     owned_ptr = next_owned;
                     pending_word_ptr = owned_ptr ? owned_ptr : "";
                     pending_word_len = next_len;
@@ -739,12 +739,12 @@ static int break_tokens_into_lines (
                         pending_word_width = 0.0;
                         break;
                     }
-                    if (build_word_segments (
+                    if (text_build_word_segments (
                             ctx, pending_word_ptr, pending_word_len, &pending_segments,
                             &pending_seg_count, &pending_word_width, NULL, &pending_ascii_only)
                         != 0) {
                         free (owned_ptr);
-                        free_lines (lines, line_count);
+                        text_free_lines (lines, line_count);
                         return -1;
                     }
                     segments_owned = 1;
@@ -755,12 +755,12 @@ static int break_tokens_into_lines (
             if (current->len > 0) {
                 consumed_input_total += assigned_input_current;
                 assigned_input_current = 0;
-                current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
                 if (!current) {
                     if (segments_owned)
                         free (pending_segments);
                     free (owned_ptr);
-                    free_lines (lines, line_count);
+                    text_free_lines (lines, line_count);
                     return -1;
                 }
                 pending_space = false;
@@ -768,22 +768,22 @@ static int break_tokens_into_lines (
                 continue;
             }
 
-            if (line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
+            if (text_line_append_bytes (current, pending_word_ptr, pending_word_len) != 0) {
                 if (segments_owned)
                     free (pending_segments);
                 free (owned_ptr);
-                free_lines (lines, line_count);
+                text_free_lines (lines, line_count);
                 return -1;
             }
             current->width_units += pending_word_width;
             consumed_input_total += assigned_input_current + pending_word_len;
             assigned_input_current = 0;
-            current = add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+            current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
             if (!current) {
                 if (segments_owned)
                     free (pending_segments);
                 free (owned_ptr);
-                free_lines (lines, line_count);
+                text_free_lines (lines, line_count);
                 return -1;
             }
             pending_space = false;
@@ -822,7 +822,7 @@ static int break_tokens_into_lines (
     return 0;
 }
 
-static int build_word_segments (
+static int text_build_word_segments (
     const font_render_context_t *ctx,
     const char *word,
     size_t word_len,
@@ -894,7 +894,7 @@ static int build_word_segments (
     return 0;
 }
 
-static int split_segments (
+static int text_split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
     double available_units,
@@ -929,7 +929,7 @@ static int split_segments (
         out->prefix = malloc (prefix_bytes + 1);
         out->suffix = malloc (suffix_bytes + 1);
         if (!out->prefix || !out->suffix) {
-            split_result_dispose (out);
+            text_split_result_dispose (out);
             return 0;
         }
         memcpy (out->prefix, segments[0].ptr, prefix_bytes);
@@ -975,7 +975,7 @@ static int split_segments (
     out->prefix = malloc (prefix_bytes + 2);
     out->suffix = malloc (suffix_bytes + 1);
     if (!out->prefix || !out->suffix) {
-        split_result_dispose (out);
+        text_split_result_dispose (out);
         return 0;
     }
     memcpy (out->prefix, segments[0].ptr, prefix_bytes);
@@ -991,7 +991,7 @@ static int split_segments (
     return 1;
 }
 
-static int force_split_segments (
+static int text_force_split_segments (
     const glyph_segment_t *segments,
     size_t seg_count,
     double available_units,
@@ -1028,7 +1028,7 @@ static int force_split_segments (
     out->prefix = (char *)malloc (prefix_bytes + (insert_hyphen ? 2 : 1));
     out->suffix = (char *)malloc (suffix_bytes + 1);
     if (!out->prefix || !out->suffix) {
-        split_result_dispose (out);
+        text_split_result_dispose (out);
         return 0;
     }
     memcpy (out->prefix, segments[0].ptr, prefix_bytes);
@@ -1045,7 +1045,7 @@ static int force_split_segments (
     return 1;
 }
 
-static int render_line_text (
+static int text_render_line_text (
     const font_render_context_t *ctx,
     font_fallback_t *fallbacks,
     const char *line_text,
@@ -1125,7 +1125,7 @@ typedef struct {
 #define STYLE_STRIKE TEXT_STYLE_STRIKE
 #define STYLE_UNDERLINE TEXT_STYLE_UNDERLINE
 
-static unsigned span_flags_at_position (const span_run_t *runs, size_t run_count, size_t pos) {
+static unsigned text_span_flags_at_position (const span_run_t *runs, size_t run_count, size_t pos) {
     unsigned flags = 0;
     if (!runs)
         return 0;
@@ -1135,7 +1135,7 @@ static unsigned span_flags_at_position (const span_run_t *runs, size_t run_count
     return flags;
 }
 
-static void inline_decoration_init (inline_decoration_t *dec, double y_mm, unsigned flag) {
+static void text_inline_decoration_init (inline_decoration_t *dec, double y_mm, unsigned flag) {
     if (!dec)
         return;
     dec->active = false;
@@ -1145,7 +1145,7 @@ static void inline_decoration_init (inline_decoration_t *dec, double y_mm, unsig
     dec->flag = flag;
 }
 
-static void inline_decoration_start (inline_decoration_t *dec, double start_mm) {
+static void text_inline_decoration_start (inline_decoration_t *dec, double start_mm) {
     if (!dec || dec->active)
         return;
     dec->active = true;
@@ -1153,14 +1153,14 @@ static void inline_decoration_start (inline_decoration_t *dec, double start_mm) 
     dec->last_mm = start_mm;
 }
 
-static void inline_decoration_extend (inline_decoration_t *dec, double end_mm) {
+static void text_inline_decoration_extend (inline_decoration_t *dec, double end_mm) {
     if (!dec || !dec->active)
         return;
     if (end_mm > dec->last_mm)
         dec->last_mm = end_mm;
 }
 
-static void inline_decoration_stop (inline_decoration_t *dec, geom_paths_t *out) {
+static void text_inline_decoration_stop (inline_decoration_t *dec, geom_paths_t *out) {
     if (!dec || !dec->active)
         return;
     if (dec->last_mm > dec->start_mm) {
@@ -1171,12 +1171,12 @@ static void inline_decoration_stop (inline_decoration_t *dec, geom_paths_t *out)
     dec->start_mm = dec->last_mm = 0.0;
 }
 
-static void inline_decoration_flush_if_needed (
+static void text_inline_decoration_flush_if_needed (
     inline_decoration_t *dec, unsigned next_flags, geom_paths_t *out) {
     if (!dec)
         return;
     if (!(next_flags & dec->flag))
-        inline_decoration_stop (dec, out);
+        text_inline_decoration_stop (dec, out);
 }
 
 typedef struct {
@@ -1184,45 +1184,45 @@ typedef struct {
     inline_decoration_t underline;
 } decoration_state_t;
 
-static void decoration_state_init (decoration_state_t *state, double strike_y, double underline_y) {
+static void text_decoration_state_init (decoration_state_t *state, double strike_y, double underline_y) {
     if (!state)
         return;
-    inline_decoration_init (&state->strike, strike_y, STYLE_STRIKE);
-    inline_decoration_init (&state->underline, underline_y, STYLE_UNDERLINE);
+    text_inline_decoration_init (&state->strike, strike_y, STYLE_STRIKE);
+    text_inline_decoration_init (&state->underline, underline_y, STYLE_UNDERLINE);
 }
 
-static void decoration_state_start (decoration_state_t *state, unsigned flags, double pen_mm) {
+static void text_decoration_state_start (decoration_state_t *state, unsigned flags, double pen_mm) {
     if (!state)
         return;
     if ((flags & STYLE_STRIKE) && !state->strike.active)
-        inline_decoration_start (&state->strike, pen_mm);
+        text_inline_decoration_start (&state->strike, pen_mm);
     if ((flags & STYLE_UNDERLINE) && !state->underline.active)
-        inline_decoration_start (&state->underline, pen_mm);
+        text_inline_decoration_start (&state->underline, pen_mm);
 }
 
-static void decoration_state_extend (decoration_state_t *state, double pen_mm) {
+static void text_decoration_state_extend (decoration_state_t *state, double pen_mm) {
     if (!state)
         return;
-    inline_decoration_extend (&state->strike, pen_mm);
-    inline_decoration_extend (&state->underline, pen_mm);
+    text_inline_decoration_extend (&state->strike, pen_mm);
+    text_inline_decoration_extend (&state->underline, pen_mm);
 }
 
 static void
-decoration_state_flush (decoration_state_t *state, unsigned next_flags, geom_paths_t *out) {
+text_decoration_state_flush (decoration_state_t *state, unsigned next_flags, geom_paths_t *out) {
     if (!state)
         return;
-    inline_decoration_flush_if_needed (&state->strike, next_flags, out);
-    inline_decoration_flush_if_needed (&state->underline, next_flags, out);
+    text_inline_decoration_flush_if_needed (&state->strike, next_flags, out);
+    text_inline_decoration_flush_if_needed (&state->underline, next_flags, out);
 }
 
-static void decoration_state_stop (decoration_state_t *state, geom_paths_t *out) {
+static void text_decoration_state_stop (decoration_state_t *state, geom_paths_t *out) {
     if (!state)
         return;
-    inline_decoration_stop (&state->strike, out);
-    inline_decoration_stop (&state->underline, out);
+    text_inline_decoration_stop (&state->strike, out);
+    text_inline_decoration_stop (&state->underline, out);
 }
 
-static int slice_spans_for_line (
+static int text_slice_spans_for_line (
     const text_span_t *spans,
     size_t span_count,
     const layout_line_t *line,
@@ -1260,7 +1260,7 @@ static int slice_spans_for_line (
     return 0;
 }
 
-static int render_line_text_spans (
+static int text_render_line_text_spans (
     const font_render_context_t *ctx_regular,
     const font_render_context_t *ctx_bold,
     const font_render_context_t *ctx_italic,
@@ -1285,23 +1285,23 @@ static int render_line_text_spans (
     double baseline_font = baseline_units / ctx_regular->scale;
 
     decoration_state_t deco;
-    decoration_state_init (
+    text_decoration_state_init (
         &deco, baseline_units - (ctx_regular->line_height_units * ctx_regular->scale) * 0.28,
         baseline_units + (ctx_regular->line_height_units * ctx_regular->scale) * 0.08);
 
     const char *cursor = line_text;
     size_t pos = 0;
     while (*cursor) {
-        unsigned active_flags = span_flags_at_position (runs, run_count, pos);
-        decoration_state_start (&deco, active_flags, pen_x_font * ctx_regular->scale);
+        unsigned active_flags = text_span_flags_at_position (runs, run_count, pos);
+        text_decoration_state_start (&deco, active_flags, pen_x_font * ctx_regular->scale);
 
         if (*cursor == ' ') {
             pen_x_font += ctx_regular->space_advance_units;
-            decoration_state_extend (&deco, pen_x_font * ctx_regular->scale);
+            text_decoration_state_extend (&deco, pen_x_font * ctx_regular->scale);
             ++cursor;
             ++pos;
-            unsigned next_flags = span_flags_at_position (runs, run_count, pos);
-            decoration_state_flush (&deco, next_flags, out);
+            unsigned next_flags = text_span_flags_at_position (runs, run_count, pos);
+            text_decoration_state_flush (&deco, next_flags, out);
             continue;
         }
 
@@ -1309,13 +1309,13 @@ static int render_line_text_spans (
         size_t consumed = 0;
         if (str_utf8_decode (cursor, &cp, &consumed) != 0 || consumed == 0) {
             pen_x_font += ctx_regular->space_advance_units;
-            decoration_state_extend (&deco, pen_x_font * ctx_regular->scale);
+            text_decoration_state_extend (&deco, pen_x_font * ctx_regular->scale);
             ++cursor;
             ++pos;
             if (missing_glyphs)
                 (*missing_glyphs)++;
-            unsigned next_flags = span_flags_at_position (runs, run_count, pos);
-            decoration_state_flush (&deco, next_flags, out);
+            unsigned next_flags = text_span_flags_at_position (runs, run_count, pos);
+            text_decoration_state_flush (&deco, next_flags, out);
             continue;
         }
 
@@ -1352,7 +1352,7 @@ static int render_line_text_spans (
                     ctx->font, cp, pen_x_font + 0.05, baseline_font, ctx->scale, out, NULL);
             }
             pen_x_font += advance_units;
-            decoration_state_extend (&deco, pen_x_font * ctx->scale);
+            text_decoration_state_extend (&deco, pen_x_font * ctx->scale);
             if (rendered_glyphs)
                 (*rendered_glyphs)++;
         } else if (glyph_rc == 1) {
@@ -1361,7 +1361,7 @@ static int render_line_text_spans (
                 = font_fallback_emit (fb, ctx, cp, pen_x_font, baseline_units, out, &fb_adv, NULL);
             if (fb_rc == 0) {
                 pen_x_font += fb_adv;
-                decoration_state_extend (&deco, pen_x_font * ctx->scale);
+                text_decoration_state_extend (&deco, pen_x_font * ctx->scale);
                 if (rendered_glyphs)
                     (*rendered_glyphs)++;
             } else {
@@ -1369,7 +1369,7 @@ static int render_line_text_spans (
                     (*missing_glyphs)++;
                 double adv = ctx->space_advance_units;
                 pen_x_font += adv;
-                decoration_state_extend (&deco, pen_x_font * ctx->scale);
+                text_decoration_state_extend (&deco, pen_x_font * ctx->scale);
             }
         } else {
             return -1;
@@ -1377,11 +1377,11 @@ static int render_line_text_spans (
 
         cursor += consumed;
         pos += consumed;
-        unsigned next_flags = span_flags_at_position (runs, run_count, pos);
-        decoration_state_flush (&deco, next_flags, out);
+        unsigned next_flags = text_span_flags_at_position (runs, run_count, pos);
+        text_decoration_state_flush (&deco, next_flags, out);
     }
 
-    decoration_state_stop (&deco, out);
+    text_decoration_state_stop (&deco, out);
     return 0;
 }
 
@@ -1410,7 +1410,7 @@ int text_render_hershey (
 
     uint32_t *codepoints = NULL;
     size_t codepoint_count = 0;
-    if (collect_codepoints (text, &codepoints, &codepoint_count) != 0) {
+    if (text_collect_codepoints (text, &codepoints, &codepoint_count) != 0) {
         geom_paths_free (out);
         return -1;
     }
@@ -1435,7 +1435,7 @@ int text_render_hershey (
     font_fallback_t fallback;
     font_fallback_init (&fallback, family, size_pt, units);
     font_usage_stats_t usage;
-    font_usage_stats_init (&usage);
+    text_font_usage_stats_init (&usage);
     free (codepoints);
 
     double pen_x = 0.0;
@@ -1476,7 +1476,7 @@ int text_render_hershey (
         if (glyph_rc == 0) {
             pen_x += advance_units;
             ++rendered;
-            font_usage_stats_increment (&usage, ctx.face.name);
+            text_font_usage_stats_increment (&usage, ctx.face.name);
             continue;
         }
         if (glyph_rc == 1) {
@@ -1489,9 +1489,9 @@ int text_render_hershey (
                 pen_x += fallback_adv;
                 ++rendered;
                 if (used_family && *used_family)
-                    font_usage_stats_increment (&usage, used_family);
+                    text_font_usage_stats_increment (&usage, used_family);
                 else
-                    font_usage_stats_increment (&usage, ctx.face.name);
+                    text_font_usage_stats_increment (&usage, ctx.face.name);
                 continue;
             }
             if (fb_rc == 1) {
@@ -1499,14 +1499,14 @@ int text_render_hershey (
                 pen_x += ctx.space_advance_units;
                 continue;
             }
-            font_usage_stats_dispose (&usage);
+            text_font_usage_stats_dispose (&usage);
             font_fallback_dispose (&fallback);
             font_render_context_dispose (&ctx);
             geom_paths_free (out);
             return -1;
         }
 
-        font_usage_stats_dispose (&usage);
+        text_font_usage_stats_dispose (&usage);
         font_fallback_dispose (&fallback);
         font_render_context_dispose (&ctx);
         geom_paths_free (out);
@@ -1519,8 +1519,8 @@ int text_render_hershey (
         info->rendered_glyphs = rendered;
         info->missing_glyphs = missing;
         info->line_height = ctx.line_height_units * ctx.scale;
-        const font_usage_entry_t *dominant = font_usage_stats_dominant (&usage);
-        size_t total_glyphs = font_usage_stats_total (&usage);
+        const font_usage_entry_t *dominant = text_font_usage_stats_dominant (&usage);
+        size_t total_glyphs = text_font_usage_stats_total (&usage);
         if (dominant) {
             strncpy (info->resolved_family, dominant->name, sizeof (info->resolved_family) - 1);
             info->resolved_glyphs = dominant->glyphs;
@@ -1534,7 +1534,7 @@ int text_render_hershey (
             info->resolved_glyphs = 0;
     }
 
-    font_usage_stats_dispose (&usage);
+    text_font_usage_stats_dispose (&usage);
     font_fallback_dispose (&fallback);
     font_render_context_dispose (&ctx);
     return 0;
@@ -1578,7 +1578,7 @@ int text_layout_render_spans (
     const char *input = text ? text : "";
     uint32_t *codepoints = NULL;
     size_t codepoint_count = 0;
-    if (collect_codepoints (input, &codepoints, &codepoint_count) != 0) {
+    if (text_collect_codepoints (input, &codepoints, &codepoint_count) != 0) {
         geom_paths_free (out);
         return -1;
     }
@@ -1603,15 +1603,15 @@ int text_layout_render_spans (
     font_fallback_t fallback;
     font_fallback_init (&fallback, opts->family, opts->size_pt, opts->units);
     font_usage_stats_t usage;
-    font_usage_stats_init (&usage);
+    text_font_usage_stats_init (&usage);
 
 #define LAYOUT_FAIL()                                                                              \
     do {                                                                                           \
-        font_usage_stats_dispose (&usage);                                                         \
+        text_font_usage_stats_dispose (&usage);                                                         \
         font_fallback_dispose (&fallback);                                                         \
         font_render_context_dispose (&ctx);                                                        \
         geom_paths_free (out);                                                                     \
-        free_lines (lines, line_count);                                                            \
+        text_free_lines (lines, line_count);                                                            \
         if (info)                                                                                  \
             memset (info, 0, sizeof (*info));                                                      \
         return -1;                                                                                 \
@@ -1629,21 +1629,21 @@ int text_layout_render_spans (
 
     text_token_t *toks = NULL;
     size_t tok_count = 0;
-    if (tokenize_text (input, &toks, &tok_count) != 0)
+    if (text_tokenize_text (input, &toks, &tok_count) != 0)
         LAYOUT_FAIL ();
 
-    if (shape_measure_words (&ctx, toks, tok_count) != 0) {
-        tokens_dispose (toks, tok_count);
-        LAYOUT_FAIL ();
-    }
-
-    if (break_tokens_into_lines (opts, &ctx, toks, tok_count, &lines, &line_count) != 0) {
-        tokens_dispose (toks, tok_count);
+    if (text_shape_measure_words (&ctx, toks, tok_count) != 0) {
+        text_tokens_dispose (toks, tok_count);
         LAYOUT_FAIL ();
     }
-    tokens_dispose (toks, tok_count);
 
-    assign_layout_positions (opts, &ctx, lines, line_count);
+    if (text_break_tokens_into_lines (opts, &ctx, toks, tok_count, &lines, &line_count) != 0) {
+        text_tokens_dispose (toks, tok_count);
+        LAYOUT_FAIL ();
+    }
+    text_tokens_dispose (toks, tok_count);
+
+    text_assign_layout_positions (opts, &ctx, lines, line_count);
 
     size_t rendered_glyphs = 0;
     size_t missing_glyphs = 0;
@@ -1654,7 +1654,7 @@ int text_layout_render_spans (
 
         span_run_t *line_runs = NULL;
         size_t line_run_count = 0;
-        if (slice_spans_for_line (spans, span_count, line, &line_runs, &line_run_count) != 0)
+        if (text_slice_spans_for_line (spans, span_count, line, &line_runs, &line_run_count) != 0)
             LAYOUT_FAIL ();
 
         const font_render_context_t *ctx_bold = NULL, *ctx_italic = NULL, *ctx_bold_italic = NULL;
@@ -1716,7 +1716,7 @@ int text_layout_render_spans (
 
         int rc_render = 0;
         if (line_run_count == 0) {
-            rc_render = render_line_text (
+            rc_render = text_render_line_text (
                 &ctx, &fallback, line->text, line->offset_units, line->baseline_units, out,
                 &rendered_glyphs, &missing_glyphs);
         } else {
@@ -1729,7 +1729,7 @@ int text_layout_render_spans (
             font_fallback_t *fb_use_bold_italic
                 = (need_bold && need_italic) ? &fb_bold_italic : &fallback;
 
-            rc_render = render_line_text_spans (
+            rc_render = text_render_line_text_spans (
                 &ctx, use_bold, use_italic, use_bold_italic, &fallback, fb_use_bold, fb_use_italic,
                 fb_use_bold_italic, line->text, line_runs, line_run_count, line->offset_units,
                 line->baseline_units, out, &rendered_glyphs, &missing_glyphs);
@@ -1769,8 +1769,8 @@ int text_layout_render_spans (
     if (lines_count)
         *lines_count = line_count;
 
-    const font_usage_entry_t *dominant = font_usage_stats_dominant (&usage);
-    size_t total_glyphs = font_usage_stats_total (&usage);
+    const font_usage_entry_t *dominant = text_font_usage_stats_dominant (&usage);
+    size_t total_glyphs = text_font_usage_stats_total (&usage);
     if (info) {
         if (dominant) {
             strncpy (info->resolved_family, dominant->name, sizeof (info->resolved_family) - 1);
@@ -1785,10 +1785,10 @@ int text_layout_render_spans (
             info->resolved_glyphs = total_glyphs;
     }
 
-    font_usage_stats_dispose (&usage);
+    text_font_usage_stats_dispose (&usage);
     font_fallback_dispose (&fallback);
     font_render_context_dispose (&ctx);
-    free_lines (lines, line_count);
+    text_free_lines (lines, line_count);
 #undef LAYOUT_FAIL
     return 0;
 }

@@ -14,28 +14,28 @@
 #include <string.h>
 
 /**
- * @copydoc json_skip_ws
+ * @copydoc jsr_json_skip_ws
  */
-const char *json_skip_ws (const char *p) {
+const char *jsr_json_skip_ws (const char *p) {
     while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
         p++;
     return p;
 }
 
 /**
- * @copydoc json_find_value
+ * @copydoc jsr_json_find_value
  */
-const char *json_find_value (const char *json, const char *key) {
+const char *jsr_json_find_value (const char *json, const char *key) {
     size_t klen = strlen (key);
     const char *p = json;
     while ((p = strstr (p, "\"")) != NULL) {
         p++;
         if (strncmp (p, key, klen) == 0 && p[klen] == '\"') {
             p += klen + 1;
-            p = json_skip_ws (p);
+            p = jsr_json_skip_ws (p);
             if (*p == ':') {
                 p++;
-                return json_skip_ws (p);
+                return jsr_json_skip_ws (p);
             }
         }
     }
@@ -43,10 +43,10 @@ const char *json_find_value (const char *json, const char *key) {
 }
 
 /**
- * @copydoc json_get_raw
+ * @copydoc jsr_json_get_raw
  */
-int json_get_raw (const char *json, const char *key, const char **out_ptr, size_t *out_len) {
-    const char *v = json_find_value (json, key);
+int jsr_json_get_raw (const char *json, const char *key, const char **out_ptr, size_t *out_len) {
+    const char *v = jsr_json_find_value (json, key);
     if (!v)
         return 0;
     const char *p = v;
@@ -87,10 +87,10 @@ int json_get_raw (const char *json, const char *key, const char **out_ptr, size_
 }
 
 /**
- * @copydoc json_get_string
+ * @copydoc jsr_json_get_string
  */
-char *json_get_string (const char *json, const char *key, size_t *out_len) {
-    const char *v = json_find_value (json, key);
+char *jsr_json_get_string (const char *json, const char *key, size_t *out_len) {
+    const char *v = jsr_json_find_value (json, key);
     if (!v || *v != '"')
         return NULL;
     v++;
@@ -181,10 +181,10 @@ fail:
 }
 
 /**
- * @copydoc json_get_bool
+ * @copydoc jsr_json_get_bool
  */
-int json_get_bool (const char *json, const char *key, int defval) {
-    const char *v = json_find_value (json, key);
+int jsr_json_get_bool (const char *json, const char *key, int defval) {
+    const char *v = jsr_json_find_value (json, key);
     if (!v)
         return defval;
     if (strncmp (v, "true", 4) == 0)
@@ -195,10 +195,10 @@ int json_get_bool (const char *json, const char *key, int defval) {
 }
 
 /**
- * @copydoc json_get_double
+ * @copydoc jsr_json_get_double
  */
-double json_get_double (const char *json, const char *key, double defval) {
-    const char *v = json_find_value (json, key);
+double jsr_json_get_double (const char *json, const char *key, double defval) {
+    const char *v = jsr_json_find_value (json, key);
     if (!v)
         return defval;
     char *end;

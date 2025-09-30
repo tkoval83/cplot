@@ -27,7 +27,7 @@ extern "C" {
  * @param p Вхідний вказівник у JSON-рядку (не `NULL`).
  * @return Вказівник на перший непробільний символ (може вказувати на `\0`).
  */
-const char *json_skip_ws (const char *p);
+const char *jsr_json_skip_ws (const char *p);
 
 /**
  * @brief Знаходить початок значення за ключем верхнього рівня.
@@ -36,7 +36,7 @@ const char *json_skip_ws (const char *p);
  * @return Вказівник на перший символ значення після двокрапки, пропустивши
  * пробіли; або `NULL`, якщо ключ не знайдено.
  */
-const char *json_find_value (const char *json, const char *key);
+const char *jsr_json_find_value (const char *json, const char *key);
 
 /**
  * @brief Повертає сире значення (вказівник + довжина) за ключем.
@@ -47,7 +47,7 @@ const char *json_find_value (const char *json, const char *key);
  * @return 1 — знайдено; 0 — не знайдено/помилка аргументів.
  * @warning Повертає підрядок, що посилається на вихідний буфер `json`.
  */
-int json_get_raw (const char *json, const char *key, const char **out_ptr, size_t *out_len);
+int jsr_json_get_raw (const char *json, const char *key, const char **out_ptr, size_t *out_len);
 
 /**
  * @brief Копіює рядкове значення у нову памʼять (завершене `\0`).
@@ -58,7 +58,7 @@ int json_get_raw (const char *json, const char *key, const char **out_ptr, size_
  * @note Підтримуються екскейпи: `\n`, `\t`, `\r`, `\\`, `\"`, `\/`; `\uXXXX`
  * спрощено, символ замінюється на `?`.
  */
-char *json_get_string (const char *json, const char *key, size_t *out_len);
+char *jsr_json_get_string (const char *json, const char *key, size_t *out_len);
 
 /**
  * @brief Зчитує булеве значення, повертає `defval`, якщо ключ відсутній або некоректний.
@@ -67,7 +67,7 @@ char *json_get_string (const char *json, const char *key, size_t *out_len);
  * @param defval Значення за замовчуванням.
  * @return 1 для `true`, 0 для `false`, інакше `defval`.
  */
-int json_get_bool (const char *json, const char *key, int defval);
+int jsr_json_get_bool (const char *json, const char *key, int defval);
 
 /**
  * @brief Зчитує число з плаваючою крапкою; у разі помилки повертає `defval`.
@@ -76,7 +76,7 @@ int json_get_bool (const char *json, const char *key, int defval);
  * @param defval Значення за замовчуванням.
  * @return Подвійна точність з `strtod` або `defval`.
  */
-double json_get_double (const char *json, const char *key, double defval);
+double jsr_json_get_double (const char *json, const char *key, double defval);
 
 #ifdef __cplusplus
 }

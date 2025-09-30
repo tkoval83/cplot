@@ -31,7 +31,7 @@ int main (int argc, char *argv[]) {
     if (!setlocale (LC_ALL, ""))
         LOGW ("Не вдалося налаштувати локаль за замовчуванням");
     options_t options;
-    options_parser (argc, argv, &options);
+    args_options_parser (argc, argv, &options);
 
     log_init_from_env ();
 
@@ -42,16 +42,16 @@ int main (int argc, char *argv[]) {
         log_set_level (LOG_DEBUG);
 
     if (options.help) {
-        cli_help ();
+        help_cli_help ();
         return EXIT_SUCCESS;
     }
     if (options.version) {
-        cli_print_version ();
+        help_cli_print_version ();
         return EXIT_SUCCESS;
     }
 
     if (options.cmd == CMD_NONE) {
-        cli_help ();
+        help_cli_help ();
         return EXIT_FAILURE;
     }
 

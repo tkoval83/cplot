@@ -14,11 +14,12 @@
 #include "log.h"
 #include "str.h"
 
+
 /**
  * @brief Створює значення дії пристрою без вибраної дії.
  * @return Обʼєкт дії з kind=DEVICE_ACTION_NONE.
  */
-static device_action_t device_action_make_none (void) {
+static device_action_t args_device_action_make_none (void) {
     device_action_t action
         = { .kind = DEVICE_ACTION_NONE, .pen = DEVICE_PEN_NONE, .motor = DEVICE_MOTOR_NONE };
     return action;
@@ -29,8 +30,8 @@ static device_action_t device_action_make_none (void) {
  * @param kind Тип дії (list, abort, home, ...).
  * @return Обʼєкт дії із заданим типом.
  */
-static device_action_t device_action_make_simple (device_action_kind_t kind) {
-    device_action_t action = device_action_make_none ();
+static device_action_t args_device_action_make_simple (device_action_kind_t kind) {
+    device_action_t action = args_device_action_make_none ();
     action.kind = kind;
     return action;
 }
@@ -40,8 +41,8 @@ static device_action_t device_action_make_simple (device_action_kind_t kind) {
  * @param pen Вказана піддія пера.
  * @return Обʼєкт дії типу DEVICE_ACTION_PEN.
  */
-static device_action_t device_action_make_pen (device_pen_action_t pen) {
-    device_action_t action = device_action_make_simple (DEVICE_ACTION_PEN);
+static device_action_t args_device_action_make_pen (device_pen_action_t pen) {
+    device_action_t action = args_device_action_make_simple (DEVICE_ACTION_PEN);
     action.pen = pen;
     return action;
 }
@@ -51,8 +52,8 @@ static device_action_t device_action_make_pen (device_pen_action_t pen) {
  * @param motor Бажаний стан моторів.
  * @return Обʼєкт дії типу DEVICE_ACTION_MOTORS.
  */
-static device_action_t device_action_make_motor (device_motor_action_t motor) {
-    device_action_t action = device_action_make_simple (DEVICE_ACTION_MOTORS);
+static device_action_t args_device_action_make_motor (device_motor_action_t motor) {
+    device_action_t action = args_device_action_make_simple (DEVICE_ACTION_MOTORS);
     action.motor = motor;
     return action;
 }
@@ -62,7 +63,7 @@ static device_action_t device_action_make_motor (device_motor_action_t motor) {
  * @param action Вказівник на дію.
  * @return true — дію встановлено, false — відсутня.
  */
-static bool device_action_is_set (const device_action_t *action) {
+static bool args_device_action_is_set (const device_action_t *action) {
     return action && action->kind != DEVICE_ACTION_NONE;
 }
 
@@ -71,7 +72,7 @@ static bool device_action_is_set (const device_action_t *action) {
  * @param name Токен назви підкоманди.
  * @return Код підкоманди або CMD_NONE.
  */
-static cmd_t parse_command_name (const char *name) {
+static cmd_t args_parse_command_name (const char *name) {
     if (!name)
         return CMD_NONE;
     static const struct {
@@ -92,42 +93,42 @@ static cmd_t parse_command_name (const char *name) {
  * @param token Рядок (напр., "pen", "motors-on", "status").
  * @return Визначена дія або відсутня.
  */
-static device_action_t device_action_from_token (const char *token) {
+static device_action_t args_device_action_from_token (const char *token) {
     if (!token)
-        return device_action_make_none ();
+        return args_device_action_make_none ();
 
     if (strcmp (token, "list") == 0)
-        return device_action_make_simple (DEVICE_ACTION_LIST);
+        return args_device_action_make_simple (DEVICE_ACTION_LIST);
     if (strcmp (token, "up") == 0 || strcmp (token, "pen-up") == 0)
-        return device_action_make_pen (DEVICE_PEN_UP);
+        return args_device_action_make_pen (DEVICE_PEN_UP);
     if (strcmp (token, "down") == 0 || strcmp (token, "pen-down") == 0)
-        return device_action_make_pen (DEVICE_PEN_DOWN);
+        return args_device_action_make_pen (DEVICE_PEN_DOWN);
     if (strcmp (token, "toggle") == 0 || strcmp (token, "pen-toggle") == 0)
-        return device_action_make_pen (DEVICE_PEN_TOGGLE);
+        return args_device_action_make_pen (DEVICE_PEN_TOGGLE);
     if (strcmp (token, "motors-on") == 0)
-        return device_action_make_motor (DEVICE_MOTOR_ON);
+        return args_device_action_make_motor (DEVICE_MOTOR_ON);
     if (strcmp (token, "motors-off") == 0)
-        return device_action_make_motor (DEVICE_MOTOR_OFF);
+        return args_device_action_make_motor (DEVICE_MOTOR_OFF);
     if (strcmp (token, "abort") == 0)
-        return device_action_make_simple (DEVICE_ACTION_ABORT);
+        return args_device_action_make_simple (DEVICE_ACTION_ABORT);
     if (strcmp (token, "home") == 0)
-        return device_action_make_simple (DEVICE_ACTION_HOME);
+        return args_device_action_make_simple (DEVICE_ACTION_HOME);
     if (strcmp (token, "jog") == 0)
-        return device_action_make_simple (DEVICE_ACTION_JOG);
+        return args_device_action_make_simple (DEVICE_ACTION_JOG);
     if (strcmp (token, "version") == 0)
-        return device_action_make_simple (DEVICE_ACTION_VERSION);
+        return args_device_action_make_simple (DEVICE_ACTION_VERSION);
     if (strcmp (token, "status") == 0)
-        return device_action_make_simple (DEVICE_ACTION_STATUS);
+        return args_device_action_make_simple (DEVICE_ACTION_STATUS);
     if (strcmp (token, "position") == 0)
-        return device_action_make_simple (DEVICE_ACTION_POSITION);
+        return args_device_action_make_simple (DEVICE_ACTION_POSITION);
     if (strcmp (token, "reset") == 0)
-        return device_action_make_simple (DEVICE_ACTION_RESET);
+        return args_device_action_make_simple (DEVICE_ACTION_RESET);
     if (strcmp (token, "reboot") == 0)
-        return device_action_make_simple (DEVICE_ACTION_REBOOT);
+        return args_device_action_make_simple (DEVICE_ACTION_REBOOT);
     if (strcmp (token, "profile") == 0)
-        return device_action_make_simple (DEVICE_ACTION_PROFILE);
+        return args_device_action_make_simple (DEVICE_ACTION_PROFILE);
 
-    return device_action_make_none ();
+    return args_device_action_make_none ();
 }
 
 typedef struct {
@@ -148,9 +149,9 @@ static device_parse_result_t
  * @param initial_action Початкова дія (якщо задано прапорцями).
  * @return Результат з вибраною дією та параметрами jog.
  */
-parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t initial_action) {
+args_parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t initial_action) {
     device_parse_result_t result = { .action = initial_action,
-                                     .action_set = device_action_is_set (&initial_action),
+                                     .action_set = args_device_action_is_set (&initial_action),
                                      .jog_dx_mm = 0.0,
                                      .dx_set = false,
                                      .jog_dy_mm = 0.0,
@@ -165,13 +166,13 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
             const char *next = (i + 1 < argc) ? argv[i + 1] : NULL;
             if (next && next[0] != '-') {
                 if (strcmp (next, "on") == 0) {
-                    result.action = device_action_make_motor (DEVICE_MOTOR_ON);
+                    result.action = args_device_action_make_motor (DEVICE_MOTOR_ON);
                     result.action_set = true;
                     ++i;
                     continue;
                 }
                 if (strcmp (next, "off") == 0) {
-                    result.action = device_action_make_motor (DEVICE_MOTOR_OFF);
+                    result.action = args_device_action_make_motor (DEVICE_MOTOR_OFF);
                     result.action_set = true;
                     ++i;
                     continue;
@@ -208,8 +209,8 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
         }
 
         if (!result.action_set) {
-            device_action_t candidate = device_action_from_token (token);
-            if (device_action_is_set (&candidate)) {
+            device_action_t candidate = args_device_action_from_token (token);
+            if (args_device_action_is_set (&candidate)) {
                 result.action = candidate;
                 result.action_set = true;
             }
@@ -217,7 +218,7 @@ parse_device_tokens (int argc, char *argv[], int current_optind, device_action_t
     }
 
     if (!result.action_set)
-        result.action = device_action_make_none ();
+        result.action = args_device_action_make_none ();
 
     return result;
 }
@@ -306,7 +307,7 @@ static const cli_option_desc_t k_option_descs[] = {
  * @param out_count [out] Кількість елементів у масиві.
  * @return Вказівник на статичний масив описів.
  */
-const cli_option_desc_t *argdefs_options (size_t *out_count) {
+const cli_option_desc_t *args_argdefs_options (size_t *out_count) {
     if (out_count)
         *out_count = sizeof (k_option_descs) / sizeof (k_option_descs[0]);
     return k_option_descs;
@@ -325,7 +326,7 @@ static const cli_command_desc_t k_commands[] = {
  * @brief Повертає список підтримуваних підкоманд.
  * @param out_count [out] Кількість елементів.
  */
-const cli_command_desc_t *argdefs_commands (size_t *out_count) {
+const cli_command_desc_t *args_argdefs_commands (size_t *out_count) {
     if (out_count)
         *out_count = sizeof (k_commands) / sizeof (k_commands[0]);
     return k_commands;
@@ -364,7 +365,7 @@ static const cli_config_desc_t k_cfg_keys[] = {
  * @brief Повертає опис підтримуваних ключів конфігурації (для help/config).
  * @param out_count [out] Кількість елементів.
  */
-const cli_config_desc_t *argdefs_config_keys (size_t *out_count) {
+const cli_config_desc_t *args_argdefs_config_keys (size_t *out_count) {
     if (out_count)
         *out_count = sizeof (k_cfg_keys) / sizeof (k_cfg_keys[0]);
     return k_cfg_keys;
@@ -375,7 +376,7 @@ const cli_config_desc_t *argdefs_config_keys (size_t *out_count) {
  * @param arg Код опції з getopt_long.
  * @param options Структура для заповнення.
  */
-void switch_options (int arg, options_t *options) {
+void args_switch_options (int arg, options_t *options) {
     switch (arg) {
     case 'h':
         options->help = true;
@@ -402,7 +403,7 @@ void switch_options (int arg, options_t *options) {
  * @param value Рядок значення.
  * @param options Структура CLI для заповнення.
  */
-static void parse_margins_argument (const char *value, options_t *options) {
+static void args_parse_margins_argument (const char *value, options_t *options) {
     if (!value || !options)
         return;
     double t = 0.0, r = 0.0, b = 0.0, l = 0.0;
@@ -445,7 +446,7 @@ static void parse_margins_argument (const char *value, options_t *options) {
  * @param options [in,out] Параметри CLI.
  * @return true — опцію оброблено, false — ні.
  */
-static bool handle_layout_option (int arg, const char *value, options_t *options) {
+static bool args_handle_layout_option (int arg, const char *value, options_t *options) {
     switch (arg) {
     case ARG_PORTRAIT:
         options->orientation = ORIENT_PORTRAIT;
@@ -456,7 +457,7 @@ static bool handle_layout_option (int arg, const char *value, options_t *options
         LOGD ("орієнтація: альбомна");
         return true;
     case ARG_MARGINS:
-        parse_margins_argument (value, options);
+        args_parse_margins_argument (value, options);
         return true;
     case ARG_WIDTH:
         if (value)
@@ -483,7 +484,7 @@ static bool handle_layout_option (int arg, const char *value, options_t *options
         return true;
     case ARG_FONT_FAMILY_VALUE:
         if (value) {
-            string_copy (options->font_family, sizeof (options->font_family), value);
+            str_string_copy (options->font_family, sizeof (options->font_family), value);
             LOGD ("родина/шрифт: %s", options->font_family);
         }
         return true;
@@ -498,7 +499,7 @@ static bool handle_layout_option (int arg, const char *value, options_t *options
  * @param options [in,out] Параметри CLI.
  * @return true — оброблено, false — ні.
  */
-static bool handle_output_option (int arg, options_t *options) {
+static bool args_handle_output_option (int arg, options_t *options) {
     switch (arg) {
     case ARG_PNG:
         options->preview_png = true;
@@ -506,7 +507,7 @@ static bool handle_output_option (int arg, options_t *options) {
         return true;
     case ARG_OUTPUT:
         if (options) {
-            string_copy (options->output_path, sizeof (options->output_path), optarg ? optarg : "");
+            str_string_copy (options->output_path, sizeof (options->output_path), optarg ? optarg : "");
             LOGD ("прев’ю: файл виводу %s", options->output_path);
         }
         return true;
@@ -533,7 +534,7 @@ static bool handle_output_option (int arg, options_t *options) {
  * @param options [in,out] Параметри CLI.
  * @return true — оброблено, false — ні.
  */
-static bool handle_font_option (int arg, options_t *options) {
+static bool args_handle_font_option (int arg, options_t *options) {
     if (!options)
         return false;
     if (options->cmd != CMD_FONTS)
@@ -559,10 +560,10 @@ static bool handle_font_option (int arg, options_t *options) {
  * @param options [in,out] Параметри CLI.
  * @return true — оброблено, false — ні.
  */
-static bool handle_device_option (int arg, const char *value, options_t *options) {
+static bool args_handle_device_option (int arg, const char *value, options_t *options) {
     switch (arg) {
     case ARG_DEVICE_NAME:
-        string_copy (options->remote_device, sizeof (options->remote_device), value);
+        str_string_copy (options->remote_device, sizeof (options->remote_device), value);
         LOGD ("пристрій: псевдонім %s", options->remote_device);
         return true;
     case ARG_DX:
@@ -572,7 +573,7 @@ static bool handle_device_option (int arg, const char *value, options_t *options
         options->jog_dy_mm = value ? atof (value) : 0.0;
         return true;
     case ARG_DEVICE_MODEL:
-        string_copy (options->device_model, sizeof (options->device_model), value);
+        str_string_copy (options->device_model, sizeof (options->device_model), value);
         LOGD ("модель пристрою: %s", options->device_model);
         return true;
     default:
@@ -587,7 +588,7 @@ static bool handle_device_option (int arg, const char *value, options_t *options
  * @param options [in,out] Параметри CLI.
  * @return true — оброблено, false — ні.
  */
-static bool handle_config_option (int arg, const char *value, options_t *options) {
+static bool args_handle_config_option (int arg, const char *value, options_t *options) {
     switch (arg) {
     case ARG_SHOW:
         options->config_action = CFG_SHOW;
@@ -599,7 +600,7 @@ static bool handle_config_option (int arg, const char *value, options_t *options
         return true;
     case ARG_SET:
         options->config_action = CFG_SET;
-        string_copy (options->config_set_pairs, sizeof (options->config_set_pairs), value);
+        str_string_copy (options->config_set_pairs, sizeof (options->config_set_pairs), value);
         LOGD ("конфігурація: встановлення %s", options->config_set_pairs);
         return true;
     default:
@@ -613,10 +614,10 @@ static bool handle_config_option (int arg, const char *value, options_t *options
  * @param argv Масив аргументів.
  * @param options [out] Для запису `file_name` або порожньо.
  */
-void get_file_name (int argc, char *argv[], options_t *options) {
+void args_get_file_name (int argc, char *argv[], options_t *options) {
 
     if (optind < argc) {
-        string_copy (options->file_name, sizeof (options->file_name), argv[optind++]);
+        str_string_copy (options->file_name, sizeof (options->file_name), argv[optind++]);
         LOGD ("вхідний файл: %s", options->file_name);
     } else {
         options->file_name[0] = '\0';
@@ -630,7 +631,7 @@ void get_file_name (int argc, char *argv[], options_t *options) {
  * @param argv Масив аргументів.
  * @param options [out] Структура результатів розбору.
  */
-void options_parser (int argc, char *argv[], options_t *options) {
+void args_options_parser (int argc, char *argv[], options_t *options) {
     static pthread_mutex_t parser_mutex = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_lock (&parser_mutex);
 
@@ -654,7 +655,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
     optind = 1;
 
     if (argc >= 2 && argv[1][0] != '-') {
-        cmd_t parsed = parse_command_name (argv[1]);
+        cmd_t parsed = args_parse_command_name (argv[1]);
         if (parsed != CMD_NONE) {
             options->cmd = parsed;
             LOGD ("виявлено підкоманду: %d", options->cmd);
@@ -678,23 +679,23 @@ void options_parser (int argc, char *argv[], options_t *options) {
             continue;
         }
 
-        if (handle_layout_option (arg, optarg, options))
+        if (args_handle_layout_option (arg, optarg, options))
             continue;
-        if (handle_output_option (arg, options))
-            continue;
-
-        if (handle_font_option (arg, options))
-            continue;
-        if (handle_device_option (arg, optarg, options))
-            continue;
-        if (handle_config_option (arg, optarg, options))
+        if (args_handle_output_option (arg, options))
             continue;
 
-        switch_options (arg, options);
+        if (args_handle_font_option (arg, options))
+            continue;
+        if (args_handle_device_option (arg, optarg, options))
+            continue;
+        if (args_handle_config_option (arg, optarg, options))
+            continue;
+
+        args_switch_options (arg, options);
     }
 
     if (options->cmd == CMD_NONE && optind < argc) {
-        cmd_t parsed_tail = parse_command_name (argv[optind]);
+        cmd_t parsed_tail = args_parse_command_name (argv[optind]);
         if (parsed_tail != CMD_NONE) {
             options->cmd = parsed_tail;
             LOGD ("виявлено підкоманду після опцій: %d", options->cmd);
@@ -704,7 +705,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
 
     if (options->cmd == CMD_DEVICE) {
         device_parse_result_t parsed
-            = parse_device_tokens (argc, argv, optind, options->device_action);
+            = args_parse_device_tokens (argc, argv, optind, options->device_action);
         if (parsed.action_set) {
             options->device_action = parsed.action;
             LOGD (
@@ -722,7 +723,7 @@ void options_parser (int argc, char *argv[], options_t *options) {
     }
 
     if (options->cmd == CMD_PRINT) {
-        get_file_name (argc, argv, options);
+        args_get_file_name (argc, argv, options);
     }
 
     pthread_mutex_unlock (&parser_mutex);

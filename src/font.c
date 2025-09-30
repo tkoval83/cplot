@@ -15,6 +15,7 @@
 
 #include <stdbool.h>
 
+
 /**
  * @brief Гарантує ємність масиву точок для додавання елементів.
  * @param pts [in,out] Масив точок (realloc за потреби).
@@ -22,7 +23,7 @@
  * @param needed Потрібна загальна кількість елементів.
  * @return 0 — успіх, -1 — помилка виділення/аргументи.
  */
-static int ensure_point_capacity (geom_point_t **pts, size_t *cap, size_t needed) {
+static int font_ensure_point_capacity (geom_point_t **pts, size_t *cap, size_t needed) {
     if (!pts || !cap)
         return -1;
     if (*cap >= needed)
@@ -47,8 +48,8 @@ static int ensure_point_capacity (geom_point_t **pts, size_t *cap, size_t needed
  * @param y Координата Y.
  * @return 0 — успіх, -1 — помилка.
  */
-static int append_point (geom_point_t **pts, size_t *len, size_t *cap, double x, double y) {
-    if (ensure_point_capacity (pts, cap, *len + 1) != 0)
+static int font_append_point (geom_point_t **pts, size_t *len, size_t *cap, double x, double y) {
+    if (font_ensure_point_capacity (pts, cap, *len + 1) != 0)
         return -1;
     (*pts)[*len].x = x;
     (*pts)[*len].y = y;
@@ -65,7 +66,7 @@ static int append_point (geom_point_t **pts, size_t *len, size_t *cap, double x,
  * @param out [out] Вихідні шляхи (GEOM_UNITS_MM).
  * @return 0 — успіх, -1 — помилка розбору.
  */
-static int emit_path_data (
+static int font_emit_path_data (
     const char *d, double origin_x, double baseline_y, double scale, geom_paths_t *out) {
     if (!d || !out)
         return 0;
@@ -126,7 +127,7 @@ static int emit_path_data (
             }
             len = 0;
             have_path = true;
-            if (append_point (&pts, &len, &cap, x_mm, y_mm) != 0) {
+            if (font_append_point (&pts, &len, &cap, x_mm, y_mm) != 0) {
                 rc = -1;
                 break;
             }
@@ -135,7 +136,7 @@ static int emit_path_data (
                 have_path = true;
                 len = 0;
             }
-            if (append_point (&pts, &len, &cap, x_mm, y_mm) != 0) {
+            if (font_append_point (&pts, &len, &cap, x_mm, y_mm) != 0) {
                 rc = -1;
                 break;
             }
@@ -171,7 +172,7 @@ struct font {
  * @param units Цільові одиниці геометрії.
  * @return Кількість цільових одиниць у одному пункті.
  */
-static double units_per_point (geom_units_t units) {
+static double font_units_per_point (geom_units_t units) {
     if (units == GEOM_UNITS_MM)
         return 25.4 / 72.0;
     return 1.0 / 72.0;
@@ -184,7 +185,7 @@ static double units_per_point (geom_units_t units) {
  * @param buflen Розмір буфера призначення.
  * @return Довжина джерела (без NUL).
  */
-static int copy_string_field (const char *source, char *buffer, size_t buflen);
+static int font_copy_string_field (const char *source, char *buffer, size_t buflen);
 
 /** @copydoc font_render_context_init */
 int font_render_context_init (
@@ -205,7 +206,7 @@ int font_render_context_init (
         return -1;
     }
 
-    double em_units = size_pt * units_per_point (units);
+    double em_units = size_pt * font_units_per_point (units);
     ctx->scale = em_units / ctx->metrics.units_per_em;
     ctx->line_height_units = ctx->metrics.ascent - ctx->metrics.descent;
     if (!(ctx->line_height_units > 0.0))
@@ -251,7 +252,7 @@ void font_render_context_dispose (font_render_context_t *ctx) {
  * @param face_index Індекс обличчя у масиві faces або SIZE_MAX.
  * @return 0 — успіх, -1 — помилка памʼяті.
  */
-static int fallback_store_map (font_fallback_t *fallback, uint32_t cp, size_t face_index) {
+static int font_fallback_store_map (font_fallback_t *fallback, uint32_t cp, size_t face_index) {
     if (fallback->map_count == fallback->map_cap) {
         size_t new_cap = (fallback->map_cap == 0) ? 16 : fallback->map_cap * 2;
         font_fallback_map_t *grown
@@ -274,7 +275,7 @@ int font_fallback_init (
         return -1;
     memset (fallback, 0, sizeof (*fallback));
     if (preferred_family && *preferred_family)
-        copy_string_field (preferred_family, fallback->preferred, sizeof (fallback->preferred));
+        font_copy_string_field (preferred_family, fallback->preferred, sizeof (fallback->preferred));
     fallback->size_pt = (size_pt > 0.0) ? size_pt : 14.0;
     fallback->units = units;
     return 0;
@@ -298,7 +299,7 @@ void font_fallback_dispose (font_fallback_t *fallback) {
  * @param cp Кодова точка.
  * @return Контекст або NULL, якщо не знайдено/помилка.
  */
-static const font_render_context_t *fallback_get_context (
+static const font_render_context_t *font_fallback_get_context (
     font_fallback_t *fallback, const font_render_context_t *primary_ctx, uint32_t cp) {
     if (!fallback)
         return NULL;
@@ -314,11 +315,11 @@ static const font_render_context_t *fallback_get_context (
     const char *preferred = fallback->preferred[0] ? fallback->preferred : NULL;
     font_face_t face;
     if (fontreg_select_face_for_codepoints (preferred, &cp, 1, &face) != 0) {
-        fallback_store_map (fallback, cp, SIZE_MAX);
+        font_fallback_store_map (fallback, cp, SIZE_MAX);
         return NULL;
     }
     if (primary_ctx && strcmp (face.id, primary_ctx->face.id) == 0) {
-        fallback_store_map (fallback, cp, SIZE_MAX);
+        font_fallback_store_map (fallback, cp, SIZE_MAX);
         return NULL;
     }
 
@@ -336,23 +337,23 @@ static const font_render_context_t *fallback_get_context (
             font_fallback_face_t *grown = (font_fallback_face_t *)realloc (
                 fallback->faces, new_cap * sizeof (*fallback->faces));
             if (!grown) {
-                fallback_store_map (fallback, cp, SIZE_MAX);
+                font_fallback_store_map (fallback, cp, SIZE_MAX);
                 return NULL;
             }
             fallback->faces = grown;
             fallback->face_cap = new_cap;
         }
         font_fallback_face_t *slot = &fallback->faces[fallback->face_count];
-        copy_string_field (face.id, slot->face_id, sizeof (slot->face_id));
+        font_copy_string_field (face.id, slot->face_id, sizeof (slot->face_id));
         if (font_render_context_init (&slot->ctx, &face, fallback->size_pt, fallback->units) != 0) {
-            fallback_store_map (fallback, cp, SIZE_MAX);
+            font_fallback_store_map (fallback, cp, SIZE_MAX);
             return NULL;
         }
         face_index = fallback->face_count;
         fallback->face_count++;
     }
 
-    fallback_store_map (fallback, cp, face_index);
+    font_fallback_store_map (fallback, cp, face_index);
     return &fallback->faces[face_index].ctx;
 }
 
@@ -370,7 +371,7 @@ int font_fallback_emit (
         return 1;
     if (used_family)
         *used_family = NULL;
-    const font_render_context_t *fb_ctx = fallback_get_context (fallback, primary_ctx, codepoint);
+    const font_render_context_t *fb_ctx = font_fallback_get_context (fallback, primary_ctx, codepoint);
     if (!fb_ctx)
         return 1;
 
@@ -393,7 +394,7 @@ int font_fallback_emit (
         return 0;
     }
     if (rc > 0) {
-        fallback_store_map (fallback, codepoint, SIZE_MAX);
+        font_fallback_store_map (fallback, codepoint, SIZE_MAX);
         if (used_family)
             *used_family = NULL;
         return 1;
@@ -410,7 +411,7 @@ int font_fallback_emit (
  * @param out_len [out] Довжина, байт (може бути NULL).
  * @return 0 — успіх; <0 — помилка.
  */
-static int read_entire_file (const char *path, char **out_data, size_t *out_len) {
+static int font_read_entire_file (const char *path, char **out_data, size_t *out_len) {
     if (!path || !out_data)
         return -2;
     FILE *fp = fopen (path, "rb");
@@ -456,7 +457,7 @@ static int read_entire_file (const char *path, char **out_data, size_t *out_len)
  * @return 0 — знайдено; 1 — не знайдено; <0 — помилка.
  */
 static int
-find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
+font_find_tag_segment (const char *data, const char *tag, const char **out_start, size_t *out_len) {
     if (!data || !tag || !out_start || !out_len)
         return -2;
     const char *start = strstr (data, tag);
@@ -482,7 +483,7 @@ find_tag_segment (const char *data, const char *tag, const char **out_start, siz
  * @return 0 — знайдено; 1 — відсутній; <0 — помилка.
  */
 static int
-extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
+font_extract_attribute (const char *segment, size_t seg_len, const char *attr, char **out_value) {
     if (!segment || !attr || !out_value)
         return -2;
     size_t attr_len = strlen (attr);
@@ -521,10 +522,10 @@ extract_attribute (const char *segment, size_t seg_len, const char *attr, char *
  * @brief Зчитує число подвійної точності з атрибута або повертає запасне значення.
  */
 static double
-parse_double_with_default (const char *segment, size_t seg_len, const char *attr, double fallback) {
+font_parse_double_with_default (const char *segment, size_t seg_len, const char *attr, double fallback) {
     char *value = NULL;
     double result = fallback;
-    int rc = extract_attribute (segment, seg_len, attr, &value);
+    int rc = font_extract_attribute (segment, seg_len, attr, &value);
     if (rc == 0 && value) {
         char *end = NULL;
         errno = 0;
@@ -540,11 +541,11 @@ parse_double_with_default (const char *segment, size_t seg_len, const char *attr
  * @brief Копіює значення рядкового атрибута у виділену памʼять.
  * @return 0 — успіх; 1 — відсутній атрибут; -1 — помилка.
  */
-static int set_string_field (char **field, const char *segment, size_t seg_len, const char *attr) {
+static int font_set_string_field (char **field, const char *segment, size_t seg_len, const char *attr) {
     if (!field)
         return -2;
     char *value = NULL;
-    int rc = extract_attribute (segment, seg_len, attr, &value);
+    int rc = font_extract_attribute (segment, seg_len, attr, &value);
     if (rc == 1) {
         *field = NULL;
         return 0;
@@ -562,7 +563,7 @@ static int set_string_field (char **field, const char *segment, size_t seg_len, 
  * @param out_len [out] Спожита кількість байтів.
  * @return 0 — успіх; -1 — недійсна послідовність; -2 — некоректні аргументи.
  */
-static int decode_utf8_char (const char *input, uint32_t *out_cp, size_t *out_len) {
+static int font_decode_utf8_char (const char *input, uint32_t *out_cp, size_t *out_len) {
     if (!input || !out_cp)
         return -2;
     const unsigned char *s = (const unsigned char *)input;
@@ -611,7 +612,7 @@ static int decode_utf8_char (const char *input, uint32_t *out_cp, size_t *out_le
  * @param out_cp [out] Кодова точка.
  * @return 0 — успіх; -1 — помилка синтаксису; -2 — некоректні аргументи.
  */
-static int parse_codepoint (const char *value, uint32_t *out_cp) {
+static int font_parse_codepoint (const char *value, uint32_t *out_cp) {
     if (!value || !out_cp)
         return -2;
     if (value[0] == '\0')
@@ -640,7 +641,7 @@ static int parse_codepoint (const char *value, uint32_t *out_cp) {
         return 0;
     } else {
         uint32_t cp = 0;
-        if (decode_utf8_char (value, &cp, NULL) != 0)
+        if (font_decode_utf8_char (value, &cp, NULL) != 0)
             return -1;
         *out_cp = cp;
         return 0;
@@ -651,7 +652,7 @@ static int parse_codepoint (const char *value, uint32_t *out_cp) {
  * @brief Додає гліф і кодову точку до таблиці шрифту.
  * @return 0 — успіх; -1 — помилка памʼяті.
  */
-static int append_glyph_entry (font_t *font, glyph_t *glyph, uint32_t codepoint) {
+static int font_append_glyph_entry (font_t *font, glyph_t *glyph, uint32_t codepoint) {
     size_t new_count = font->glyph_count + 1;
     glyph_t **glyphs = (glyph_t **)malloc (new_count * sizeof (*glyphs));
     if (!glyphs)
@@ -680,7 +681,7 @@ static int append_glyph_entry (font_t *font, glyph_t *glyph, uint32_t codepoint)
  * @param font Обʼєкт шрифту.
  * @return 0 — успіх; -1 — помилка.
  */
-static int ensure_glyphs_loaded (font_t *font) {
+static int font_ensure_glyphs_loaded (font_t *font) {
     if (font->glyphs_loaded)
         return 0;
     const char *cursor = font->svg_data;
@@ -693,12 +694,12 @@ static int ensure_glyphs_loaded (font_t *font) {
             break;
         size_t seg_len = (size_t)(end - glyph_tag + 1);
         char *unicode_val = NULL;
-        if (extract_attribute (glyph_tag, seg_len, "unicode=", &unicode_val) != 0) {
+        if (font_extract_attribute (glyph_tag, seg_len, "unicode=", &unicode_val) != 0) {
             cursor = end + 1;
             continue;
         }
         uint32_t codepoint = 0;
-        if (parse_codepoint (unicode_val, &codepoint) != 0) {
+        if (font_parse_codepoint (unicode_val, &codepoint) != 0) {
             free (unicode_val);
             cursor = end + 1;
             continue;
@@ -711,11 +712,11 @@ static int ensure_glyphs_loaded (font_t *font) {
                 break;
             }
         }
-        double adv = parse_double_with_default (
+        double adv = font_parse_double_with_default (
             glyph_tag, seg_len, "horiz-adv-x=", font->metrics.units_per_em);
         char *path_val = NULL;
         const char *path_data = "";
-        if (extract_attribute (glyph_tag, seg_len, "d=", &path_val) == 0 && path_val)
+        if (font_extract_attribute (glyph_tag, seg_len, "d=", &path_val) == 0 && path_val)
             path_data = path_val;
         glyph_t *glyph = NULL;
         if (!duplicate && glyph_create_from_svg_path (codepoint, adv, path_data, &glyph) != 0)
@@ -729,7 +730,7 @@ static int ensure_glyphs_loaded (font_t *font) {
         if (duplicate) {
             glyph_release (glyph);
         } else {
-            if (append_glyph_entry (font, glyph, codepoint) != 0) {
+            if (font_append_glyph_entry (font, glyph, codepoint) != 0) {
                 glyph_release (glyph);
                 return -1;
             }
@@ -749,7 +750,7 @@ int font_load_from_file (const char *path, font_t **out_font) {
         return -1;
     char *svg = NULL;
     size_t svg_len = 0;
-    if (read_entire_file (path, &svg, &svg_len) != 0) {
+    if (font_read_entire_file (path, &svg, &svg_len) != 0) {
         free (font);
         return -1;
     }
@@ -757,32 +758,32 @@ int font_load_from_file (const char *path, font_t **out_font) {
     font->svg_len = svg_len;
     const char *font_segment = NULL;
     size_t font_seg_len = 0;
-    if (find_tag_segment (svg, "<font ", &font_segment, &font_seg_len) != 0) {
+    if (font_find_tag_segment (svg, "<font ", &font_segment, &font_seg_len) != 0) {
         font_release (font);
         return -1;
     }
-    if (set_string_field (&font->id, font_segment, font_seg_len, "id=") != 0) {
+    if (font_set_string_field (&font->id, font_segment, font_seg_len, "id=") != 0) {
         font_release (font);
         return -1;
     }
     const char *face_segment = NULL;
     size_t face_seg_len = 0;
-    if (find_tag_segment (svg, "<font-face", &face_segment, &face_seg_len) != 0) {
+    if (font_find_tag_segment (svg, "<font-face", &face_segment, &face_seg_len) != 0) {
         font_release (font);
         return -1;
     }
-    if (set_string_field (&font->family, face_segment, face_seg_len, "font-family=") != 0) {
+    if (font_set_string_field (&font->family, face_segment, face_seg_len, "font-family=") != 0) {
         font_release (font);
         return -1;
     }
     font->metrics.units_per_em
-        = parse_double_with_default (face_segment, face_seg_len, "units-per-em=", 1000.0);
-    font->metrics.ascent = parse_double_with_default (face_segment, face_seg_len, "ascent=", 0.0);
-    font->metrics.descent = parse_double_with_default (face_segment, face_seg_len, "descent=", 0.0);
+        = font_parse_double_with_default (face_segment, face_seg_len, "units-per-em=", 1000.0);
+    font->metrics.ascent = font_parse_double_with_default (face_segment, face_seg_len, "ascent=", 0.0);
+    font->metrics.descent = font_parse_double_with_default (face_segment, face_seg_len, "descent=", 0.0);
     font->metrics.cap_height
-        = parse_double_with_default (face_segment, face_seg_len, "cap-height=", 0.0);
+        = font_parse_double_with_default (face_segment, face_seg_len, "cap-height=", 0.0);
     font->metrics.x_height
-        = parse_double_with_default (face_segment, face_seg_len, "x-height=", 0.0);
+        = font_parse_double_with_default (face_segment, face_seg_len, "x-height=", 0.0);
     *out_font = font;
     return 0;
 }
@@ -790,7 +791,7 @@ int font_load_from_file (const char *path, font_t **out_font) {
 /**
  * @brief Копіює рядок у буфер із обрізанням, повертаючи довжину джерела.
  */
-static int copy_string_field (const char *source, char *buffer, size_t buflen) {
+static int font_copy_string_field (const char *source, char *buffer, size_t buflen) {
     if (!source)
         return 0;
     size_t len = strlen (source);
@@ -807,14 +808,14 @@ static int copy_string_field (const char *source, char *buffer, size_t buflen) {
 int font_get_id (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
-    return copy_string_field (font->id, buffer, buflen);
+    return font_copy_string_field (font->id, buffer, buflen);
 }
 
 /** @copydoc font_get_family_name */
 int font_get_family_name (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
-    return copy_string_field (font->family, buffer, buflen);
+    return font_copy_string_field (font->family, buffer, buflen);
 }
 
 /** @copydoc font_get_metrics */
@@ -830,7 +831,7 @@ int font_find_glyph (const font_t *font, uint32_t codepoint, const glyph_t **out
     if (!font || !out_glyph)
         return -1;
     font_t *mutable_font = (font_t *)font;
-    if (ensure_glyphs_loaded (mutable_font) != 0)
+    if (font_ensure_glyphs_loaded (mutable_font) != 0)
         return -1;
     for (size_t i = 0; i < mutable_font->glyph_count; ++i) {
         if (mutable_font->glyph_codes[i] == codepoint) {
@@ -865,7 +866,7 @@ int font_emit_glyph_paths (
         *advance_units = info.advance_width;
 
     const char *d = glyph_get_path_data (glyph);
-    if (emit_path_data (d, origin_x, baseline_y, scale, out) != 0)
+    if (font_emit_path_data (d, origin_x, baseline_y, scale, out) != 0)
         return -1;
 
     return 0;
@@ -876,7 +877,7 @@ int font_list_codepoints (const font_t *font, uint32_t **out_codes, size_t *out_
     if (!font || !out_codes || !out_count)
         return -1;
     font_t *mutable_font = (font_t *)font;
-    if (ensure_glyphs_loaded (mutable_font) != 0)
+    if (font_ensure_glyphs_loaded (mutable_font) != 0)
         return -1;
     size_t count = mutable_font->glyph_count;
     uint32_t *codes = NULL;

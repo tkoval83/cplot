@@ -26,7 +26,7 @@
  * @param info [out] Інформація про рендеринг (може бути NULL).
  * @return 0 — успіх, 1 — помилка.
  */
-static int build_text_paths (
+static int drawing_build_text_paths (
     string_t input,
     const char *font_family,
     double font_size_pt,
@@ -96,7 +96,7 @@ int drawing_build_layout (
     geom_paths_t text_paths;
     text_render_info_t info;
     memset (&info, 0, sizeof (info));
-    if (build_text_paths (input, font_family, font_size_pt, frame_width_mm, &text_paths, &info)
+    if (drawing_build_text_paths (input, font_family, font_size_pt, frame_width_mm, &text_paths, &info)
         != 0)
         return 1;
 

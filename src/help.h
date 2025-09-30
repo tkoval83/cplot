@@ -17,17 +17,17 @@
  * дії пристрою, ключі конфігурації та автора. Джерело правди — визначення в
  * `args.c`/`args.h` і константи з `proginfo.h`.
  */
-void cli_help (void);
+void help_cli_help (void);
 
 /**
  * @brief Виводить короткий розділ "Використання" у `stdout`.
  */
-void cli_usage (void);
+void help_cli_usage (void);
 
 /**
  * @brief Виводить рядок версії застосунку у `stdout`.
  * @details Формат: "<name> версія <version>".
  */
-void cli_print_version (void);
+void help_cli_print_version (void);
 
 #endif

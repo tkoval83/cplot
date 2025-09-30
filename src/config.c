@@ -29,7 +29,7 @@
  * @param p Шлях до каталогу.
  * @return 1 — існує, 0 — ні.
  */
-static int dir_exists (const char *p) {
+static int config_dir_exists (const char *p) {
     struct stat st;
     if (stat (p, &st) == 0 && S_ISDIR (st.st_mode))
         return 1;
@@ -41,7 +41,7 @@ static int dir_exists (const char *p) {
  * @param path Повний шлях до каталогу/файлу.
  * @return 0 — успіх, -1 — помилка створення.
  */
-static int mkdir_p (const char *path) {
+static int config_mkdir_p (const char *path) {
     if (!path || !path[0])
         return -1;
     char tmp[512];
@@ -55,14 +55,14 @@ static int mkdir_p (const char *path) {
     for (char *p = tmp + 1; *p; p++) {
         if (*p == PATH_SEP) {
             *p = '\0';
-            if (!dir_exists (tmp)) {
+            if (!config_dir_exists (tmp)) {
                 if (mkdir (tmp, 0700) != 0 && errno != EEXIST)
                     return -1;
             }
             *p = PATH_SEP;
         }
     }
-    if (!dir_exists (tmp)) {
+    if (!config_dir_exists (tmp)) {
         if (mkdir (tmp, 0700) != 0 && errno != EEXIST)
             return -1;
     }
@@ -74,7 +74,7 @@ static int mkdir_p (const char *path) {
  * @param fp Файл.
  * @param value Рядок (може бути NULL).
  */
-static void json_write_string (FILE *fp, const char *value) {
+static void config_json_write_string (FILE *fp, const char *value) {
     fputc ('"', fp);
     if (value) {
         for (const char *p = value; *p; ++p) {
@@ -104,7 +104,7 @@ static void json_write_string (FILE *fp, const char *value) {
  * @param path Повний шлях до файлу.
  * @return 0 — ок, -1 — помилка.
  */
-static int ensure_parent_dir (const char *path) {
+static int config_ensure_parent_dir (const char *path) {
     if (!path || !*path)
         return -1;
     char dir[512];
@@ -116,7 +116,7 @@ static int ensure_parent_dir (const char *path) {
     *last_sep = '\0';
     if (dir[0] == '\0')
         return 0;
-    if (mkdir_p (dir) != 0) {
+    if (config_mkdir_p (dir) != 0) {
         LOGE ("не вдалося створити каталог: %s", dir);
         log_print (LOG_ERROR, "конфігурація: не вдалося створити каталог %s", dir);
         return -1;
@@ -209,7 +209,7 @@ int config_get_path (char *buf, size_t buflen) {
  * @param c [out] Конфігурація.
  * @return 0 — успіх, -1 — помилка.
  */
-static int parse_json (const char *s, config_t *c) {
+static int config_parse_json (const char *s, config_t *c) {
     if (!s || !c)
         return -1;
     typedef enum { FIELD_DOUBLE, FIELD_INT, FIELD_ENUM, FIELD_STRING } field_kind_t;
@@ -355,7 +355,7 @@ static int parse_json (const char *s, config_t *c) {
  * @param c Конфігурація.
  * @return 0 — успіх, -1 — помилка IO.
  */
-static int write_json (FILE *fp, const config_t *c) {
+static int config_write_json (FILE *fp, const config_t *c) {
     int n = fprintf (
         fp,
         "{\n"
@@ -385,10 +385,10 @@ static int write_json (FILE *fp, const config_t *c) {
         return -1;
     if (fprintf (fp, "  \"font_family\": ") < 0)
         return -1;
-    json_write_string (fp, c->font_family);
+    config_json_write_string (fp, c->font_family);
     if (fprintf (fp, ",\n  \"default_device\": ") < 0)
         return -1;
-    json_write_string (fp, c->default_device);
+    config_json_write_string (fp, c->default_device);
     if (fprintf (fp, "\n}\n") < 0)
         return -1;
     return 0;
@@ -502,7 +502,7 @@ int config_load (config_t *out) {
     size_t rd = fread (buf, 1, (size_t)n, fp);
     buf[rd] = '\0';
     fclose (fp);
-    (void)parse_json (buf, out);
+    (void)config_parse_json (buf, out);
     free (buf);
     out->version = CONFIG_VERSION;
 
@@ -529,7 +529,7 @@ int config_save (const config_t *cfg) {
     if (config_get_path (path, sizeof (path)) != 0)
         return -2;
 
-    if (ensure_parent_dir (path) != 0)
+    if (config_ensure_parent_dir (path) != 0)
         return -7;
 
     char tmp[576];
@@ -540,7 +540,7 @@ int config_save (const config_t *cfg) {
         log_print (LOG_ERROR, "конфігурація: не вдалося відкрити %s для запису", tmp);
         return -3;
     }
-    if (write_json (fp, cfg) != 0) {
+    if (config_write_json (fp, cfg) != 0) {
         fclose (fp);
         remove (tmp);
         LOGE ("помилка під час запису конфігурації у JSON: %s", tmp);

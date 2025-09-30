@@ -47,27 +47,27 @@ typedef struct arg_parser {
  * @param program Імʼя програми (для usage).
  * @return Вказівник на парсер або NULL.
  */
-arg_parser_t *arg_parser_create (const char *program);
+arg_parser_t *argp_arg_parser_create (const char *program);
 
 /**
  * @brief Знищує парсер і вивільняє ресурси.
  * @param p Парсер (може бути NULL).
  */
-void arg_parser_destroy (arg_parser_t *p);
+void argp_arg_parser_destroy (arg_parser_t *p);
 
 /**
  * @brief Встановлює обробник хелпу/використання.
  * @param p Парсер.
  * @param handler Функція, що друкує usage (отримує program).
  */
-void arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler);
+void argp_arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler);
 
 /**
  * @brief Встановлює обробник для позиційних аргументів.
  * @param p Парсер.
  * @param handler Обробник, що отримує значення аргументу.
  */
-void arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler);
+void argp_arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler);
 
 /**
  * @brief Додає опцію до парсера.
@@ -79,7 +79,7 @@ void arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler);
  * @param usage Опис для довідки.
  * @return 0 — успіх, -1 — помилка.
  */
-int arg_parser_add (
+int argp_arg_parser_add (
     arg_parser_t *p,
     const char *long_name,
     const char *short_name,
@@ -96,7 +96,7 @@ int arg_parser_add (
  * @param usage Опис для довідки.
  * @return 0 — успіх, -1 — помилка.
  */
-int arg_parser_add_auto (
+int argp_arg_parser_add_auto (
     arg_parser_t *p,
     const char *pattern,
     const char *short_name,
@@ -110,14 +110,14 @@ int arg_parser_add_auto (
  * @param argv Масив аргументів.
  * @return 0 — успіх (або після друку --help), -1 — помилка.
  */
-int arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]);
+int argp_arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]);
 
 /**
  * @brief Друкує перелік опцій у потік.
  * @param p Парсер.
  * @param out Потік виводу.
  */
-void arg_parser_print_options (const arg_parser_t *p, FILE *out);
+void argp_arg_parser_print_options (const arg_parser_t *p, FILE *out);
 
 #ifdef __cplusplus
 }

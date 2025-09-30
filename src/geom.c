@@ -368,7 +368,7 @@ int geom_paths_set_units (geom_paths_t *ps, geom_units_t units) {
  * @param to Цільові одиниці.
  * @return Множник, яким слід домножити координати.
  */
-static double unit_scale (geom_units_t from, geom_units_t to) {
+static double geom_unit_scale (geom_units_t from, geom_units_t to) {
     if (from == to)
         return 1.0;
     if (from == GEOM_UNITS_MM && to == GEOM_UNITS_IN)
@@ -384,7 +384,7 @@ static double unit_scale (geom_units_t from, geom_units_t to) {
 int geom_paths_convert (const geom_paths_t *a, geom_units_t to, geom_paths_t *out) {
     if (!a || !out)
         return -1;
-    double scale = unit_scale (a->units, to);
+    double scale = geom_unit_scale (a->units, to);
     if (geom_paths_clone (a, out) != 0)
         return -1;
     if (scale != 1.0) {

@@ -22,7 +22,7 @@
  * @param opt Параметри сторінки та полів.
  * @return CANVAS_STATUS_OK або код помилки.
  */
-static canvas_status_t validate_options (const canvas_options_t *opt) {
+static canvas_status_t canvas_validate_options (const canvas_options_t *opt) {
     if (!opt)
         return CANVAS_STATUS_INVALID_INPUT;
     if (!(opt->paper_w_mm > 0.0) || !(opt->paper_h_mm > 0.0))
@@ -49,7 +49,7 @@ static canvas_status_t validate_options (const canvas_options_t *opt) {
  * @param dst [out] Вихідний контейнер у мм.
  * @return CANVAS_STATUS_OK або CANVAS_STATUS_INTERNAL_ERROR.
  */
-static canvas_status_t copy_paths_mm (const geom_paths_t *src, geom_paths_t *dst) {
+static canvas_status_t canvas_copy_paths_mm (const geom_paths_t *src, geom_paths_t *dst) {
     if (!src || !dst)
         return CANVAS_STATUS_INVALID_INPUT;
     int rc;
@@ -69,7 +69,7 @@ static canvas_status_t copy_paths_mm (const geom_paths_t *src, geom_paths_t *dst
 /**
  * @brief Гарантує місце у масиві сегментів планувальника (realloc при потребі).
  */
-static int segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap, size_t extra) {
+static int canvas_segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap, size_t extra) {
     size_t need = *len + extra;
     if (need <= *cap)
         return 0;
@@ -104,7 +104,7 @@ canvas_status_t canvas_layout_document (
         options->margin_top_mm, options->margin_left_mm, options->margin_bottom_mm,
         options->margin_right_mm, (int)options->orientation);
 
-    canvas_status_t opt_rc = validate_options (options);
+    canvas_status_t opt_rc = canvas_validate_options (options);
     if (opt_rc != CANVAS_STATUS_OK)
         return opt_rc;
 
@@ -129,7 +129,7 @@ canvas_status_t canvas_layout_document (
         return CANVAS_STATUS_INVALID_INPUT;
 
     geom_paths_t src_mm;
-    canvas_status_t copy_rc = copy_paths_mm (source_paths, &src_mm);
+    canvas_status_t copy_rc = canvas_copy_paths_mm (source_paths, &src_mm);
     if (copy_rc != CANVAS_STATUS_OK)
         return copy_rc;
 
@@ -346,7 +346,7 @@ int canvas_generate_motion_plan (
             have_current = true;
         } else if (
             fabs (current[0] - path_start[0]) > 1e-6 || fabs (current[1] - path_start[1]) > 1e-6) {
-            if (segments_reserve (&segments, &seg_len, &seg_cap, 1) != 0)
+            if (canvas_segments_reserve (&segments, &seg_len, &seg_cap, 1) != 0)
                 goto fail;
             segments[seg_len].target_mm[0] = path_start[0];
             segments[seg_len].target_mm[1] = path_start[1];
@@ -361,7 +361,7 @@ int canvas_generate_motion_plan (
             double target[2] = { path->pts[j].x, path->pts[j].y };
             if (fabs (current[0] - target[0]) <= 1e-9 && fabs (current[1] - target[1]) <= 1e-9)
                 continue;
-            if (segments_reserve (&segments, &seg_len, &seg_cap, 1) != 0)
+            if (canvas_segments_reserve (&segments, &seg_len, &seg_cap, 1) != 0)
                 goto fail;
             segments[seg_len].target_mm[0] = target[0];
             segments[seg_len].target_mm[1] = target[1];

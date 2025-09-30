@@ -31,7 +31,7 @@
  * @param dst Вказівник на 4‑байтовий буфер призначення.
  * @param value Значення для запису.
  */
-static void write_u32_be (uint8_t *dst, uint32_t value) {
+static void png_write_u32_be (uint8_t *dst, uint32_t value) {
     dst[0] = (uint8_t)((value >> 24) & 0xFF);
     dst[1] = (uint8_t)((value >> 16) & 0xFF);
     dst[2] = (uint8_t)((value >> 8) & 0xFF);
@@ -45,7 +45,7 @@ static void write_u32_be (uint8_t *dst, uint32_t value) {
  * @param len Довжина у байтах.
  * @return Оновлене CRC‑32.
  */
-static uint32_t crc32_update (uint32_t crc, const uint8_t *data, size_t len) {
+static uint32_t png_crc32_update (uint32_t crc, const uint8_t *data, size_t len) {
     static uint32_t table[256];
     static int table_init = 0;
     if (!table_init) {
@@ -70,7 +70,7 @@ static uint32_t crc32_update (uint32_t crc, const uint8_t *data, size_t len) {
  * @param len Довжина.
  * @return Нова Adler‑32.
  */
-static uint32_t adler32_update (uint32_t adler, const uint8_t *data, size_t len) {
+static uint32_t png_adler32_update (uint32_t adler, const uint8_t *data, size_t len) {
     uint32_t s1 = adler & 0xFFFFU;
     uint32_t s2 = (adler >> 16) & 0xFFFFU;
     for (size_t i = 0; i < len; ++i) {
@@ -89,7 +89,7 @@ static uint32_t adler32_update (uint32_t adler, const uint8_t *data, size_t len)
  * @param add Кількість байтів для додавання.
  * @return 0 — успіх; -1 — помилка виділення памʼяті.
  */
-static int append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t *data, size_t add) {
+static int png_append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t *data, size_t add) {
     size_t need = *len + add;
     if (need > *cap) {
         size_t new_cap = (*cap == 0) ? 1024 : *cap;
@@ -109,8 +109,8 @@ static int append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t 
 /**
  * @brief Додає один байт у динамічний буфер.
  */
-static int append_byte (uint8_t **buf, size_t *len, size_t *cap, uint8_t value) {
-    return append_bytes (buf, len, cap, &value, 1);
+static int png_append_byte (uint8_t **buf, size_t *len, size_t *cap, uint8_t value) {
+    return png_append_bytes (buf, len, cap, &value, 1);
 }
 
 /**
@@ -123,7 +123,7 @@ static int append_byte (uint8_t **buf, size_t *len, size_t *cap, uint8_t value) 
  * @param data_len Довжина даних.
  * @return 0 — успіх; -1 — помилка памʼяті.
  */
-static int append_chunk (
+static int png_append_chunk (
     uint8_t **buf,
     size_t *len,
     size_t *cap,
@@ -131,17 +131,17 @@ static int append_chunk (
     const uint8_t *data,
     uint32_t data_len) {
     uint8_t header[8];
-    write_u32_be (header, data_len);
+    png_write_u32_be (header, data_len);
     memcpy (header + 4, type, 4);
-    if (append_bytes (buf, len, cap, header, 8) != 0)
+    if (png_append_bytes (buf, len, cap, header, 8) != 0)
         return -1;
-    if (data_len > 0 && append_bytes (buf, len, cap, data, data_len) != 0)
+    if (data_len > 0 && png_append_bytes (buf, len, cap, data, data_len) != 0)
         return -1;
-    uint32_t crc = crc32_update (0, (const uint8_t *)type, 4);
-    crc = crc32_update (crc, data, data_len);
+    uint32_t crc = png_crc32_update (0, (const uint8_t *)type, 4);
+    crc = png_crc32_update (crc, data, data_len);
     uint8_t crc_bytes[4];
-    write_u32_be (crc_bytes, crc);
-    return append_bytes (buf, len, cap, crc_bytes, 4);
+    png_write_u32_be (crc_bytes, crc);
+    return png_append_bytes (buf, len, cap, crc_bytes, 4);
 }
 
 /**
@@ -153,7 +153,7 @@ static int append_chunk (
  * @param x0_mm,y0_mm Початкова точка у мм.
  * @param x1_mm,y1_mm Кінцева точка у мм.
  */
-static void draw_line (
+static void png_draw_line (
     uint8_t *pixels,
     int width,
     int height,
@@ -219,7 +219,7 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         if (path->len < 2)
             continue;
         for (size_t j = 1; j < path->len; ++j)
-            draw_line (
+            png_draw_line (
                 pixels, width_px, height_px, scale, path->pts[j - 1].x, path->pts[j - 1].y,
                 path->pts[j].x, path->pts[j].y);
     }
@@ -243,18 +243,18 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
     size_t cap = 0;
 
     const uint8_t signature[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
-    if (append_bytes (&png, &len, &cap, signature, sizeof (signature)) != 0)
+    if (png_append_bytes (&png, &len, &cap, signature, sizeof (signature)) != 0)
         goto fail;
 
     uint8_t ihdr[13];
-    write_u32_be (&ihdr[0], (uint32_t)width_px);
-    write_u32_be (&ihdr[4], (uint32_t)height_px);
+    png_write_u32_be (&ihdr[0], (uint32_t)width_px);
+    png_write_u32_be (&ihdr[4], (uint32_t)height_px);
     ihdr[8] = 8;
     ihdr[9] = 0;
     ihdr[10] = 0;
     ihdr[11] = 0;
     ihdr[12] = 0;
-    if (append_chunk (&png, &len, &cap, "IHDR", ihdr, sizeof (ihdr)) != 0)
+    if (png_append_chunk (&png, &len, &cap, "IHDR", ihdr, sizeof (ihdr)) != 0)
         goto fail;
 
     size_t zcap = raw_size + raw_size / 255 + 100;
@@ -263,8 +263,8 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         goto fail;
     size_t zlen = 0;
 
-    append_byte (&zdata, &zlen, &zcap, 0x78);
-    append_byte (&zdata, &zlen, &zcap, 0x01);
+    png_append_byte (&zdata, &zlen, &zcap, 0x78);
+    png_append_byte (&zdata, &zlen, &zcap, 0x01);
 
     size_t offset = 0;
     uint32_t adler = 1;
@@ -273,33 +273,33 @@ int png_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         if (chunk > 65535)
             chunk = 65535;
         int final = (offset + chunk == raw_size) ? 1 : 0;
-        append_byte (&zdata, &zlen, &zcap, (uint8_t)(final));
+        png_append_byte (&zdata, &zlen, &zcap, (uint8_t)(final));
         uint16_t len16 = (uint16_t)chunk;
         uint16_t nlen = ~len16;
-        append_byte (&zdata, &zlen, &zcap, len16 & 0xFF);
-        append_byte (&zdata, &zlen, &zcap, (len16 >> 8) & 0xFF);
-        append_byte (&zdata, &zlen, &zcap, nlen & 0xFF);
-        append_byte (&zdata, &zlen, &zcap, (nlen >> 8) & 0xFF);
-        if (append_bytes (&zdata, &zlen, &zcap, raw + offset, chunk) != 0) {
+        png_append_byte (&zdata, &zlen, &zcap, len16 & 0xFF);
+        png_append_byte (&zdata, &zlen, &zcap, (len16 >> 8) & 0xFF);
+        png_append_byte (&zdata, &zlen, &zcap, nlen & 0xFF);
+        png_append_byte (&zdata, &zlen, &zcap, (nlen >> 8) & 0xFF);
+        if (png_append_bytes (&zdata, &zlen, &zcap, raw + offset, chunk) != 0) {
             free (zdata);
             goto fail;
         }
-        adler = adler32_update (adler, raw + offset, chunk);
+        adler = png_adler32_update (adler, raw + offset, chunk);
         offset += chunk;
     }
 
     uint8_t adler_bytes[4];
-    write_u32_be (adler_bytes, adler);
-    append_bytes (&zdata, &zlen, &zcap, adler_bytes, sizeof (adler_bytes));
+    png_write_u32_be (adler_bytes, adler);
+    png_append_bytes (&zdata, &zlen, &zcap, adler_bytes, sizeof (adler_bytes));
     free (raw);
 
-    if (append_chunk (&png, &len, &cap, "IDAT", zdata, (uint32_t)zlen) != 0) {
+    if (png_append_chunk (&png, &len, &cap, "IDAT", zdata, (uint32_t)zlen) != 0) {
         free (zdata);
         goto fail;
     }
     free (zdata);
 
-    if (append_chunk (&png, &len, &cap, "IEND", NULL, 0) != 0)
+    if (png_append_chunk (&png, &len, &cap, "IEND", NULL, 0) != 0)
         goto fail;
 
     out->bytes = png;

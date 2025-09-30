@@ -72,7 +72,7 @@ typedef enum {
  * @param out_len [out] Розмір буфера.
  * @return 0 — успіх, інакше код помилки.
  */
-static int layout_to_bytes (
+static int cmd_layout_to_bytes (
     const drawing_layout_t *layout, preview_fmt_t fmt, uint8_t **out_bytes, size_t *out_len);
 
 /**
@@ -103,7 +103,7 @@ void cmd_set_output (FILE *out) { g_cmd_out = out; }
  * @param out [out] Призначення налаштувань.
  * @param cfg Джерело конфігурації (може бути NULL — тоді лише скидання).
  */
-static void axidraw_settings_from_config (axidraw_settings_t *out, const config_t *cfg) {
+static void cmd_axidraw_settings_from_config (axidraw_settings_t *out, const config_t *cfg) {
     if (!out)
         return;
     axidraw_settings_reset (out);
@@ -126,7 +126,7 @@ static void axidraw_settings_from_config (axidraw_settings_t *out, const config_
  * @param settings [out] Налаштування для застосунку.
  * @return true — успіх, false — помилка.
  */
-static bool load_axidraw_settings (const char *model, axidraw_settings_t *settings) {
+static bool cmd_load_axidraw_settings (const char *model, axidraw_settings_t *settings) {
     if (!settings)
         return false;
     const char *model_id = (model && *model) ? model : CONFIG_DEFAULT_MODEL;
@@ -138,7 +138,7 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
     }
     const axidraw_device_profile_t *profile = axidraw_device_profile_for_model (model_id);
     axidraw_device_profile_apply (&cfg, profile);
-    axidraw_settings_from_config (settings, &cfg);
+    cmd_axidraw_settings_from_config (settings, &cfg);
 
     if (profile && profile->steps_per_mm > 0.0) {
         settings->steps_per_mm = profile->steps_per_mm;
@@ -164,7 +164,7 @@ static bool load_axidraw_settings (const char *model, axidraw_settings_t *settin
 /**
  * @brief Попереджає про зайнятість пристрою, читаючи інформацію з lock-файлу.
  */
-static void warn_device_busy (void) {
+static void cmd_warn_device_busy (void) {
     char holder[64] = "невідомий процес";
     const char *lock_path = axidraw_device_lock_file ();
     FILE *lf = fopen (lock_path, "r");
@@ -185,7 +185,7 @@ static void warn_device_busy (void) {
  * @param out_w [out] Ширина рамки.
  * @param out_h [out] Висота рамки.
  */
-static void page_frame_dims (const drawing_page_t *page, double *out_w, double *out_h) {
+static void cmd_page_frame_dims (const drawing_page_t *page, double *out_w, double *out_h) {
     double fw = 0.0, fh = 0.0;
     if (page->orientation == ORIENT_PORTRAIT) {
         fw = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
@@ -205,7 +205,7 @@ static void page_frame_dims (const drawing_page_t *page, double *out_w, double *
  * @param s Вхідний коефіцієнт.
  * @return Обмежене значення.
  */
-static double clamp_scale (double s) {
+static double cmd_clamp_scale (double s) {
     if (!(s > 0.0))
         return 1.0;
     if (s > 1.0)
@@ -226,7 +226,7 @@ static double clamp_scale (double s) {
  * @param orientation Орієнтація (ORIENT_PORTRAIT/ORIENT_LANDSCAPE або інше — взяти з профілю).
  * @return 0 — успіх, 1/2 — помилка параметрів.
  */
-static int build_print_page (
+static int cmd_build_print_page (
     drawing_page_t *page,
     const char *device_model,
     double paper_w_mm,
@@ -257,7 +257,7 @@ typedef int (*device_cb_t) (axidraw_device_t *dev, void *ctx);
  * @param wait_idle Чекати завершення рухів після дії.
  * @return 0 — успіх, 1 — помилка/зайнятий пристрій.
  */
-static int with_axidraw_device (
+static int cmd_with_axidraw_device (
     const char *port,
     const char *model,
     verbose_level_t verbose,
@@ -268,12 +268,12 @@ static int with_axidraw_device (
     int status = 0;
     int lock_fd = -1;
     if (axidraw_device_lock_acquire (&lock_fd) != 0) {
-        warn_device_busy ();
+        cmd_warn_device_busy ();
         return 1;
     }
 
     axidraw_settings_t settings;
-    if (!load_axidraw_settings (model, &settings)) {
+    if (!cmd_load_axidraw_settings (model, &settings)) {
         LOGE ("Не вдалося завантажити налаштування для моделі %s", model ? model : "(типова)");
         status = 1;
         goto cleanup;
@@ -325,7 +325,7 @@ cleanup:
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_pen_up_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_pen_up_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = axidraw_pen_up (dev);
     if (rc == 0)
@@ -339,7 +339,7 @@ static int device_pen_up_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_pen_down_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_pen_down_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = axidraw_pen_down (dev);
     if (rc == 0)
@@ -353,7 +353,7 @@ static int device_pen_down_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     bool pen_up = false;
     if (ebb_query_pen (dev->port, &pen_up, dev->timeout_ms) != 0) {
@@ -372,7 +372,7 @@ static int device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = ebb_enable_motors (dev->port, EBB_MOTOR_STEP_16, EBB_MOTOR_STEP_16, dev->timeout_ms);
     if (rc == 0)
@@ -386,7 +386,7 @@ static int device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = ebb_disable_motors (dev->port, dev->timeout_ms);
     if (rc == 0)
@@ -400,7 +400,7 @@ static int device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_abort_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_abort_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = axidraw_emergency_stop (dev);
     if (rc == 0)
@@ -419,7 +419,7 @@ typedef struct {
  * @param ctx Контекст зі зсувами (jog_ctx_t*).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_jog_cb (axidraw_device_t *dev, void *ctx) {
     jog_ctx_t *jog = (jog_ctx_t *)ctx;
     double dx = jog ? jog->dx_mm : 0.0;
     double dy = jog ? jog->dy_mm : 0.0;
@@ -461,7 +461,7 @@ static int device_jog_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_home_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_home_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = axidraw_home_default (dev);
     if (rc == 0)
@@ -475,7 +475,7 @@ static int device_home_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_version_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_version_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     char version[64];
     if (ebb_query_version (dev->port, version, sizeof (version), dev->timeout_ms) != 0) {
@@ -492,7 +492,7 @@ static int device_version_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_status_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_status_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     ebb_motion_status_t ms = { 0 };
     if (ebb_query_motion (dev->port, &ms, dev->timeout_ms) != 0)
@@ -535,7 +535,7 @@ static int device_status_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_position_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_position_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int32_t steps1 = 0;
     int32_t steps2 = 0;
@@ -565,7 +565,7 @@ static int device_position_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_reset_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_reset_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int rc = axidraw_pen_up (dev);
     if (rc != 0)
@@ -587,7 +587,7 @@ static int device_reset_cb (axidraw_device_t *dev, void *ctx) {
  * @param ctx Не використовується (NULL).
  * @return 0 — успіх, -1 — помилка.
  */
-static int device_reboot_cb (axidraw_device_t *dev, void *ctx) {
+static int cmd_device_reboot_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     if (serial_write_line (dev->port, "RB") != 0) {
         LOGE ("Не вдалося надіслати команду перезавантаження");
@@ -637,7 +637,7 @@ typedef struct {
  * @param verbose Рівень докладності.
  * @return true — успіх, false — не вдалося визначити профіль/порт.
  */
-static bool ensure_device_profile (
+static bool cmd_ensure_device_profile (
     config_t *cfg, char *inout_alias, size_t alias_len, const char *model, verbose_level_t verbose);
 
 /**
@@ -646,7 +646,7 @@ static bool ensure_device_profile (
  * @param out [out] Буфер для псевдоніма.
  * @param out_len Розмір буфера.
  */
-static void derive_port_alias (const char *path, char *out, size_t out_len) {
+static void cmd_derive_port_alias (const char *path, char *out, size_t out_len) {
     if (!out || out_len == 0)
         return;
     const char *base = path;
@@ -673,7 +673,7 @@ static void derive_port_alias (const char *path, char *out, size_t out_len) {
 }
 
 /** Перевіряє, чи порт уже є у списку. */
-static bool device_port_exists (const device_port_info_t *ports, size_t count, const char *path) {
+static bool cmd_device_port_exists (const device_port_info_t *ports, size_t count, const char *path) {
     if (!ports || !path)
         return false;
     for (size_t i = 0; i < count; ++i) {
@@ -692,10 +692,10 @@ static bool device_port_exists (const device_port_info_t *ports, size_t count, c
  * @return true — успіх, false — помилка виділення памʼяті.
  */
 static bool
-device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, const char *path) {
+cmd_device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, const char *path) {
     if (!ports || !count || !capacity || !path || !*path)
         return false;
-    if (*ports && device_port_exists (*ports, *count, path))
+    if (*ports && cmd_device_port_exists (*ports, *count, path))
         return true;
     if (*count == *capacity) {
         size_t new_cap = (*capacity == 0) ? 4 : (*capacity * 2);
@@ -710,7 +710,7 @@ device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, co
     memset (slot, 0, sizeof (*slot));
     strncpy (slot->path, path, sizeof (slot->path) - 1);
     slot->path[sizeof (slot->path) - 1] = '\0';
-    derive_port_alias (slot->path, slot->alias, sizeof (slot->alias));
+    cmd_derive_port_alias (slot->path, slot->alias, sizeof (slot->alias));
     ++(*count);
     return true;
 }
@@ -722,7 +722,7 @@ device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, co
  * @param capacity [in,out] Ємність масиву.
  * @return 0 — успіх, -1 — помилка виділення.
  */
-static int collect_device_ports (device_port_info_t **ports, size_t *count, size_t *capacity) {
+static int cmd_collect_device_ports (device_port_info_t **ports, size_t *count, size_t *capacity) {
     if (!ports || !count || !capacity)
         return -1;
 
@@ -745,7 +745,7 @@ static int collect_device_ports (device_port_info_t **ports, size_t *count, size
         int grc = glob (patterns[i], 0, NULL, &g);
         if (grc == 0) {
             for (size_t j = 0; j < g.gl_pathc; ++j) {
-                if (!device_port_add (ports, count, capacity, g.gl_pathv[j])) {
+                if (!cmd_device_port_add (ports, count, capacity, g.gl_pathv[j])) {
                     LOGE ("Недостатньо пам'яті для переліку портів");
                     globfree (&g);
                     return -1;
@@ -760,7 +760,7 @@ static int collect_device_ports (device_port_info_t **ports, size_t *count, size
 #ifdef __APPLE__
     char guessed[PATH_MAX];
     if (serial_guess_axidraw_port (guessed, sizeof (guessed)) == 0) {
-        if (!device_port_add (ports, count, capacity, guessed)) {
+        if (!cmd_device_port_add (ports, count, capacity, guessed)) {
             LOGE ("Недостатньо пам'яті для переліку портів");
             return -1;
         }
@@ -773,7 +773,7 @@ static int collect_device_ports (device_port_info_t **ports, size_t *count, size
 /**
  * @brief Перевіряє відповіді від контролера для кожного порту та зчитує версію.
  */
-static void probe_device_ports (device_port_info_t *ports, size_t count) {
+static void cmd_probe_device_ports (device_port_info_t *ports, size_t count) {
     if (!ports)
         return;
     for (size_t i = 0; i < count; ++i) {
@@ -811,7 +811,7 @@ static void probe_device_ports (device_port_info_t *ports, size_t count) {
  * @param out_auto_selected [out] true, якщо порт обрано автоматично.
  * @return 0 — успіх, 1 — не знайдено жодного, 2 — псевдонім не знайдено, -1 — помилка.
  */
-static int resolve_device_port (
+static int cmd_resolve_device_port (
     const char *alias,
     char *out_path,
     size_t out_len,
@@ -824,7 +824,7 @@ static int resolve_device_port (
     device_port_info_t *ports = NULL;
     size_t count = 0;
     size_t capacity = 0;
-    if (collect_device_ports (&ports, &count, &capacity) != 0) {
+    if (cmd_collect_device_ports (&ports, &count, &capacity) != 0) {
         free (ports);
         return -1;
     }
@@ -833,7 +833,7 @@ static int resolve_device_port (
         return 1;
     }
 
-    probe_device_ports (ports, count);
+    cmd_probe_device_ports (ports, count);
 
     const device_port_info_t *selected = NULL;
     bool requested_alias = alias && *alias;
@@ -874,7 +874,7 @@ static int resolve_device_port (
 /**
  * @brief Локальна реалізація `device list` — друк знайдених портів.
  */
-static int device_list_local (const char *model, verbose_level_t verbose) {
+static int cmd_device_list_local (const char *model, verbose_level_t verbose) {
     (void)model;
     (void)verbose;
     LOGI ("Перелік доступних портів");
@@ -884,7 +884,7 @@ static int device_list_local (const char *model, verbose_level_t verbose) {
     size_t count = 0;
     size_t capacity = 0;
 
-    if (collect_device_ports (&ports, &count, &capacity) != 0) {
+    if (cmd_collect_device_ports (&ports, &count, &capacity) != 0) {
         free (ports);
         return 1;
     }
@@ -896,7 +896,7 @@ static int device_list_local (const char *model, verbose_level_t verbose) {
         return 0;
     }
 
-    probe_device_ports (ports, count);
+    cmd_probe_device_ports (ports, count);
 
     fprintf (CMD_OUT, "Знайдені порти (%zu):\n", count);
     for (size_t i = 0; i < count; ++i) {
@@ -931,7 +931,7 @@ static int device_list_local (const char *model, verbose_level_t verbose) {
  * @param verbose Режим докладності.
  * @return true — успіх, false — помилка.
  */
-static bool device_profile_local (
+static bool cmd_device_profile_local (
     const char *alias, const char *model, device_profile_info_t *info, verbose_level_t verbose) {
     if (!info)
         return false;
@@ -941,7 +941,7 @@ static bool device_profile_local (
     char resolved_alias[64];
     bool auto_selected = false;
 
-    int resolve_rc = resolve_device_port (
+    int resolve_rc = cmd_resolve_device_port (
         alias && *alias ? alias : NULL, port_buf, sizeof (port_buf), resolved_alias,
         sizeof (resolved_alias), &auto_selected);
     if (resolve_rc == 1) {
@@ -996,7 +996,7 @@ static bool device_profile_local (
 #if 0
 static __thread const char *g_device_alias_ctx = NULL;
 
-static int run_device_list (
+static int cmd_run_device_list (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1007,10 +1007,10 @@ static int run_device_list (
     (void)port;
     (void)dx;
     (void)dy;
-    return device_list_local (model, v);
+    return cmd_device_list_local (model, v);
 }
 
-static int run_device_profile (
+static int cmd_run_device_profile (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1023,7 +1023,7 @@ static int run_device_profile (
     (void)dy;
     device_profile_info_t info;
 
-    if (!device_profile_local (g_device_alias_ctx, model, &info, v))
+    if (!cmd_device_profile_local (g_device_alias_ctx, model, &info, v))
         return 1;
     fprintf (CMD_OUT, "ALIAS=%s\n", info.alias);
     fprintf (CMD_OUT, "PORT=%s\n", info.port);
@@ -1037,7 +1037,7 @@ static int run_device_profile (
     return 0;
 }
 
-static int run_device_pen (
+static int cmd_run_device_pen (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1048,19 +1048,19 @@ static int run_device_pen (
     (void)dy;
     switch (a->pen) {
     case DEVICE_PEN_UP:
-        return with_axidraw_device (port, model, v, "підйом пера", device_pen_up_cb, NULL, true);
+        return cmd_with_axidraw_device (port, model, v, "підйом пера", cmd_device_pen_up_cb, NULL, true);
     case DEVICE_PEN_DOWN:
-        return with_axidraw_device (
-            port, model, v, "опускання пера", device_pen_down_cb, NULL, true);
+        return cmd_with_axidraw_device (
+            port, model, v, "опускання пера", cmd_device_pen_down_cb, NULL, true);
     case DEVICE_PEN_TOGGLE:
-        return with_axidraw_device (
-            port, model, v, "перемикання пера", device_pen_toggle_cb, NULL, true);
+        return cmd_with_axidraw_device (
+            port, model, v, "перемикання пера", cmd_device_pen_toggle_cb, NULL, true);
     default:
         return 2;
     }
 }
 
-static int run_device_motors (
+static int cmd_run_device_motors (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1071,17 +1071,17 @@ static int run_device_motors (
     (void)dy;
     switch (a->motor) {
     case DEVICE_MOTOR_ON:
-        return with_axidraw_device (
-            port, model, v, "увімкнення моторів", device_motors_on_cb, NULL, false);
+        return cmd_with_axidraw_device (
+            port, model, v, "увімкнення моторів", cmd_device_motors_on_cb, NULL, false);
     case DEVICE_MOTOR_OFF:
-        return with_axidraw_device (
-            port, model, v, "вимкнення моторів", device_motors_off_cb, NULL, false);
+        return cmd_with_axidraw_device (
+            port, model, v, "вимкнення моторів", cmd_device_motors_off_cb, NULL, false);
     default:
         return 2;
     }
 }
 
-static int run_device_abort (
+static int cmd_run_device_abort (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1091,10 +1091,10 @@ static int run_device_abort (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "аварійна зупинка", device_abort_cb, NULL, false);
+    return cmd_with_axidraw_device (port, model, v, "аварійна зупинка", cmd_device_abort_cb, NULL, false);
 }
 
-static int run_device_home (
+static int cmd_run_device_home (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1104,10 +1104,10 @@ static int run_device_home (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "home", device_home_cb, NULL, true);
+    return cmd_with_axidraw_device (port, model, v, "home", cmd_device_home_cb, NULL, true);
 }
 
-static int run_device_jog (
+static int cmd_run_device_jog (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1116,10 +1116,10 @@ static int run_device_jog (
     verbose_level_t v) {
     (void)a;
     jog_ctx_t ctx = { .dx_mm = dx, .dy_mm = dy };
-    return with_axidraw_device (port, model, v, "ручний зсув", device_jog_cb, &ctx, false);
+    return cmd_with_axidraw_device (port, model, v, "ручний зсув", cmd_device_jog_cb, &ctx, false);
 }
 
-static int run_device_version (
+static int cmd_run_device_version (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1129,10 +1129,10 @@ static int run_device_version (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "версія", device_version_cb, NULL, false);
+    return cmd_with_axidraw_device (port, model, v, "версія", cmd_device_version_cb, NULL, false);
 }
 
-static int run_device_status (
+static int cmd_run_device_status (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1142,10 +1142,10 @@ static int run_device_status (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "статус", device_status_cb, NULL, false);
+    return cmd_with_axidraw_device (port, model, v, "статус", cmd_device_status_cb, NULL, false);
 }
 
-static int run_device_position (
+static int cmd_run_device_position (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1155,10 +1155,10 @@ static int run_device_position (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "позиція", device_position_cb, NULL, false);
+    return cmd_with_axidraw_device (port, model, v, "позиція", cmd_device_position_cb, NULL, false);
 }
 
-static int run_device_reset (
+static int cmd_run_device_reset (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1168,10 +1168,10 @@ static int run_device_reset (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "скидання", device_reset_cb, NULL, false);
+    return cmd_with_axidraw_device (port, model, v, "скидання", cmd_device_reset_cb, NULL, false);
 }
 
-static int run_device_reboot (
+static int cmd_run_device_reboot (
     const device_action_t *a,
     const char *port,
     const char *model,
@@ -1181,12 +1181,12 @@ static int run_device_reboot (
     (void)a;
     (void)dx;
     (void)dy;
-    return with_axidraw_device (port, model, v, "перезавантаження", device_reboot_cb, NULL, false);
+    return cmd_with_axidraw_device (port, model, v, "перезавантаження", cmd_device_reboot_cb, NULL, false);
 }
 #endif
 
 #if 0
-static int device_execute_local (
+static int cmd_device_execute_local (
     const device_action_t *action,
     const char *alias,
     const char *model,
@@ -1201,7 +1201,7 @@ static int device_execute_local (
     if (action->kind != DEVICE_ACTION_LIST && action->kind != DEVICE_ACTION_PROFILE) {
         const char *requested = (alias && *alias) ? alias : NULL;
         int resolve_rc
-            = resolve_device_port (requested, port_buf, sizeof (port_buf), NULL, 0, NULL);
+            = cmd_resolve_device_port (requested, port_buf, sizeof (port_buf), NULL, 0, NULL);
         if (resolve_rc == 1) {
             LOGE ("Порт пристрою не знайдено");
             fprintf (CMD_OUT, "Пристрої не знайдено. Підключіть пристрій і повторіть.\n");
@@ -1236,18 +1236,18 @@ static int device_execute_local (
     } device_action_dispatch_t;
 
     static const device_action_dispatch_t k_device_dispatch[] = {
-        { DEVICE_ACTION_LIST, run_device_list },
-        { DEVICE_ACTION_PROFILE, run_device_profile },
-        { DEVICE_ACTION_PEN, run_device_pen },
-        { DEVICE_ACTION_MOTORS, run_device_motors },
-        { DEVICE_ACTION_ABORT, run_device_abort },
-        { DEVICE_ACTION_HOME, run_device_home },
-        { DEVICE_ACTION_JOG, run_device_jog },
-        { DEVICE_ACTION_VERSION, run_device_version },
-        { DEVICE_ACTION_STATUS, run_device_status },
-        { DEVICE_ACTION_POSITION, run_device_position },
-        { DEVICE_ACTION_RESET, run_device_reset },
-        { DEVICE_ACTION_REBOOT, run_device_reboot },
+        { DEVICE_ACTION_LIST, cmd_run_device_list },
+        { DEVICE_ACTION_PROFILE, cmd_run_device_profile },
+        { DEVICE_ACTION_PEN, cmd_run_device_pen },
+        { DEVICE_ACTION_MOTORS, cmd_run_device_motors },
+        { DEVICE_ACTION_ABORT, cmd_run_device_abort },
+        { DEVICE_ACTION_HOME, cmd_run_device_home },
+        { DEVICE_ACTION_JOG, cmd_run_device_jog },
+        { DEVICE_ACTION_VERSION, cmd_run_device_version },
+        { DEVICE_ACTION_STATUS, cmd_run_device_status },
+        { DEVICE_ACTION_POSITION, cmd_run_device_position },
+        { DEVICE_ACTION_RESET, cmd_run_device_reset },
+        { DEVICE_ACTION_REBOOT, cmd_run_device_reboot },
     };
 
     const device_action_dispatch_t *entry = NULL;
@@ -1265,7 +1265,7 @@ static int device_execute_local (
 #endif
 
 /** Розбір числа з плаваючою крапкою (strict). */
-static bool parse_double_str (const char *value, double *out) {
+static bool cmd_parse_double_str (const char *value, double *out) {
     if (!value || !out)
         return false;
     char *endptr = NULL;
@@ -1277,7 +1277,7 @@ static bool parse_double_str (const char *value, double *out) {
 }
 
 /** Розбір десяткового цілого зі строгими перевірками. */
-static bool parse_int_str (const char *value, int *out) {
+static bool cmd_parse_int_str (const char *value, int *out) {
     if (!value || !out)
         return false;
     char *endptr = NULL;
@@ -1296,20 +1296,20 @@ static bool parse_int_str (const char *value, int *out) {
  * @brief Застосовує одну пару key=value до конфігурації (обмежений перелік ключів).
  * @return 0 — успіх, -1 — невідомий ключ або некоректне значення.
  */
-static int config_apply_pair (config_t *cfg, const char *key_raw, const char *value_raw) {
+static int cmd_config_apply_pair (config_t *cfg, const char *key_raw, const char *value_raw) {
     if (!cfg || !key_raw || !value_raw)
         return -1;
 
     char key[64];
     strncpy (key, key_raw, sizeof (key) - 1);
     key[sizeof (key) - 1] = '\0';
-    string_trim_ascii (key);
-    string_to_lower_ascii (key);
+    str_string_trim_ascii (key);
+    str_string_to_lower_ascii (key);
 
     char value_buf[256];
     strncpy (value_buf, value_raw, sizeof (value_buf) - 1);
     value_buf[sizeof (value_buf) - 1] = '\0';
-    string_trim_ascii (value_buf);
+    str_string_trim_ascii (value_buf);
 
     if (strcmp (key, "device-name") == 0 || strcmp (key, "device_name") == 0
         || strcmp (key, "default_device") == 0 || strcmp (key, "device") == 0) {
@@ -1343,43 +1343,43 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
         || strcmp (key, "height") == 0)
         return -1;
     if (strcmp (key, "margin_top_mm") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->margin_top_mm = dbl;
         return 0;
     }
     if (strcmp (key, "margin_right_mm") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->margin_right_mm = dbl;
         return 0;
     }
     if (strcmp (key, "margin_bottom_mm") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->margin_bottom_mm = dbl;
         return 0;
     }
     if (strcmp (key, "margin_left_mm") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->margin_left_mm = dbl;
         return 0;
     }
     if (strcmp (key, "font_size_pt") == 0 || strcmp (key, "font_size") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->font_size_pt = dbl;
         return 0;
     }
     if (strcmp (key, "speed_mm_s") == 0 || strcmp (key, "speed") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->speed_mm_s = dbl;
         return 0;
     }
     if (strcmp (key, "accel_mm_s2") == 0 || strcmp (key, "accel") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->accel_mm_s2 = dbl;
         return 0;
@@ -1390,31 +1390,31 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
     if (strcmp (key, "pen_down_pos") == 0 || strcmp (key, "pen_down") == 0)
         return -1;
     if (strcmp (key, "pen_up_speed") == 0) {
-        if (!parse_int_str (value_buf, &integer))
+        if (!cmd_parse_int_str (value_buf, &integer))
             return -1;
         cfg->pen_up_speed = integer;
         return 0;
     }
     if (strcmp (key, "pen_down_speed") == 0) {
-        if (!parse_int_str (value_buf, &integer))
+        if (!cmd_parse_int_str (value_buf, &integer))
             return -1;
         cfg->pen_down_speed = integer;
         return 0;
     }
     if (strcmp (key, "pen_up_delay_ms") == 0 || strcmp (key, "pen_up_delay") == 0) {
-        if (!parse_int_str (value_buf, &integer))
+        if (!cmd_parse_int_str (value_buf, &integer))
             return -1;
         cfg->pen_up_delay_ms = integer;
         return 0;
     }
     if (strcmp (key, "pen_down_delay_ms") == 0 || strcmp (key, "pen_down_delay") == 0) {
-        if (!parse_int_str (value_buf, &integer))
+        if (!cmd_parse_int_str (value_buf, &integer))
             return -1;
         cfg->pen_down_delay_ms = integer;
         return 0;
     }
     if (strcmp (key, "servo_timeout_s") == 0 || strcmp (key, "servo_timeout") == 0) {
-        if (!parse_int_str (value_buf, &integer))
+        if (!cmd_parse_int_str (value_buf, &integer))
             return -1;
         cfg->servo_timeout_s = integer;
         return 0;
@@ -1423,7 +1423,7 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
         return -1;
 
     if (strcmp (key, "margin") == 0 || strcmp (key, "margins") == 0) {
-        if (!parse_double_str (value_buf, &dbl))
+        if (!cmd_parse_double_str (value_buf, &dbl))
             return -1;
         cfg->margin_top_mm = cfg->margin_right_mm = cfg->margin_bottom_mm = cfg->margin_left_mm
             = dbl;
@@ -1434,14 +1434,14 @@ static int config_apply_pair (config_t *cfg, const char *key_raw, const char *va
 }
 
 /**
- * @brief Реалізація ensure_device_profile(): доповнення конфігурації з даних пристрою.
+ * @brief Реалізація cmd_ensure_device_profile(): доповнення конфігурації з даних пристрою.
  * @param cfg [in,out] Конфігурація.
  * @param inout_alias [in,out] Псевдонім пристрою.
  * @param alias_len Розмір буфера псевдоніма.
  * @param model Бажана модель профілю (опційно).
  * @param verbose Рівень докладності.
  */
-static bool ensure_device_profile (
+static bool cmd_ensure_device_profile (
     config_t *cfg,
     char *inout_alias,
     size_t alias_len,
@@ -1461,7 +1461,7 @@ static bool ensure_device_profile (
     else if (cfg->default_device[0])
         requested_alias = cfg->default_device;
 
-    if (!device_profile_local (requested_alias, model, &info, verbose))
+    if (!cmd_device_profile_local (requested_alias, model, &info, verbose))
         return false;
 
     cfg->paper_w_mm = info.paper_w_mm;
@@ -1483,7 +1483,7 @@ static bool ensure_device_profile (
     return true;
 }
 
-static int build_print_page (
+static int cmd_build_print_page (
     drawing_page_t *page,
     const char *device_model,
     double paper_w_mm,
@@ -1539,7 +1539,7 @@ static int build_print_page (
     return 0;
 }
 
-static int layout_to_bytes (
+static int cmd_layout_to_bytes (
     const drawing_layout_t *layout, preview_fmt_t format, uint8_t **out_bytes, size_t *out_len) {
     if (!out_bytes || !out_len)
         return 1;
@@ -1621,7 +1621,7 @@ cmd_result_t cmd_print_execute (
         margin_left = cfg.margin_left_mm;
 
     drawing_page_t page;
-    int setup_rc = build_print_page (
+    int setup_rc = cmd_build_print_page (
         &page, model, paper_w, paper_h, margin_top, margin_right, margin_bottom, margin_left,
         orientation);
     if (setup_rc != 0)
@@ -1644,7 +1644,7 @@ cmd_result_t cmd_print_execute (
 
         if (page.fit_to_frame) {
             double fw, fh;
-            page_frame_dims (&page, &fw, &fh);
+            cmd_page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb;
             if (geom_bbox_of_paths (&md_paths, &bb) == 0) {
                 double cw = bb.max_x - bb.min_x;
@@ -1653,7 +1653,7 @@ cmd_result_t cmd_print_execute (
                     geom_paths_free (&md_paths);
                     double sx = fw / cw;
                     double sy = fh / ch;
-                    double s = clamp_scale (sx < sy ? sx : sy);
+                    double s = cmd_clamp_scale (sx < sy ? sx : sy);
                     double new_pt = mopts.base_size_pt * s;
                     if (new_pt < 3.0)
                         new_pt = 3.0;
@@ -1681,7 +1681,7 @@ cmd_result_t cmd_print_execute (
 
         if (page.fit_to_frame) {
             double fw, fh;
-            page_frame_dims (&page, &fw, &fh);
+            cmd_page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb = layout_info.layout.bounds_mm;
             double cw = bb.max_x - bb.min_x;
             double ch = bb.max_y - bb.min_y;
@@ -1689,7 +1689,7 @@ cmd_result_t cmd_print_execute (
                 drawing_layout_dispose (&layout_info);
                 double sx = fw / cw;
                 double sy = fh / ch;
-                double s = clamp_scale (sx < sy ? sx : sy);
+                double s = cmd_clamp_scale (sx < sy ? sx : sy);
                 double new_pt = font_size * s;
                 if (new_pt < 3.0)
                     new_pt = 3.0;
@@ -1770,7 +1770,7 @@ cmd_result_t cmd_print_preview (
         margin_left = cfg.margin_left_mm;
 
     drawing_page_t page;
-    int setup_rc = build_print_page (
+    int setup_rc = cmd_build_print_page (
         &page, model, paper_w, paper_h, margin_top, margin_right, margin_bottom, margin_left,
         orientation);
     if (setup_rc != 0)
@@ -1793,7 +1793,7 @@ cmd_result_t cmd_print_preview (
             return 1;
         if (page.fit_to_frame) {
             double fw, fh;
-            page_frame_dims (&page, &fw, &fh);
+            cmd_page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb;
             if (geom_bbox_of_paths (&md_paths, &bb) == 0) {
                 double cw = bb.max_x - bb.min_x;
@@ -1801,7 +1801,7 @@ cmd_result_t cmd_print_preview (
                 if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
                     geom_paths_free (&md_paths);
                     double sx = fw / cw, sy = fh / ch;
-                    double s = clamp_scale (sx < sy ? sx : sy);
+                    double s = cmd_clamp_scale (sx < sy ? sx : sy);
                     double new_pt = mopts.base_size_pt * s;
                     if (new_pt < 3.0)
                         new_pt = 3.0;
@@ -1817,7 +1817,7 @@ cmd_result_t cmd_print_preview (
             return 1;
         }
         geom_paths_free (&md_paths);
-        rc = layout_to_bytes (&layout_info, format, out_bytes, out_len);
+        rc = cmd_layout_to_bytes (&layout_info, format, out_bytes, out_len);
         drawing_layout_dispose (&layout_info);
     } else {
         drawing_layout_t layout_info = { 0 };
@@ -1825,14 +1825,14 @@ cmd_result_t cmd_print_preview (
             return 1;
         if (page.fit_to_frame) {
             double fw, fh;
-            page_frame_dims (&page, &fw, &fh);
+            cmd_page_frame_dims (&page, &fw, &fh);
             geom_bbox_t bb = layout_info.layout.bounds_mm;
             double cw = bb.max_x - bb.min_x;
             double ch = bb.max_y - bb.min_y;
             if ((cw > 0.0 && ch > 0.0) && ((cw > fw) || (ch > fh))) {
                 drawing_layout_dispose (&layout_info);
                 double sx = fw / cw, sy = fh / ch;
-                double s = clamp_scale (sx < sy ? sx : sy);
+                double s = cmd_clamp_scale (sx < sy ? sx : sy);
                 double new_pt = font_size * s;
                 if (new_pt < 3.0)
                     new_pt = 3.0;
@@ -1840,7 +1840,7 @@ cmd_result_t cmd_print_preview (
                     return 1;
             }
         }
-        rc = layout_to_bytes (&layout_info, format, out_bytes, out_len);
+        rc = cmd_layout_to_bytes (&layout_info, format, out_bytes, out_len);
         drawing_layout_dispose (&layout_info);
     }
     return rc;
@@ -2000,7 +2000,7 @@ cmd_result_t cmd_config_reset (config_t *inout_cfg, bool verbose) {
 
     config_factory_defaults (inout_cfg, CONFIG_DEFAULT_MODEL);
 
-    if (!ensure_device_profile (inout_cfg, alias_buf, sizeof (alias_buf), NULL, verbose))
+    if (!cmd_ensure_device_profile (inout_cfg, alias_buf, sizeof (alias_buf), NULL, verbose))
         return 1;
 
     if (config_save (inout_cfg) != 0) {
@@ -2050,7 +2050,7 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, bool ve
         *eq = '\0';
         const char *key = item;
         const char *value = eq + 1;
-        if (config_apply_pair (inout_cfg, key, value) != 0) {
+        if (cmd_config_apply_pair (inout_cfg, key, value) != 0) {
             fprintf (CMD_OUT, "Невідомий або некоректний ключ: %s\n", key);
             status = 1;
         }
@@ -2087,7 +2087,7 @@ cmd_result_t cmd_config_set (const char *set_pairs, config_t *inout_cfg, bool ve
  * @return 0 — успіх, інакше помилка.
  */
 cmd_result_t cmd_device_list (const char *model, bool verbose) {
-    return device_list_local (model, verbose ? VERBOSE_ON : VERBOSE_OFF);
+    return cmd_device_list_local (model, verbose ? VERBOSE_ON : VERBOSE_OFF);
 }
 
 /**
@@ -2099,7 +2099,7 @@ cmd_result_t cmd_device_list (const char *model, bool verbose) {
  */
 cmd_result_t cmd_device_profile (const char *alias, const char *model, bool verbose) {
     device_profile_info_t info;
-    if (!device_profile_local (alias, model, &info, verbose ? VERBOSE_ON : VERBOSE_OFF))
+    if (!cmd_device_profile_local (alias, model, &info, verbose ? VERBOSE_ON : VERBOSE_OFF))
         return 1;
     fprintf (CMD_OUT, "ALIAS=%s\n", info.alias);
     fprintf (CMD_OUT, "PORT=%s\n", info.port);
@@ -2117,8 +2117,8 @@ cmd_result_t cmd_device_profile (const char *alias, const char *model, bool verb
  * @brief Розвʼязує порт за псевдонімом та друкує повідомлення про помилку у stdout.
  * @return 0 — успіх, 1 — помилка/не знайдено.
  */
-static int resolve_port_or_err (const char *alias, char *out, size_t outlen) {
-    int r = resolve_device_port (alias && *alias ? alias : NULL, out, outlen, NULL, 0, NULL);
+static int cmd_resolve_port_or_err (const char *alias, char *out, size_t outlen) {
+    int r = cmd_resolve_device_port (alias && *alias ? alias : NULL, out, outlen, NULL, 0, NULL);
     if (r == 0)
         return 0;
     if (r == 1)
@@ -2131,25 +2131,25 @@ static int resolve_port_or_err (const char *alias, char *out, size_t outlen) {
 #define DEV_WRAP(name, action_desc, cb, wait_idle)                                                 \
     cmd_result_t name (const char *alias, const char *model, bool verbose) {                       \
         char port_buf[PATH_MAX];                                                                   \
-        if (resolve_port_or_err (alias, port_buf, sizeof (port_buf)) != 0)                         \
+        if (cmd_resolve_port_or_err (alias, port_buf, sizeof (port_buf)) != 0)                         \
             return 1;                                                                              \
-        return with_axidraw_device (                                                               \
-            port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, action_desc, cb, NULL,            \
-            wait_idle);                                                                            \
+        return cmd_with_axidraw_device (                                                           \
+            port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, action_desc, cb, NULL,           \
+            wait_idle);                                                                           \
     }
 
-DEV_WRAP (cmd_device_pen_up, "підйом пера", device_pen_up_cb, true)
-DEV_WRAP (cmd_device_pen_down, "опускання пера", device_pen_down_cb, true)
-DEV_WRAP (cmd_device_pen_toggle, "перемикання пера", device_pen_toggle_cb, true)
-DEV_WRAP (cmd_device_motors_on, "увімкнення моторів", device_motors_on_cb, false)
-DEV_WRAP (cmd_device_motors_off, "вимкнення моторів", device_motors_off_cb, false)
-DEV_WRAP (cmd_device_abort, "аварійна зупинка", device_abort_cb, false)
-DEV_WRAP (cmd_device_home, "home", device_home_cb, true)
-DEV_WRAP (cmd_device_version, "версія", device_version_cb, false)
-DEV_WRAP (cmd_device_status, "статус", device_status_cb, false)
-DEV_WRAP (cmd_device_position, "позиція", device_position_cb, false)
-DEV_WRAP (cmd_device_reset, "скидання", device_reset_cb, false)
-DEV_WRAP (cmd_device_reboot, "перезавантаження", device_reboot_cb, false)
+DEV_WRAP (cmd_device_pen_up, "підйом пера", cmd_device_pen_up_cb, true)
+DEV_WRAP (cmd_device_pen_down, "опускання пера", cmd_device_pen_down_cb, true)
+DEV_WRAP (cmd_device_pen_toggle, "перемикання пера", cmd_device_pen_toggle_cb, true)
+DEV_WRAP (cmd_device_motors_on, "увімкнення моторів", cmd_device_motors_on_cb, false)
+DEV_WRAP (cmd_device_motors_off, "вимкнення моторів", cmd_device_motors_off_cb, false)
+DEV_WRAP (cmd_device_abort, "аварійна зупинка", cmd_device_abort_cb, false)
+DEV_WRAP (cmd_device_home, "home", cmd_device_home_cb, true)
+DEV_WRAP (cmd_device_version, "версія", cmd_device_version_cb, false)
+DEV_WRAP (cmd_device_status, "статус", cmd_device_status_cb, false)
+DEV_WRAP (cmd_device_position, "позиція", cmd_device_position_cb, false)
+DEV_WRAP (cmd_device_reset, "скидання", cmd_device_reset_cb, false)
+DEV_WRAP (cmd_device_reboot, "перезавантаження", cmd_device_reboot_cb, false)
 
 /**
  * @brief Публічний фасад для ручного зсуву (jog) на X/Y мм.
@@ -2163,10 +2163,10 @@ DEV_WRAP (cmd_device_reboot, "перезавантаження", device_reboot_c
 cmd_result_t
 cmd_device_jog (const char *alias, const char *model, double dx_mm, double dy_mm, bool verbose) {
     char port_buf[PATH_MAX];
-    if (resolve_port_or_err (alias, port_buf, sizeof (port_buf)) != 0)
+    if (cmd_resolve_port_or_err (alias, port_buf, sizeof (port_buf)) != 0)
         return 1;
     jog_ctx_t ctx = { .dx_mm = dx_mm, .dy_mm = dy_mm };
-    return with_axidraw_device (
-        port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, "ручний зсув", device_jog_cb, &ctx,
+    return cmd_with_axidraw_device (
+        port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, "ручний зсув", cmd_device_jog_cb, &ctx,
         false);
 }

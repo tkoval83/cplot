@@ -43,7 +43,7 @@ static planner_limits_t g_limits;
  * @param value Вхідне значення.
  * @param fallback Запасне значення, якщо `value` не придатне.
  */
-static double clamp_positive (double value, double fallback) {
+static double planner_clamp_positive (double value, double fallback) {
     if (!(value > 0.0) || isinf (value) || isnan (value))
         return fallback;
     return value;
@@ -55,21 +55,21 @@ static double clamp_positive (double value, double fallback) {
  * @param curr Поточний вузол.
  * @return Максимальна швидкість входу згідно з `cornering_distance_mm` і кутом між векторами.
  */
-static double compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
+static double planner_compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
     if (!prev || !curr)
         return 0.0;
     double dot = prev->unit_vec[0] * curr->unit_vec[0] + prev->unit_vec[1] * curr->unit_vec[1];
     if (!isfinite (dot))
         return 0.0;
     if (g_limits.cornering_distance_mm <= 0.0)
-        return (dot > 0.999999) ? clamp_positive (g_limits.max_speed_mm_s, 0.0) : 0.0;
+        return (dot > 0.999999) ? planner_clamp_positive (g_limits.max_speed_mm_s, 0.0) : 0.0;
     if (dot > 0.999999)
-        return clamp_positive (g_limits.max_speed_mm_s, 0.0);
+        return planner_clamp_positive (g_limits.max_speed_mm_s, 0.0);
     if (dot < -0.999999)
         dot = -0.999999;
     double sin_theta_half = sqrt (0.5 * (1.0 - dot));
     if (sin_theta_half <= 1e-9)
-        return clamp_positive (g_limits.max_speed_mm_s, 0.0);
+        return planner_clamp_positive (g_limits.max_speed_mm_s, 0.0);
     double numerator = g_limits.max_accel_mm_s2 * g_limits.cornering_distance_mm * sin_theta_half;
     double denom = 1.0 - sin_theta_half;
     if (denom <= 0.0)
@@ -87,7 +87,7 @@ static double compute_junction_speed (const planner_node_t *prev, const planner_
  * @param node Джерельний вузол з довжиною та граничними швидкостями.
  * @param out [out] Блок для заповнення відстаней/швидкостей/прискорення.
  */
-static void compute_trapezoid_profile (const planner_node_t *node, plan_block_t *out) {
+static void planner_compute_trapezoid_profile (const planner_node_t *node, plan_block_t *out) {
     const double length = node->length_mm;
     double v0 = node->entry_speed;
     double v1 = node->exit_speed;
@@ -165,12 +165,12 @@ static void compute_trapezoid_profile (const planner_node_t *node, plan_block_t 
 /**
  * @brief Обчислює межі швидкості входу для кожного стику.
  */
-static void compute_all_junction_limits (planner_node_t *nodes, size_t count) {
+static void planner_compute_all_junction_limits (planner_node_t *nodes, size_t count) {
     if (!nodes || count == 0)
         return;
     nodes[0].max_entry_speed = fmax (0.0, fmin (nodes[0].nominal_speed, g_limits.max_speed_mm_s));
     for (size_t i = 1; i < count; ++i) {
-        double junction = compute_junction_speed (&nodes[i - 1], &nodes[i]);
+        double junction = planner_compute_junction_speed (&nodes[i - 1], &nodes[i]);
         double lim = junction;
         if (!(lim > 0.0))
             lim = 0.0;
@@ -187,7 +187,7 @@ static void compute_all_junction_limits (planner_node_t *nodes, size_t count) {
 /**
  * @brief Виконує двонапрямну корекцію швидкостей входу/виходу згідно з прискоренням.
  */
-static void recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
+static void planner_recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
     if (!nodes || count == 0)
         return;
 
@@ -235,7 +235,7 @@ static void recompute_entry_exit_speeds (planner_node_t *nodes, size_t count) {
 }
 
 /** \brief Додає вузол до масиву та збільшує лічильник. */
-static void store_node (planner_node_t *nodes, size_t *node_count, planner_node_t node) {
+static void planner_store_node (planner_node_t *nodes, size_t *node_count, planner_node_t node) {
     nodes[*node_count] = node;
     ++(*node_count);
 }
@@ -358,7 +358,7 @@ bool planner_plan (
                     last_node->unit_vec[0] = new_unit_x;
                     last_node->unit_vec[1] = new_unit_y;
                     double new_nominal
-                        = clamp_positive (segment.feed_mm_s, g_limits.max_speed_mm_s);
+                        = planner_clamp_positive (segment.feed_mm_s, g_limits.max_speed_mm_s);
                     if (new_nominal > g_limits.max_speed_mm_s)
                         new_nominal = g_limits.max_speed_mm_s;
                     if (last_node->nominal_speed <= 0.0 || new_nominal < last_node->nominal_speed)
@@ -388,7 +388,7 @@ bool planner_plan (
         node.unit_vec[0] = delta[0] * inv_length;
         node.unit_vec[1] = delta[1] * inv_length;
 
-        double nominal = clamp_positive (segment.feed_mm_s, g_limits.max_speed_mm_s);
+        double nominal = planner_clamp_positive (segment.feed_mm_s, g_limits.max_speed_mm_s);
         if (nominal > g_limits.max_speed_mm_s)
             nominal = g_limits.max_speed_mm_s;
         node.nominal_speed = nominal;
@@ -397,7 +397,7 @@ bool planner_plan (
         node.entry_speed = 0.0;
         node.exit_speed = 0.0;
 
-        store_node (nodes, &node_count, node);
+        planner_store_node (nodes, &node_count, node);
 
         current_pos[0] = segment.target_mm[0];
         current_pos[1] = segment.target_mm[1];
@@ -410,8 +410,8 @@ bool planner_plan (
         return false;
     }
 
-    compute_all_junction_limits (nodes, node_count);
-    recompute_entry_exit_speeds (nodes, node_count);
+    planner_compute_all_junction_limits (nodes, node_count);
+    planner_recompute_entry_exit_speeds (nodes, node_count);
 
     for (size_t i = 0; i < node_count; ++i) {
         const planner_node_t *node = &nodes[i];
@@ -427,7 +427,7 @@ bool planner_plan (
         block->nominal_speed_mm_s = node->nominal_speed;
         block->pen_down = node->pen_down;
 
-        compute_trapezoid_profile (node, block);
+        planner_compute_trapezoid_profile (node, block);
 
 #ifdef DEBUG
         log_print (

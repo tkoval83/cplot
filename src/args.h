@@ -201,7 +201,7 @@ typedef struct options options_t;
  * @param argv Масив аргументів.
  * @param options Вихідна структура з результатами розбору.
  */
-void options_parser (int argc, char *argv[], options_t *options);
+void args_options_parser (int argc, char *argv[], options_t *options);
 
 /**
  * @brief Повертає масив довгих опцій для `getopt_long`.
@@ -212,18 +212,18 @@ const struct option *argdefs_long_options (void);
  * @brief Повертає опис підтримуваних опцій для генерації хелпу.
  * @param out_count [out] Кількість елементів у масиві.
  */
-const cli_option_desc_t *argdefs_options (size_t *out_count);
+const cli_option_desc_t *args_argdefs_options (size_t *out_count);
 
 /**
  * @brief Повертає список підкоманд.
  * @param out_count [out] Кількість елементів у масиві.
  */
-const cli_command_desc_t *argdefs_commands (size_t *out_count);
+const cli_command_desc_t *args_argdefs_commands (size_t *out_count);
 
 /**
  * @brief Повертає опис підтримуваних конфігураційних ключів.
  * @param out_count [out] Кількість елементів у масиві.
  */
-const cli_config_desc_t *argdefs_config_keys (size_t *out_count);
+const cli_config_desc_t *args_argdefs_config_keys (size_t *out_count);
 
 #endif

@@ -12,9 +12,9 @@
 #include <string.h>
 
 /**
- * @copydoc json_fprint_escaped
+ * @copydoc jsw_json_fprint_escaped
  */
-void json_fprint_escaped (FILE *f, const char *s, size_t len) {
+void jsw_json_fprint_escaped (FILE *f, const char *s, size_t len) {
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)s[i];
         switch (c) {
@@ -44,7 +44,7 @@ void json_fprint_escaped (FILE *f, const char *s, size_t len) {
 }
 
 /** \brief Вставляє кому за потреби перед новим елементом. */
-static inline void jsonw_maybe_comma (json_writer_t *w) {
+static inline void jsw_jsonw_maybe_comma (json_writer_t *w) {
     if (w->depth > 0) {
         unsigned int idx = (unsigned int)(w->depth - 1);
         if (w->type[idx] == 1) { /* обʼєкт */
@@ -61,7 +61,7 @@ static inline void jsonw_maybe_comma (json_writer_t *w) {
 }
 
 /** \brief Оновлює лічильники після запису значення. */
-static inline void jsonw_after_value (json_writer_t *w) {
+static inline void jsw_jsonw_after_value (json_writer_t *w) {
     if (w->depth > 0) {
         unsigned int idx = (unsigned int)(w->depth - 1);
         if (w->type[idx] == 1) { /* обʼєкт */
@@ -79,18 +79,18 @@ static inline void jsonw_after_value (json_writer_t *w) {
 #define JSW_CTX_ARRAY 2
 
 /**
- * @copydoc jsonw_init
+ * @copydoc jsw_jsonw_init
  */
-void jsonw_init (json_writer_t *w, FILE *f) {
+void jsw_jsonw_init (json_writer_t *w, FILE *f) {
     memset (w, 0, sizeof (*w));
     w->f = f;
 }
 
 /**
- * @copydoc jsonw_begin_object
+ * @copydoc jsw_jsonw_begin_object
  */
-void jsonw_begin_object (json_writer_t *w) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_begin_object (json_writer_t *w) {
+    jsw_jsonw_maybe_comma (w);
     fputc ('{', w->f);
     w->type[w->depth] = JSW_CTX_OBJECT;
     w->count[w->depth] = 0;
@@ -99,19 +99,19 @@ void jsonw_begin_object (json_writer_t *w) {
 }
 
 /**
- * @copydoc jsonw_end_object
+ * @copydoc jsw_jsonw_end_object
  */
-void jsonw_end_object (json_writer_t *w) {
+void jsw_jsonw_end_object (json_writer_t *w) {
     fputc ('}', w->f);
     w->depth--;
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_begin_array
+ * @copydoc jsw_jsonw_begin_array
  */
-void jsonw_begin_array (json_writer_t *w) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_begin_array (json_writer_t *w) {
+    jsw_jsonw_maybe_comma (w);
     fputc ('[', w->f);
     w->type[w->depth] = JSW_CTX_ARRAY;
     w->count[w->depth] = 0;
@@ -120,18 +120,18 @@ void jsonw_begin_array (json_writer_t *w) {
 }
 
 /**
- * @copydoc jsonw_end_array
+ * @copydoc jsw_jsonw_end_array
  */
-void jsonw_end_array (json_writer_t *w) {
+void jsw_jsonw_end_array (json_writer_t *w) {
     fputc (']', w->f);
     w->depth--;
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_key
+ * @copydoc jsw_jsonw_key
  */
-void jsonw_key (json_writer_t *w, const char *key) {
+void jsw_jsonw_key (json_writer_t *w, const char *key) {
     if (w->depth > 0) {
         unsigned int idx = (unsigned int)(w->depth - 1);
         if (w->type[idx] == JSW_CTX_OBJECT) {
@@ -140,7 +140,7 @@ void jsonw_key (json_writer_t *w, const char *key) {
         }
     }
     fputc ('"', w->f);
-    json_fprint_escaped (w->f, key, strlen (key));
+    jsw_json_fprint_escaped (w->f, key, strlen (key));
     fputc ('"', w->f);
     fputc (':', w->f);
     if (w->depth > 0) {
@@ -149,62 +149,62 @@ void jsonw_key (json_writer_t *w, const char *key) {
 }
 
 /**
- * @copydoc jsonw_string
+ * @copydoc jsw_jsonw_string
  */
-void jsonw_string (json_writer_t *w, const char *s, size_t len) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_string (json_writer_t *w, const char *s, size_t len) {
+    jsw_jsonw_maybe_comma (w);
     fputc ('"', w->f);
-    json_fprint_escaped (w->f, s, len);
+    jsw_json_fprint_escaped (w->f, s, len);
     fputc ('"', w->f);
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_string_cstr
+ * @copydoc jsw_jsonw_string_cstr
  */
-void jsonw_string_cstr (json_writer_t *w, const char *s) { jsonw_string (w, s, strlen (s)); }
+void jsw_jsonw_string_cstr (json_writer_t *w, const char *s) { jsw_jsonw_string (w, s, strlen (s)); }
 
 /**
- * @copydoc jsonw_bool
+ * @copydoc jsw_jsonw_bool
  */
-void jsonw_bool (json_writer_t *w, int b) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_bool (json_writer_t *w, int b) {
+    jsw_jsonw_maybe_comma (w);
     fputs (b ? "true" : "false", w->f);
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_int
+ * @copydoc jsw_jsonw_int
  */
-void jsonw_int (json_writer_t *w, long long v) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_int (json_writer_t *w, long long v) {
+    jsw_jsonw_maybe_comma (w);
     fprintf (w->f, "%lld", v);
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_double
+ * @copydoc jsw_jsonw_double
  */
-void jsonw_double (json_writer_t *w, double v) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_double (json_writer_t *w, double v) {
+    jsw_jsonw_maybe_comma (w);
     fprintf (w->f, "%g", v);
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_null
+ * @copydoc jsw_jsonw_null
  */
-void jsonw_null (json_writer_t *w) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_null (json_writer_t *w) {
+    jsw_jsonw_maybe_comma (w);
     fputs ("null", w->f);
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }
 
 /**
- * @copydoc jsonw_raw
+ * @copydoc jsw_jsonw_raw
  */
-void jsonw_raw (json_writer_t *w, const char *raw, size_t len) {
-    jsonw_maybe_comma (w);
+void jsw_jsonw_raw (json_writer_t *w, const char *raw, size_t len) {
+    jsw_jsonw_maybe_comma (w);
     fwrite (raw, 1, len, w->f);
-    jsonw_after_value (w);
+    jsw_jsonw_after_value (w);
 }

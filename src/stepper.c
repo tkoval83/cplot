@@ -38,7 +38,7 @@ typedef struct {
 } stepper_phase_t;
 
 /** \brief Безпечно зводить double до int32 з насиченням. */
-static int32_t clamp_i32 (double value) {
+static int32_t stepper_clamp_i32 (double value) {
     if (!isfinite (value))
         return 0;
     if (value > (double)INT32_MAX)
@@ -51,7 +51,7 @@ static int32_t clamp_i32 (double value) {
 /**
  * @brief Оцінює тривалість фази за математикою рівноприскореного руху.
  */
-static double phase_duration_s (double distance_mm, double start_speed, double end_speed) {
+static double stepper_phase_duration_s (double distance_mm, double start_speed, double end_speed) {
     if (!(distance_mm > 0.0))
         return 0.0;
     double sum = start_speed + end_speed;
@@ -122,7 +122,7 @@ void stepper_init (stepper_context_t *ctx, const stepper_config_t *cfg) {
 }
 
 /** \brief Конвертує зміщення блоку у кроки по осях X/Y через AxiDraw. */
-static void mm_to_steps (
+static void stepper_mm_to_steps (
     const stepper_context_t *ctx,
     const plan_block_t *block,
     int32_t *steps_x_out,
@@ -151,7 +151,7 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
 
     int32_t steps_x_total = 0;
     int32_t steps_y_total = 0;
-    mm_to_steps (ctx, block, &steps_x_total, &steps_y_total);
+    stepper_mm_to_steps (ctx, block, &steps_x_total, &steps_y_total);
 
     stepper_phase_t phases[3];
     size_t phase_count = 0;
@@ -214,14 +214,14 @@ bool stepper_submit_block (stepper_context_t *ctx, const plan_block_t *block, bo
             phase->steps_a = steps_x_total - (int32_t)used_steps_x;
             phase->steps_b = steps_y_total - (int32_t)used_steps_y;
         } else {
-            phase->steps_a = clamp_i32 ((double)steps_x_total * fraction);
-            phase->steps_b = clamp_i32 ((double)steps_y_total * fraction);
+            phase->steps_a = stepper_clamp_i32 ((double)steps_x_total * fraction);
+            phase->steps_b = stepper_clamp_i32 ((double)steps_y_total * fraction);
         }
         used_steps_x += phase->steps_a;
         used_steps_y += phase->steps_b;
 
-        double duration
-            = phase_duration_s (phase->distance_mm, phase->start_speed_mm_s, phase->end_speed_mm_s);
+        double duration = stepper_phase_duration_s (
+            phase->distance_mm, phase->start_speed_mm_s, phase->end_speed_mm_s);
         if (!(duration > 0.0)) {
             double fallback = fmax (phase->start_speed_mm_s, phase->end_speed_mm_s);
             if (!(fallback > SPEED_EPS))

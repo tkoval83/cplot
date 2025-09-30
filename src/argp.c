@@ -15,7 +15,7 @@
  * @param elem_size Розмір одного елемента.
  * @return Новий вказівник або NULL (при new_count=0 або помилці).
  */
-static void *xrealloc (void *ptr, size_t new_count, size_t elem_size) {
+static void *argp_xrealloc (void *ptr, size_t new_count, size_t elem_size) {
     if (new_count == 0) {
         free (ptr);
         return NULL;
@@ -30,13 +30,13 @@ static void *xrealloc (void *ptr, size_t new_count, size_t elem_size) {
  * @param need Потрібна кількість елементів.
  * @return 0 — ємність достатня/збільшено, -1 — помилка виділення.
  */
-static int ensure_capacity (arg_parser_t *p, size_t need) {
+static int argp_ensure_capacity (arg_parser_t *p, size_t need) {
     if (p->capacity >= need)
         return 0;
     size_t new_cap = p->capacity ? p->capacity * 2 : 8;
     while (new_cap < need)
         new_cap *= 2;
-    void *n = xrealloc (p->options, new_cap, sizeof (arg_option_t));
+    void *n = argp_xrealloc (p->options, new_cap, sizeof (arg_option_t));
     if (!n)
         return -1;
     p->options = (arg_option_t *)n;
@@ -50,7 +50,7 @@ static int ensure_capacity (arg_parser_t *p, size_t need) {
  * @param arg Аргумент командного рядка без початкових тире.
  * @return 1 — співпадає, 0 — ні.
  */
-static int matches_long (const arg_option_t *opt, const char *arg) {
+static int argp_matches_long (const arg_option_t *opt, const char *arg) {
     if (!opt->long_name)
         return 0;
     size_t n = strlen (opt->long_name);
@@ -67,7 +67,7 @@ static int matches_long (const arg_option_t *opt, const char *arg) {
  * @param arg Аргумент (включно з префіксом '-').
  * @return 1 — співпадає, 0 — ні.
  */
-static int matches_short (const arg_option_t *opt, const char *arg) {
+static int argp_matches_short (const arg_option_t *opt, const char *arg) {
     if (!opt->short_name)
         return 0;
     return strcmp (arg, opt->short_name) == 0;
@@ -78,7 +78,7 @@ static int matches_short (const arg_option_t *opt, const char *arg) {
  * @param program Імʼя програми (для хелпу).
  * @return Вказівник на парсер або NULL.
  */
-arg_parser_t *arg_parser_create (const char *program) {
+arg_parser_t *argp_arg_parser_create (const char *program) {
     arg_parser_t *p = (arg_parser_t *)calloc (1, sizeof (*p));
     if (!p)
         return NULL;
@@ -90,7 +90,7 @@ arg_parser_t *arg_parser_create (const char *program) {
  * @brief Звільняє ресурси парсера і його таблиці опцій.
  * @param p Парсер (може бути NULL).
  */
-void arg_parser_destroy (arg_parser_t *p) {
+void argp_arg_parser_destroy (arg_parser_t *p) {
     if (!p)
         return;
     free (p->options);
@@ -102,7 +102,7 @@ void arg_parser_destroy (arg_parser_t *p) {
  * @param p Парсер.
  * @param handler Колбек для друку usage (отримує program).
  */
-void arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler) {
+void argp_arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler) {
     if (p)
         p->usage_handler = handler;
 }
@@ -112,7 +112,7 @@ void arg_parser_set_usage (arg_parser_t *p, arg_handler_fn handler) {
  * @param p Парсер.
  * @param handler Колбек, що отримує значення.
  */
-void arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler) {
+void argp_arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler) {
     if (p)
         p->default_handler = handler;
 }
@@ -127,7 +127,7 @@ void arg_parser_set_default (arg_parser_t *p, arg_handler_fn handler) {
  * @param usage Опис для хелпу.
  * @return 0 — успіх, -1 — помилка.
  */
-int arg_parser_add (
+int argp_arg_parser_add (
     arg_parser_t *p,
     const char *long_name,
     const char *short_name,
@@ -136,7 +136,7 @@ int arg_parser_add (
     const char *usage) {
     if (!p || !long_name || !handler)
         return -1;
-    if (ensure_capacity (p, p->count + 1) != 0)
+    if (argp_ensure_capacity (p, p->count + 1) != 0)
         return -1;
     arg_option_t *opt = &p->options[p->count++];
     opt->long_name = long_name;
@@ -156,7 +156,7 @@ int arg_parser_add (
  * @param usage Опис для хелпу.
  * @return 0 — успіх, -1 — помилка.
  */
-int arg_parser_add_auto (
+int argp_arg_parser_add_auto (
     arg_parser_t *p,
     const char *pattern,
     const char *short_name,
@@ -174,13 +174,13 @@ int arg_parser_add_auto (
             return -1;
         memcpy (name_copy, pattern, len);
         name_copy[len] = '\0';
-        int rc = arg_parser_add (p, name_copy, short_name, true, handler, usage);
+        int rc = argp_arg_parser_add (p, name_copy, short_name, true, handler, usage);
         if (rc != 0) {
             free (name_copy);
             return rc;
         }
     } else {
-        return arg_parser_add (p, pattern, short_name, false, handler, usage);
+        return argp_arg_parser_add (p, pattern, short_name, false, handler, usage);
     }
     return 0;
 }
@@ -190,7 +190,7 @@ int arg_parser_add_auto (
  * @param p Парсер.
  * @param out Потік виводу.
  */
-static void print_usage_header (const arg_parser_t *p, FILE *out) {
+static void argp_print_usage_header (const arg_parser_t *p, FILE *out) {
     if (p->usage_handler) {
         p->usage_handler (p->program);
     } else if (p->program) {
@@ -203,7 +203,7 @@ static void print_usage_header (const arg_parser_t *p, FILE *out) {
  * @param p Парсер.
  * @param out Потік виводу.
  */
-void arg_parser_print_options (const arg_parser_t *p, FILE *out) {
+void argp_arg_parser_print_options (const arg_parser_t *p, FILE *out) {
     if (!p)
         return;
     size_t max_long = 0, max_short = 0;
@@ -232,7 +232,7 @@ void arg_parser_print_options (const arg_parser_t *p, FILE *out) {
  * @param arg Аргумент рядка (вигляд --name[=value]).
  * @return Код, повернений обробником (0 — успіх).
  */
-static int handle_option (arg_parser_t *p, const arg_option_t *opt, const char *arg) {
+static int argp_handle_option (arg_parser_t *p, const arg_option_t *opt, const char *arg) {
     const char *value = NULL;
     if (opt->takes_value) {
         const char *eq = strchr (arg, '=');
@@ -254,11 +254,11 @@ static int handle_option (arg_parser_t *p, const arg_option_t *opt, const char *
  * @param arg Аргумент.
  * @return 0 — успіх, -1 — помилка/невідома опція.
  */
-static int parse_one (arg_parser_t *p, const char *arg) {
+static int argp_parse_one (arg_parser_t *p, const char *arg) {
     for (size_t i = 0; i < p->count; i++) {
         arg_option_t *opt = &p->options[i];
-        if (matches_long (opt, arg) || matches_short (opt, arg)) {
-            return handle_option (p, opt, arg);
+        if (argp_matches_long (opt, arg) || argp_matches_short (opt, arg)) {
+            return argp_handle_option (p, opt, arg);
         }
     }
     if (p->default_handler)
@@ -274,19 +274,19 @@ static int parse_one (arg_parser_t *p, const char *arg) {
  * @param argv Масив аргументів.
  * @return 0 — успіх, -1 — помилка.
  */
-int arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]) {
+int argp_arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]) {
     if (!p || argc < 0)
         return -1;
     p->program = (argc > 0) ? argv[0] : p->program;
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
         if (strcmp (arg, "--help") == 0 || strcmp (arg, "-h") == 0) {
-            print_usage_header (p, stdout);
-            arg_parser_print_options (p, stdout);
+    argp_print_usage_header (p, stdout);
+            argp_arg_parser_print_options (p, stdout);
             p->printed_usage = 1;
             return 0;
         }
-        if (parse_one (p, arg) != 0)
+        if (argp_parse_one (p, arg) != 0)
             return -1;
     }
     return 0;

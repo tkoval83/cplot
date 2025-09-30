@@ -21,7 +21,7 @@
  * @param out_dst [out] Вказівник на нову копію (виділяється `malloc`).
  * @return 0 — успіх; -1 — помилка виділення памʼяті; -2 — некоректні аргументи.
  */
-int string_duplicate (const char *src, char **out_dst);
+int str_string_duplicate (const char *src, char **out_dst);
 
 /**
  * @brief Безпечна копія рядка з обмеженням розміру й гарантованим `\0`.
@@ -29,7 +29,7 @@ int string_duplicate (const char *src, char **out_dst);
  * @param dst_size Розмір буфера `dst` у байтах (>=1).
  * @param src Джерело; якщо `NULL` — у `dst` записується порожній рядок.
  */
-void string_copy (char *dst, size_t dst_size, const char *src);
+void str_string_copy (char *dst, size_t dst_size, const char *src);
 
 /**
  * @brief Порівняння рядків без урахування регістру (ASCII‑латиниця).
@@ -37,19 +37,19 @@ void string_copy (char *dst, size_t dst_size, const char *src);
  * @param b Другий рядок.
  * @return true — рівні; false — різні або `NULL`.
  */
-bool string_equals_ci (const char *a, const char *b);
+bool str_string_equals_ci (const char *a, const char *b);
 
 /**
  * @brief Перетворює латинські символи у нижній регістр (ASCII‑латиниця).
  * @param s Рядок для модифікації (in‑place); `NULL` — no‑op.
  */
-void string_to_lower_ascii (char *s);
+void str_string_to_lower_ascii (char *s);
 
 /**
  * @brief Обрізає ASCII‑пробіли з обох кінців.
  * @param s Рядок для модифікації (in‑place); `NULL` — no‑op.
  */
-void string_trim_ascii (char *s);
+void str_string_trim_ascii (char *s);
 
 /**
  * @brief Декодує один UTF‑8 символ (мінімальна перевірка коректності).

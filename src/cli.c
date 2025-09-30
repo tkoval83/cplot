@@ -27,7 +27,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
     if (!options)
         return 1;
     if (options->cmd == CMD_NONE) {
-        cli_usage ();
+        help_cli_usage ();
         return 1;
     }
 

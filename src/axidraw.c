@@ -34,7 +34,7 @@ static const double AXIDRAW_LL_RATE_SCALE = (2147483648.0 * 0.00004);
  * @param steps_per_sec Позитивна швидкість у кроках за секунду.
  * @return Беззнакове значення частоти для LM (0, якщо швидкість некоректна/нульова).
  */
-static uint32_t ax_rate_from_steps_per_sec (double steps_per_sec) {
+static uint32_t axidraw_rate_from_steps_per_sec (double steps_per_sec) {
     if (!(steps_per_sec > 0.0))
         return 0u;
     double rate = steps_per_sec * AXIDRAW_LL_RATE_SCALE;
@@ -55,7 +55,7 @@ static uint32_t ax_rate_from_steps_per_sec (double steps_per_sec) {
  * @param value Вхідне значення (double).
  * @return Ціле зі зрізом до діапазону int32_t.
  */
-static int32_t ax_clamp_i32 (double value) {
+static int32_t axidraw_clamp_i32 (double value) {
     if (!isfinite (value))
         return 0;
     if (value > (double)INT32_MAX)
@@ -96,11 +96,11 @@ static const axidraw_device_profile_t k_axidraw_device_profiles[] = {
  * @param model Назва моделі.
  * @return Вказівник на профіль або NULL.
  */
-static const axidraw_device_profile_t *profile_lookup (const char *model) {
+static const axidraw_device_profile_t *axidraw_profile_lookup (const char *model) {
     if (model && *model) {
         for (size_t i = 0;
              i < sizeof (k_axidraw_device_profiles) / sizeof (k_axidraw_device_profiles[0]); ++i) {
-            if (string_equals_ci (model, k_axidraw_device_profiles[i].model))
+            if (str_string_equals_ci (model, k_axidraw_device_profiles[i].model))
                 return &k_axidraw_device_profiles[i];
         }
     }
@@ -112,7 +112,7 @@ static const axidraw_device_profile_t *profile_lookup (const char *model) {
  * @return Вказівник на профіль.
  */
 const axidraw_device_profile_t *axidraw_device_profile_default (void) {
-    const axidraw_device_profile_t *profile = profile_lookup (CONFIG_DEFAULT_MODEL);
+    const axidraw_device_profile_t *profile = axidraw_profile_lookup (CONFIG_DEFAULT_MODEL);
     if (profile)
         return profile;
     return &k_axidraw_device_profiles[0];
@@ -124,7 +124,7 @@ const axidraw_device_profile_t *axidraw_device_profile_default (void) {
  * @return Вказівник на профіль.
  */
 const axidraw_device_profile_t *axidraw_device_profile_for_model (const char *model) {
-    const axidraw_device_profile_t *profile = profile_lookup (model);
+    const axidraw_device_profile_t *profile = axidraw_profile_lookup (model);
     if (profile)
         return profile;
     return axidraw_device_profile_default ();
@@ -295,7 +295,7 @@ int32_t axidraw_mm_to_steps (const axidraw_device_t *dev, double mm) {
  * @param speed_mm_s Швидкість у мм/с.
  * @return Тривалість у мс (мінімум 1, обмежено).
  */
-static uint32_t duration_from_mm_speed (double distance_mm, double speed_mm_s) {
+static uint32_t axidraw_duration_from_mm_speed (double distance_mm, double speed_mm_s) {
     if (!(distance_mm > 0.0) || !(speed_mm_s > 0.0))
         return 1u;
     double ms = ceil ((distance_mm / speed_mm_s) * 1000.0);
@@ -323,7 +323,7 @@ int axidraw_move_mm (axidraw_device_t *dev, double dx_mm, double dy_mm, double s
     int32_t steps_x = axidraw_mm_to_steps (dev, dx_mm);
     int32_t steps_y = axidraw_mm_to_steps (dev, dy_mm);
     double distance = hypot (dx_mm, dy_mm);
-    uint32_t duration = duration_from_mm_speed (distance, speed);
+    uint32_t duration = axidraw_duration_from_mm_speed (distance, speed);
     return axidraw_move_xy (dev, duration, steps_x, steps_y);
 }
 
@@ -374,10 +374,10 @@ int axidraw_move_lowlevel_phase (
         double steps_per_mm_a = (double)steps_a / distance_mm;
         double start_rate_a = fabs (start_speed_mm_s * steps_per_mm_a);
         double end_rate_a = fabs (end_speed_mm_s * steps_per_mm_a);
-        rate1 = ax_rate_from_steps_per_sec (start_rate_a);
-        uint32_t rate1_end = ax_rate_from_steps_per_sec (end_rate_a);
+        rate1 = axidraw_rate_from_steps_per_sec (start_rate_a);
+        uint32_t rate1_end = axidraw_rate_from_steps_per_sec (end_rate_a);
         double accel_a = ((double)rate1_end - (double)rate1) / (double)intervals;
-        accel1 = ax_clamp_i32 (accel_a);
+        accel1 = axidraw_clamp_i32 (accel_a);
         if (accel1 == 0 && rate1_end != rate1)
             accel1 = (rate1_end > rate1) ? 1 : -1;
     }
@@ -386,10 +386,10 @@ int axidraw_move_lowlevel_phase (
         double steps_per_mm_b = (double)steps_b / distance_mm;
         double start_rate_b = fabs (start_speed_mm_s * steps_per_mm_b);
         double end_rate_b = fabs (end_speed_mm_s * steps_per_mm_b);
-        rate2 = ax_rate_from_steps_per_sec (start_rate_b);
-        uint32_t rate2_end = ax_rate_from_steps_per_sec (end_rate_b);
+        rate2 = axidraw_rate_from_steps_per_sec (start_rate_b);
+        uint32_t rate2_end = axidraw_rate_from_steps_per_sec (end_rate_b);
         double accel_b = ((double)rate2_end - (double)rate2) / (double)intervals;
-        accel2 = ax_clamp_i32 (accel_b);
+        accel2 = axidraw_clamp_i32 (accel_b);
         if (accel2 == 0 && rate2_end != rate2)
             accel2 = (rate2_end > rate2) ? 1 : -1;
     }

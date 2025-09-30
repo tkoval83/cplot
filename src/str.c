@@ -15,9 +15,9 @@
 #include <string.h>
 
 /**
- * @copydoc string_duplicate
+ * @copydoc str_string_duplicate
  */
-int string_duplicate (const char *src, char **out_dst) {
+int str_string_duplicate (const char *src, char **out_dst) {
     if (!src || !out_dst)
         return -2;
     size_t len = strlen (src);
@@ -30,9 +30,9 @@ int string_duplicate (const char *src, char **out_dst) {
 }
 
 /**
- * @copydoc string_copy
+ * @copydoc str_string_copy
  */
-void string_copy (char *dst, size_t dst_size, const char *src) {
+void str_string_copy (char *dst, size_t dst_size, const char *src) {
     if (!dst || dst_size == 0)
         return;
     if (!src) {
@@ -44,9 +44,9 @@ void string_copy (char *dst, size_t dst_size, const char *src) {
 }
 
 /**
- * @copydoc string_equals_ci
+ * @copydoc str_string_equals_ci
  */
-bool string_equals_ci (const char *a, const char *b) {
+bool str_string_equals_ci (const char *a, const char *b) {
     if (!a || !b)
         return false;
     while (*a && *b) {
@@ -61,9 +61,9 @@ bool string_equals_ci (const char *a, const char *b) {
 }
 
 /**
- * @copydoc string_to_lower_ascii
+ * @copydoc str_string_to_lower_ascii
  */
-void string_to_lower_ascii (char *s) {
+void str_string_to_lower_ascii (char *s) {
     if (!s)
         return;
     for (; *s; ++s)
@@ -71,9 +71,9 @@ void string_to_lower_ascii (char *s) {
 }
 
 /**
- * @copydoc string_trim_ascii
+ * @copydoc str_string_trim_ascii
  */
-void string_trim_ascii (char *s) {
+void str_string_trim_ascii (char *s) {
     if (!s)
         return;
     char *start = s;

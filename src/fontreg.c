@@ -61,7 +61,7 @@ static void fontreg_catalog_clear (void) {
  * @param b Вказівник на другий елемент (uint32_t*).
  * @return <0 якщо a<b, >0 якщо a>b, 0 — рівні.
  */
-static int cmp_uint32 (const void *a, const void *b) {
+static int fontreg_cmp_uint32 (const void *a, const void *b) {
     uint32_t ua = *(const uint32_t *)a;
     uint32_t ub = *(const uint32_t *)b;
     if (ua < ub)
@@ -76,7 +76,7 @@ static int cmp_uint32 (const void *a, const void *b) {
  * @param codes Масив кодових точок (відсортований, in-place).
  * @param count [in,out] Кількість елементів (зменшується після дедуплікації).
  */
-static void dedupe_codepoints (uint32_t *codes, size_t *count) {
+static void fontreg_dedupe_codepoints (uint32_t *codes, size_t *count) {
     if (!codes || !count || *count == 0)
         return;
     size_t unique = 0;
@@ -92,7 +92,7 @@ static void dedupe_codepoints (uint32_t *codes, size_t *count) {
  * @param token Слово у нижньому регістрі.
  * @return 1 — так; 0 — ні.
  */
-static int is_style_token (const char *token) {
+static int fontreg_is_style_token (const char *token) {
     static const char *k_tokens[]
         = { "italic", "ital",  "oblique", "bold",   "regular",   "roman",    "medium", "light",
             "heavy",  "plain", "outline", "shadow", "condensed", "extended", "narrow", "book" };
@@ -109,22 +109,22 @@ static int is_style_token (const char *token) {
  * @param out [out] Буфер назви родини.
  * @param out_len Розмір буфера.
  */
-static void build_family_display (const char *name, char *out, size_t out_len) {
+static void fontreg_build_family_display (const char *name, char *out, size_t out_len) {
     if (!out || out_len == 0)
         return;
     out[0] = '\0';
     if (!name || !*name)
         return;
     char original[128];
-    string_copy (original, sizeof (original), name);
+    str_string_copy (original, sizeof (original), name);
     char lower[128];
-    string_copy (lower, sizeof (lower), name);
-    string_to_lower_ascii (lower);
+    str_string_copy (lower, sizeof (lower), name);
+    str_string_to_lower_ascii (lower);
     char *ctx = NULL;
     char *token = strtok_r (lower, " _-\t\n\r", &ctx);
     size_t written = 0;
     while (token) {
-        if (!is_style_token (token)) {
+        if (!fontreg_is_style_token (token)) {
             size_t offset = (size_t)(token - lower);
             size_t len = strlen (token);
             if (written > 0 && written + 1 < out_len)
@@ -136,7 +136,7 @@ static void build_family_display (const char *name, char *out, size_t out_len) {
         token = strtok_r (NULL, " _-\t\n\r", &ctx);
     }
     if (written == 0)
-        string_copy (out, out_len, name);
+        str_string_copy (out, out_len, name);
 }
 
 /**
@@ -144,15 +144,15 @@ static void build_family_display (const char *name, char *out, size_t out_len) {
  * @param face Опис обличчя.
  * @return Маска стильових прапорців FONT_STYLE_*.
  */
-static int style_flags_from_face (const font_face_t *face) {
+static int fontreg_style_flags_from_face (const font_face_t *face) {
     if (!face)
         return FONT_STYLE_REGULAR;
     char lowered_name[128];
-    string_copy (lowered_name, sizeof (lowered_name), face->name);
-    string_to_lower_ascii (lowered_name);
+    str_string_copy (lowered_name, sizeof (lowered_name), face->name);
+    str_string_to_lower_ascii (lowered_name);
     char lowered_id[128];
-    string_copy (lowered_id, sizeof (lowered_id), face->id);
-    string_to_lower_ascii (lowered_id);
+    str_string_copy (lowered_id, sizeof (lowered_id), face->id);
+    str_string_to_lower_ascii (lowered_id);
     int flags = 0;
     if (strstr (lowered_name, "italic") || strstr (lowered_name, "oblique")
         || strstr (lowered_id, "italic") || strstr (lowered_id, "oblique"))
@@ -175,7 +175,7 @@ static int style_flags_from_face (const font_face_t *face) {
  * @param str Рядок для модифікації (in-place).
  * @param suffix Скінчений суфікс, який шукаємо.
  */
-static void strip_suffix (char *str, const char *suffix) {
+static void fontreg_strip_suffix (char *str, const char *suffix) {
     size_t len = strlen (str);
     size_t slen = strlen (suffix);
     if (len >= slen && strcmp (str + len - slen, suffix) == 0)
@@ -190,32 +190,32 @@ static void strip_suffix (char *str, const char *suffix) {
  * @param out_display [out] Назва родини для показу.
  * @param display_len Розмір буфера назви.
  */
-static void derive_family_key (
+static void fontreg_derive_family_key (
     const font_face_t *face, char *out_key, size_t key_len, char *out_display, size_t display_len) {
     if (out_key && key_len > 0) {
         char tmp[64];
-        string_copy (tmp, sizeof (tmp), face->id);
-        string_to_lower_ascii (tmp);
-        strip_suffix (tmp, "_bold_italic");
-        strip_suffix (tmp, "_italic");
-        strip_suffix (tmp, "_bold");
+        str_string_copy (tmp, sizeof (tmp), face->id);
+        str_string_to_lower_ascii (tmp);
+        fontreg_strip_suffix (tmp, "_bold_italic");
+        fontreg_strip_suffix (tmp, "_italic");
+        fontreg_strip_suffix (tmp, "_bold");
 
-        strip_suffix (tmp, "_medium");
-        strip_suffix (tmp, "_med");
-        strip_suffix (tmp, "_regular");
-        strip_suffix (tmp, "_light");
-        strip_suffix (tmp, "_heavy");
+        fontreg_strip_suffix (tmp, "_medium");
+        fontreg_strip_suffix (tmp, "_med");
+        fontreg_strip_suffix (tmp, "_regular");
+        fontreg_strip_suffix (tmp, "_light");
+        fontreg_strip_suffix (tmp, "_heavy");
         size_t len = strlen (tmp);
         while (len > 0 && tmp[len - 1] == '_') {
             tmp[len - 1] = '\0';
             --len;
         }
         if (len == 0)
-            string_copy (tmp, sizeof (tmp), face->id);
-        string_copy (out_key, key_len, tmp);
+            str_string_copy (tmp, sizeof (tmp), face->id);
+        str_string_copy (out_key, key_len, tmp);
     }
     if (out_display && display_len > 0)
-        build_family_display (face->name, out_display, display_len);
+        fontreg_build_family_display (face->name, out_display, display_len);
 }
 
 /** Пошук родини у кеші за ключем. */
@@ -224,7 +224,7 @@ static void derive_family_key (
  * @param key Ключ родини.
  * @return Вказівник на запис родини або NULL.
  */
-static font_family_info_t *find_family_by_key (const char *key) {
+static font_family_info_t *fontreg_find_family_by_key (const char *key) {
     if (!key)
         return NULL;
     for (size_t i = 0; i < g_family_count; ++i) {
@@ -240,8 +240,8 @@ static font_family_info_t *find_family_by_key (const char *key) {
  * @param display Назва родини для показу.
  * @return Вказівник на запис родини або NULL при помилці памʼяті.
  */
-static font_family_info_t *ensure_family (const char *key, const char *display) {
-    font_family_info_t *family = find_family_by_key (key);
+static font_family_info_t *fontreg_ensure_family (const char *key, const char *display) {
+    font_family_info_t *family = fontreg_find_family_by_key (key);
     if (family)
         return family;
     if (g_family_count == g_family_cap) {
@@ -255,8 +255,8 @@ static font_family_info_t *ensure_family (const char *key, const char *display) 
     }
     family = &g_families[g_family_count++];
     memset (family, 0, sizeof (*family));
-    string_copy (family->key, sizeof (family->key), key);
-    string_copy (family->display, sizeof (family->display), display);
+    str_string_copy (family->key, sizeof (family->key), key);
+    str_string_copy (family->display, sizeof (family->display), display);
     return family;
 }
 
@@ -265,7 +265,7 @@ static font_family_info_t *ensure_family (const char *key, const char *display) 
  * @param family Родина, куди додаємо.
  * @return Вказівник на новий варіант або NULL при помилці памʼяті.
  */
-static font_variant_info_t *append_variant (font_family_info_t *family) {
+static font_variant_info_t *fontreg_append_variant (font_family_info_t *family) {
     if (!family)
         return NULL;
     if (family->variant_count == family->variant_cap) {
@@ -299,19 +299,19 @@ static int fontreg_ensure_catalog (void) {
         font_face_t *face = &faces[i];
         char key[64];
         char display[96];
-        derive_family_key (face, key, sizeof (key), display, sizeof (display));
-        font_family_info_t *family = ensure_family (key, display);
+        fontreg_derive_family_key (face, key, sizeof (key), display, sizeof (display));
+        font_family_info_t *family = fontreg_ensure_family (key, display);
         if (!family) {
             LOGW ("реєстр шрифтів: не вдалося створити сімʼю для %s", face->name);
             continue;
         }
-        font_variant_info_t *variant = append_variant (family);
+        font_variant_info_t *variant = fontreg_append_variant (family);
         if (!variant) {
             LOGW ("реєстр шрифтів: не вдалося додати варіант %s", face->name);
             continue;
         }
         variant->face = *face;
-        variant->style_flags = style_flags_from_face (face);
+        variant->style_flags = fontreg_style_flags_from_face (face);
 
         font_t *font = NULL;
         if (font_load_from_file (face->path, &font) == 0) {
@@ -324,8 +324,8 @@ static int fontreg_ensure_catalog (void) {
             }
             font_release (font);
             if (codes && code_count > 0) {
-                qsort (codes, code_count, sizeof (*codes), cmp_uint32);
-                dedupe_codepoints (codes, &code_count);
+                qsort (codes, code_count, sizeof (*codes), fontreg_cmp_uint32);
+                fontreg_dedupe_codepoints (codes, &code_count);
             }
             variant->codepoints = codes;
             variant->codepoint_count = code_count;
@@ -337,7 +337,7 @@ static int fontreg_ensure_catalog (void) {
 
         family->capability_mask |= variant->style_flags;
         if (family->display[0] == '\0')
-            string_copy (family->display, sizeof (family->display), display);
+            str_string_copy (family->display, sizeof (family->display), display);
     }
 
     free (faces);
@@ -350,7 +350,7 @@ static int fontreg_ensure_catalog (void) {
  * @param mask Ціле зі встановленими бітами.
  * @return Кількість встановлених бітів.
  */
-static int popcount_int (int mask) {
+static int fontreg_popcount_int (int mask) {
     int count = 0;
     while (mask) {
         count += mask & 1;
@@ -364,7 +364,7 @@ static int popcount_int (int mask) {
  * @param flags Маска стилів FONT_STYLE_*.
  * @return Пріоритет стилю.
  */
-static int style_priority (int flags) {
+static int fontreg_style_priority (int flags) {
     if (flags & FONT_STYLE_REGULAR)
         return 0;
     if (flags & FONT_STYLE_BOLD)
@@ -380,7 +380,7 @@ static int style_priority (int flags) {
  * @param flag Прапорець для перевірки.
  * @return 1 — встановлено; 0 — ні.
  */
-static int has_style_flag (int mask, int flag) { return (mask & flag) ? 1 : 0; }
+static int fontreg_has_style_flag (int mask, int flag) { return (mask & flag) ? 1 : 0; }
 
 /**
  * @brief Бінарний пошук кодової точки у списку варіанту.
@@ -388,7 +388,7 @@ static int has_style_flag (int mask, int flag) { return (mask & flag) ? 1 : 0; }
  * @param cp Кодова точка Unicode.
  * @return 1 — знайдено; 0 — ні.
  */
-static int variant_contains_codepoint (const font_variant_info_t *variant, uint32_t cp) {
+static int fontreg_variant_contains_codepoint (const font_variant_info_t *variant, uint32_t cp) {
     if (!variant || variant->codepoint_count == 0)
         return 0;
     size_t left = 0;
@@ -413,13 +413,13 @@ static int variant_contains_codepoint (const font_variant_info_t *variant, uint3
  * @param codepoint_count Кількість кодових точок у наборі.
  * @return Кількість покритих кодових точок.
  */
-static size_t variant_coverage (
+static size_t fontreg_variant_coverage (
     const font_variant_info_t *variant, const uint32_t *codepoints, size_t codepoint_count) {
     if (!variant)
         return 0;
     size_t covered = 0;
     for (size_t i = 0; i < codepoint_count; ++i) {
-        if (variant_contains_codepoint (variant, codepoints[i]))
+        if (fontreg_variant_contains_codepoint (variant, codepoints[i]))
             ++covered;
     }
     return covered;
@@ -444,7 +444,7 @@ typedef struct {
  * @param codepoint_count Кількість кодових точок.
  * @param out [out] Заповнений результат оцінювання.
  */
-static void evaluate_family (
+static void fontreg_evaluate_family (
     const font_family_info_t *family,
     const uint32_t *codepoints,
     size_t codepoint_count,
@@ -457,8 +457,8 @@ static void evaluate_family (
 
     for (size_t i = 0; i < family->variant_count; ++i) {
         const font_variant_info_t *variant = &family->variants[i];
-        size_t cover = variant_coverage (variant, codepoints, codepoint_count);
-        int priority = style_priority (variant->style_flags);
+        size_t cover = fontreg_variant_coverage (variant, codepoints, codepoint_count);
+        int priority = fontreg_style_priority (variant->style_flags);
         int covers_all = (codepoint_count == 0) ? 1 : (cover == codepoint_count);
         int better = 0;
         if (out->best_variant_index == (size_t)-1)
@@ -474,8 +474,8 @@ static void evaluate_family (
         else if (
             covers_all == out->covers_all && cover == out->best_variant_cover
             && priority == out->best_priority
-            && has_style_flag (variant->style_flags, FONT_STYLE_REGULAR)
-                   > has_style_flag (out->best_style_flags, FONT_STYLE_REGULAR))
+            && fontreg_has_style_flag (variant->style_flags, FONT_STYLE_REGULAR)
+                   > fontreg_has_style_flag (out->best_style_flags, FONT_STYLE_REGULAR))
             better = 1;
         if (better) {
             out->best_variant = variant;
@@ -494,21 +494,21 @@ static void evaluate_family (
  * @param current Поточний найкращий.
  * @return 1 — кандидат кращий; 0 — ні.
  */
-static int family_full_better (const family_eval_t *candidate, const family_eval_t *current) {
-    int cap_c = popcount_int (candidate->capability_mask);
-    int cap_cur = popcount_int (current->capability_mask);
+static int fontreg_family_full_better (const family_eval_t *candidate, const family_eval_t *current) {
+    int cap_c = fontreg_popcount_int (candidate->capability_mask);
+    int cap_cur = fontreg_popcount_int (current->capability_mask);
     if (cap_c != cap_cur)
         return cap_c > cap_cur;
-    int reg_c = has_style_flag (candidate->capability_mask, FONT_STYLE_REGULAR);
-    int reg_cur = has_style_flag (current->capability_mask, FONT_STYLE_REGULAR);
+    int reg_c = fontreg_has_style_flag (candidate->capability_mask, FONT_STYLE_REGULAR);
+    int reg_cur = fontreg_has_style_flag (current->capability_mask, FONT_STYLE_REGULAR);
     if (reg_c != reg_cur)
         return reg_c > reg_cur;
-    int bold_c = has_style_flag (candidate->capability_mask, FONT_STYLE_BOLD);
-    int bold_cur = has_style_flag (current->capability_mask, FONT_STYLE_BOLD);
+    int bold_c = fontreg_has_style_flag (candidate->capability_mask, FONT_STYLE_BOLD);
+    int bold_cur = fontreg_has_style_flag (current->capability_mask, FONT_STYLE_BOLD);
     if (bold_c != bold_cur)
         return bold_c > bold_cur;
-    int italic_c = has_style_flag (candidate->capability_mask, FONT_STYLE_ITALIC);
-    int italic_cur = has_style_flag (current->capability_mask, FONT_STYLE_ITALIC);
+    int italic_c = fontreg_has_style_flag (candidate->capability_mask, FONT_STYLE_ITALIC);
+    int italic_cur = fontreg_has_style_flag (current->capability_mask, FONT_STYLE_ITALIC);
     if (italic_c != italic_cur)
         return italic_c > italic_cur;
     if (candidate->best_priority != current->best_priority)
@@ -524,15 +524,15 @@ static int family_full_better (const family_eval_t *candidate, const family_eval
  * @param current Поточний найкращий.
  * @return 1 — кандидат кращий; 0 — ні.
  */
-static int family_partial_better (const family_eval_t *candidate, const family_eval_t *current) {
+static int fontreg_family_partial_better (const family_eval_t *candidate, const family_eval_t *current) {
     if (candidate->best_variant_cover != current->best_variant_cover)
         return candidate->best_variant_cover > current->best_variant_cover;
-    int cap_c = popcount_int (candidate->capability_mask);
-    int cap_cur = popcount_int (current->capability_mask);
+    int cap_c = fontreg_popcount_int (candidate->capability_mask);
+    int cap_cur = fontreg_popcount_int (current->capability_mask);
     if (cap_c != cap_cur)
         return cap_c > cap_cur;
-    int reg_c = has_style_flag (candidate->capability_mask, FONT_STYLE_REGULAR);
-    int reg_cur = has_style_flag (current->capability_mask, FONT_STYLE_REGULAR);
+    int reg_c = fontreg_has_style_flag (candidate->capability_mask, FONT_STYLE_REGULAR);
+    int reg_cur = fontreg_has_style_flag (current->capability_mask, FONT_STYLE_REGULAR);
     if (reg_c != reg_cur)
         return reg_c > reg_cur;
     if (candidate->best_priority != current->best_priority)
@@ -543,7 +543,7 @@ static int family_partial_better (const family_eval_t *candidate, const family_e
 }
 
 static int
-find_family_index_by_variant_id (const char *id, family_eval_t *evals, size_t eval_count) {
+fontreg_find_family_index_by_variant_id (const char *id, family_eval_t *evals, size_t eval_count) {
     if (!id)
         return -1;
     for (size_t i = 0; i < eval_count; ++i) {
@@ -567,7 +567,7 @@ void fontreg_set_root (const char *path) {
         log_print (LOG_INFO, "реєстр шрифтів: скинуто базовий каталог");
         return;
     }
-    string_copy (g_font_root, sizeof (g_font_root), path);
+    str_string_copy (g_font_root, sizeof (g_font_root), path);
     size_t len = strlen (g_font_root);
     while (len > 0 && g_font_root[len - 1] == '/') {
         g_font_root[len - 1] = '\0';
@@ -638,7 +638,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         return -3;
     }
 
-    const char *p = json_skip_ws (json);
+    const char *p = jsr_json_skip_ws (json);
     if (*p != '{') {
         free (arr);
         free (json);
@@ -648,7 +648,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
     }
     p++;
     while (1) {
-        p = json_skip_ws (p);
+        p = jsr_json_skip_ws (p);
         if (*p == '}') {
             break;
         }
@@ -677,7 +677,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         memcpy (key, kbeg, klen);
         key[klen] = '\0';
         p++;
-        p = json_skip_ws (p);
+        p = jsr_json_skip_ws (p);
         if (*p != ':') {
 
             while (*p && *p != ',' && *p != '}')
@@ -690,11 +690,11 @@ int fontreg_list (font_face_t **faces, size_t *count) {
                 break;
         }
         p++;
-        p = json_skip_ws (p);
+        p = jsr_json_skip_ws (p);
 
         const char *vptr = NULL;
         size_t vlen = 0;
-        if (!json_get_raw (json, key, &vptr, &vlen)) {
+        if (!jsr_json_get_raw (json, key, &vptr, &vlen)) {
 
             int depth = 0, in_str = 0;
             const char *q = p;
@@ -721,14 +721,14 @@ int fontreg_list (font_face_t **faces, size_t *count) {
                 q++;
             }
             p = q;
-            p = json_skip_ws (p);
+            p = jsr_json_skip_ws (p);
             if (*p == ',')
                 p++;
             continue;
         }
 
-        char *file = json_get_string (vptr, "file", NULL);
-        char *name = json_get_string (vptr, "name", NULL);
+        char *file = jsr_json_get_string (vptr, "file", NULL);
+        char *name = jsr_json_get_string (vptr, "name", NULL);
         if (file && name) {
             if (*count == cap) {
                 cap *= 2;
@@ -744,8 +744,8 @@ int fontreg_list (font_face_t **faces, size_t *count) {
                 arr = na;
             }
             memset (&arr[*count], 0, sizeof (arr[*count]));
-            string_copy (arr[*count].id, sizeof (arr[*count].id), key);
-            string_copy (arr[*count].name, sizeof (arr[*count].name), name);
+            str_string_copy (arr[*count].id, sizeof (arr[*count].id), key);
+            str_string_copy (arr[*count].name, sizeof (arr[*count].name), name);
             int written;
             if (root)
                 written = snprintf (
@@ -763,7 +763,7 @@ int fontreg_list (font_face_t **faces, size_t *count) {
         free (name);
 
         p = vptr + vlen;
-        p = json_skip_ws (p);
+        p = jsr_json_skip_ws (p);
         if (*p == ',') {
             p++;
             continue;
@@ -794,8 +794,8 @@ int fontreg_list_families (font_family_name_t **families, size_t *count) {
     if (!arr)
         return -3;
     for (size_t i = 0; i < g_family_count; ++i) {
-        string_copy (arr[i].key, sizeof (arr[i].key), g_families[i].key);
-        string_copy (arr[i].name, sizeof (arr[i].name), g_families[i].display);
+        str_string_copy (arr[i].key, sizeof (arr[i].key), g_families[i].key);
+        str_string_copy (arr[i].name, sizeof (arr[i].name), g_families[i].display);
     }
     *families = arr;
     *count = g_family_count;
@@ -817,10 +817,10 @@ int fontreg_select_face_for_codepoints (
         font_face_t exact;
         if (fontreg_resolve (preferred_family, &exact) == 0) {
             char q[96], id[64];
-            string_copy (q, sizeof (q), preferred_family);
-            string_to_lower_ascii (q);
-            string_copy (id, sizeof (id), exact.id);
-            string_to_lower_ascii (id);
+            str_string_copy (q, sizeof (q), preferred_family);
+            str_string_to_lower_ascii (q);
+            str_string_copy (id, sizeof (id), exact.id);
+            str_string_to_lower_ascii (id);
             if (strcmp (q, id) == 0) {
                 *out_face = exact;
                 return 0;
@@ -837,12 +837,12 @@ int fontreg_select_face_for_codepoints (
         return -1;
 
     for (size_t i = 0; i < g_family_count; ++i)
-        evaluate_family (&g_families[i], codepoints, codepoint_count, &evals[i]);
+        fontreg_evaluate_family (&g_families[i], codepoints, codepoint_count, &evals[i]);
 
     font_face_t resolved_pref;
     int preferred_index = -1;
     if (preferred_family && fontreg_resolve (preferred_family, &resolved_pref) == 0)
-        preferred_index = find_family_index_by_variant_id (resolved_pref.id, evals, g_family_count);
+        preferred_index = fontreg_find_family_index_by_variant_id (resolved_pref.id, evals, g_family_count);
 
     size_t full_best = (size_t)-1;
     size_t partial_best = (size_t)-1;
@@ -850,11 +850,11 @@ int fontreg_select_face_for_codepoints (
         if (evals[i].best_variant_index == (size_t)-1)
             continue;
         if (evals[i].covers_all) {
-            if (full_best == (size_t)-1 || family_full_better (&evals[i], &evals[full_best]))
+            if (full_best == (size_t)-1 || fontreg_family_full_better (&evals[i], &evals[full_best]))
                 full_best = i;
         } else {
             if (partial_best == (size_t)-1
-                || family_partial_better (&evals[i], &evals[partial_best]))
+                || fontreg_family_partial_better (&evals[i], &evals[partial_best]))
                 partial_best = i;
         }
     }
@@ -863,7 +863,7 @@ int fontreg_select_face_for_codepoints (
     if (preferred_index >= 0 && evals[preferred_index].best_variant_index != (size_t)-1) {
         const family_eval_t *pref = &evals[preferred_index];
         if (pref->covers_all) {
-            if (full_best != (size_t)-1 && family_full_better (&evals[full_best], pref))
+            if (full_best != (size_t)-1 && fontreg_family_full_better (&evals[full_best], pref))
                 chosen = full_best;
             else
                 chosen = (size_t)preferred_index;
@@ -871,7 +871,7 @@ int fontreg_select_face_for_codepoints (
             if (full_best != (size_t)-1)
                 chosen = full_best;
             else if (
-                partial_best != (size_t)-1 && family_partial_better (&evals[partial_best], pref))
+                partial_best != (size_t)-1 && fontreg_family_partial_better (&evals[partial_best], pref))
                 chosen = partial_best;
             else
                 chosen = (size_t)preferred_index;
@@ -907,15 +907,15 @@ int fontreg_resolve (const char *query, font_face_t *out) {
     int found = 0;
     if (query && *query) {
         char q[96];
-        string_copy (q, sizeof (q), query);
-        string_to_lower_ascii (q);
+        str_string_copy (q, sizeof (q), query);
+        str_string_to_lower_ascii (q);
         for (size_t i = 0; i < count; ++i) {
             char id[64];
-            string_copy (id, sizeof (id), faces[i].id);
-            string_to_lower_ascii (id);
+            str_string_copy (id, sizeof (id), faces[i].id);
+            str_string_to_lower_ascii (id);
             char nm[96];
-            string_copy (nm, sizeof (nm), faces[i].name);
-            string_to_lower_ascii (nm);
+            str_string_copy (nm, sizeof (nm), faces[i].name);
+            str_string_to_lower_ascii (nm);
             if (strstr (id, q) || strstr (nm, q)) {
                 *out = faces[i];
                 found = 1;

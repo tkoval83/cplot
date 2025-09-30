@@ -35,7 +35,7 @@ struct serial_port_s {
  * @param baud Швидкість у бодах (9600, 115200, ...).
  * @return Значення `speed_t` для termios (B9600 тощо).
  */
-static speed_t baud_to_speed (int baud) {
+static speed_t serial_baud_to_speed (int baud) {
     switch (baud) {
     case 9600:
         return B9600;
@@ -95,7 +95,7 @@ serial_open (const char *path, int baud, int read_timeout_ms, char *errbuf, size
         tio.c_cflag &= ~CRTSCTS;
         tio.c_iflag &= ~(IXON | IXOFF | IXANY);
 
-        speed_t spd = baud_to_speed (baud);
+        speed_t spd = serial_baud_to_speed (baud);
         cfsetispeed (&tio, spd);
         cfsetospeed (&tio, spd);
 

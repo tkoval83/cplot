@@ -29,7 +29,7 @@
  * @param extra Скільки додаткових байтів потрібно записати (без урахування `\0`).
  * @return 0 — успіх; -1 — помилка виділення памʼяті.
  */
-static int str_reserve (char **buf, size_t *len, size_t *cap, size_t extra) {
+static int svg_str_reserve (char **buf, size_t *len, size_t *cap, size_t extra) {
     size_t need = *len + extra + 1;
     if (need <= *cap)
         return 0;
@@ -52,14 +52,14 @@ static int str_reserve (char **buf, size_t *len, size_t *cap, size_t extra) {
  * @param fmt Форматний рядок.
  * @return 0 — успіх; -1 — помилка виділення памʼяті/форматування.
  */
-static int str_appendf (char **buf, size_t *len, size_t *cap, const char *fmt, ...) {
+static int svg_str_appendf (char **buf, size_t *len, size_t *cap, const char *fmt, ...) {
     va_list args;
     va_start (args, fmt);
     int needed = vsnprintf (NULL, 0, fmt, args);
     va_end (args);
     if (needed < 0)
         return -1;
-    if (str_reserve (buf, len, cap, (size_t)needed) != 0)
+    if (svg_str_reserve (buf, len, cap, (size_t)needed) != 0)
         return -1;
     va_start (args, fmt);
     int written = vsnprintf (*buf + *len, *cap - *len, fmt, args);
@@ -84,7 +84,7 @@ int svg_render_layout (const drawing_layout_t *layout, bytes_t *out) {
     size_t len = 0;
     size_t cap = 0;
 
-    if (str_appendf (
+    if (svg_str_appendf (
             &svg, &len, &cap,
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.2fmm\" height=\"%.2fmm\" "
             "viewBox=\"0 0 %.4f %.4f\">\n",
@@ -92,7 +92,7 @@ int svg_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         != 0)
         goto fail;
 
-    if (str_appendf (
+    if (svg_str_appendf (
             &svg, &len, &cap,
             "  <rect x=\"0\" y=\"0\" width=\"%.4f\" height=\"%.4f\" fill=\"#ffffff\" "
             "stroke=\"#cccccc\" stroke-width=\"0.2\"/>\n",
@@ -104,15 +104,15 @@ int svg_render_layout (const drawing_layout_t *layout, bytes_t *out) {
         const geom_path_t *p = &paths->items[i];
         if (!p->len || !p->pts)
             continue;
-        if (str_appendf (&svg, &len, &cap, "  <path d=\"") != 0)
+        if (svg_str_appendf (&svg, &len, &cap, "  <path d=\"") != 0)
             goto fail;
-        if (str_appendf (&svg, &len, &cap, "M %.4f %.4f", p->pts[0].x, p->pts[0].y) != 0)
+        if (svg_str_appendf (&svg, &len, &cap, "M %.4f %.4f", p->pts[0].x, p->pts[0].y) != 0)
             goto fail;
         for (size_t j = 1; j < p->len; ++j) {
-            if (str_appendf (&svg, &len, &cap, " L %.4f %.4f", p->pts[j].x, p->pts[j].y) != 0)
+            if (svg_str_appendf (&svg, &len, &cap, " L %.4f %.4f", p->pts[j].x, p->pts[j].y) != 0)
                 goto fail;
         }
-        if (str_appendf (
+        if (svg_str_appendf (
                 &svg, &len, &cap,
                 "\" fill=\"none\" stroke=\"#000\" stroke-width=\"0.3\" stroke-linecap=\"round\" "
                 "stroke-linejoin=\"round\"/>\n")
@@ -120,7 +120,7 @@ int svg_render_layout (const drawing_layout_t *layout, bytes_t *out) {
             goto fail;
     }
 
-    if (str_appendf (&svg, &len, &cap, "</svg>\n") != 0)
+    if (svg_str_appendf (&svg, &len, &cap, "</svg>\n") != 0)
         goto fail;
 
     out->bytes = (uint8_t *)svg;
