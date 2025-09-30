@@ -162,7 +162,9 @@ void jsw_jsonw_string (json_writer_t *w, const char *s, size_t len) {
 /**
  * @copydoc jsw_jsonw_string_cstr
  */
-void jsw_jsonw_string_cstr (json_writer_t *w, const char *s) { jsw_jsonw_string (w, s, strlen (s)); }
+void jsw_jsonw_string_cstr (json_writer_t *w, const char *s) {
+    jsw_jsonw_string (w, s, strlen (s));
+}
 
 /**
  * @copydoc jsw_jsonw_bool

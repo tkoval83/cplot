@@ -144,17 +144,8 @@ typedef enum {
     INPUT_FORMAT_MARKDOWN = 1,
 } input_format_t;
 
-/**
- * @brief Сукупність усіх параметрів CLI, що впливають на виконання команд.
- */
-struct options {
-
-    bool help;
-    bool version;
-    bool no_colors;
-    cmd_t cmd;
+typedef struct args_print_options {
     char file_name[FILE_NAME_SIZE];
-
     orientation_t orientation;
     double margin_top_mm;
     double margin_right_mm;
@@ -162,31 +153,48 @@ struct options {
     double margin_left_mm;
     double paper_w_mm;
     double paper_h_mm;
-
     bool preview;
     bool preview_png;
     char output_path[FILE_NAME_SIZE];
-    bool dry_run;
-    bool verbose;
     bool fit_page;
-
+    bool dry_run;
     char font_family[128];
     double font_size_pt;
-
     char device_model[32];
+    input_format_t input_format;
+} args_print_options_t;
 
-    device_action_t device_action;
+typedef struct args_device_options {
+    device_action_t action;
     char remote_device[64];
     double jog_dx_mm;
     double jog_dy_mm;
+    char device_model[32];
+} args_device_options_t;
 
-    config_action_t config_action;
-    char config_set_pairs[512];
+typedef struct args_config_options {
+    config_action_t action;
+    char set_pairs[512];
+} args_config_options_t;
 
-    bool fonts_list;
-    bool fonts_list_families;
+typedef struct args_fonts_options {
+    bool list;
+    bool list_families;
+} args_fonts_options_t;
 
-    input_format_t input_format;
+/**
+ * @brief Сукупність усіх параметрів CLI, що впливають на виконання команд.
+ */
+struct options {
+    bool help;
+    bool version;
+    bool no_colors;
+    bool verbose;
+    cmd_t cmd;
+    args_print_options_t print;
+    args_device_options_t device;
+    args_config_options_t config;
+    args_fonts_options_t fonts;
 };
 
 /**

@@ -34,12 +34,13 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
     cmd_set_output (NULL);
     switch (options->cmd) {
     case CMD_PRINT: {
+        const args_print_options_t *print = &options->print;
 
         char *owned = NULL;
         size_t in_len = 0;
         const char *in_chars = NULL;
-        if (options->file_name[0]) {
-            FILE *fp = fopen (options->file_name, "rb");
+        if (print->file_name[0]) {
+            FILE *fp = fopen (print->file_name, "rb");
             if (!fp)
                 return 1;
             if (fseek (fp, 0, SEEK_END) != 0) {
@@ -105,22 +106,22 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
             in_chars = owned;
             in_len = len;
         }
-
-        const char *family = options->font_family;
-        const char *model = options->device_model;
-        if (options->preview) {
-            LOGD ("cli: fit_page option=%d", options->fit_page ? 1 : 0);
+        const char *family = print->font_family;
+        const char *model
+            = print->device_model[0] ? print->device_model : options->device.device_model;
+        if (print->preview) {
+            LOGD ("cli: fit_page option=%d", print->fit_page ? 1 : 0);
             uint8_t *bytes = NULL;
             size_t blen = 0;
             int rc = cmd_print_preview (
-                in_chars, in_len, options->input_format == INPUT_FORMAT_MARKDOWN, family,
-                options->font_size_pt, model, options->paper_w_mm, options->paper_h_mm,
-                options->margin_top_mm, options->margin_right_mm, options->margin_bottom_mm,
-                options->margin_left_mm, options->orientation, options->fit_page ? 1 : 0,
-                options->preview_png ? 1 : 0, options->verbose, &bytes, &blen);
+                in_chars, in_len, print->input_format == INPUT_FORMAT_MARKDOWN, family,
+                print->font_size_pt, model, print->paper_w_mm, print->paper_h_mm,
+                print->margin_top_mm, print->margin_right_mm, print->margin_bottom_mm,
+                print->margin_left_mm, print->orientation, print->fit_page ? 1 : 0,
+                print->preview_png ? 1 : 0, options->verbose, &bytes, &blen);
             if (rc == 0 && bytes) {
-                if (options->output_path[0]) {
-                    FILE *fp = fopen (options->output_path, "wb");
+                if (print->output_path[0]) {
+                    FILE *fp = fopen (print->output_path, "wb");
                     if (!fp)
                         rc = 1;
                     else {
@@ -136,25 +137,27 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
             return rc;
         } else {
             int rc = cmd_print_execute (
-                in_chars, in_len, options->input_format == INPUT_FORMAT_MARKDOWN, family,
-                options->font_size_pt, model, options->paper_w_mm, options->paper_h_mm,
-                options->margin_top_mm, options->margin_right_mm, options->margin_bottom_mm,
-                options->margin_left_mm, options->orientation, options->fit_page, options->dry_run,
+                in_chars, in_len, print->input_format == INPUT_FORMAT_MARKDOWN, family,
+                print->font_size_pt, model, print->paper_w_mm, print->paper_h_mm,
+                print->margin_top_mm, print->margin_right_mm, print->margin_bottom_mm,
+                print->margin_left_mm, print->orientation, print->fit_page, print->dry_run,
                 options->verbose);
             free (owned);
             return rc;
         }
     }
     case CMD_DEVICE: {
-        const char *alias = options->remote_device;
-        const char *model = options->device_model;
-        switch (options->device_action.kind) {
+        const args_device_options_t *device = &options->device;
+        const char *alias = device->remote_device;
+        const char *model
+            = device->device_model[0] ? device->device_model : options->print.device_model;
+        switch (device->action.kind) {
         case DEVICE_ACTION_LIST:
             return cmd_device_list (model, options->verbose);
         case DEVICE_ACTION_PROFILE:
             return cmd_device_profile (alias, model, options->verbose);
         case DEVICE_ACTION_PEN:
-            switch (options->device_action.pen) {
+            switch (device->action.pen) {
             case DEVICE_PEN_UP:
                 return cmd_device_pen_up (alias, model, options->verbose);
             case DEVICE_PEN_DOWN:
@@ -165,7 +168,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
                 return 2;
             }
         case DEVICE_ACTION_MOTORS:
-            return (options->device_action.motor == DEVICE_MOTOR_ON)
+            return (device->action.motor == DEVICE_MOTOR_ON)
                        ? cmd_device_motors_on (alias, model, options->verbose)
                        : cmd_device_motors_off (alias, model, options->verbose);
         case DEVICE_ACTION_ABORT:
@@ -174,7 +177,7 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
             return cmd_device_home (alias, model, options->verbose);
         case DEVICE_ACTION_JOG:
             return cmd_device_jog (
-                alias, model, options->jog_dx_mm, options->jog_dy_mm, options->verbose);
+                alias, model, device->jog_dx_mm, device->jog_dy_mm, options->verbose);
         case DEVICE_ACTION_VERSION:
             return cmd_device_version (alias, model, options->verbose);
         case DEVICE_ACTION_STATUS:
@@ -190,17 +193,17 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
         }
     }
     case CMD_FONTS:
-        return options->fonts_list
-                   ? cmd_font_list_execute (options->fonts_list_families, options->verbose)
+        return options->fonts.list
+                   ? cmd_font_list_execute (options->fonts.list_families, options->verbose)
                    : 2;
     case CMD_CONFIG: {
-        switch (options->config_action) {
+        switch (options->config.action) {
         case CFG_SHOW:
             return cmd_config_show (NULL, options->verbose);
         case CFG_RESET:
             return cmd_config_reset (NULL, options->verbose);
         case CFG_SET:
-            return cmd_config_set (options->config_set_pairs, NULL, options->verbose);
+            return cmd_config_set (options->config.set_pairs, NULL, options->verbose);
         default:
             return 2;
         }

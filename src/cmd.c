@@ -237,7 +237,6 @@ static int cmd_build_print_page (
     double margin_left_mm,
     int orientation);
 
-
 /**
  * @brief Тип колбека дії над підключеним пристроєм AxiDraw.
  * @param dev Підключений пристрій.
@@ -673,7 +672,8 @@ static void cmd_derive_port_alias (const char *path, char *out, size_t out_len) 
 }
 
 /** Перевіряє, чи порт уже є у списку. */
-static bool cmd_device_port_exists (const device_port_info_t *ports, size_t count, const char *path) {
+static bool
+cmd_device_port_exists (const device_port_info_t *ports, size_t count, const char *path) {
     if (!ports || !path)
         return false;
     for (size_t i = 0; i < count; ++i) {
@@ -691,8 +691,8 @@ static bool cmd_device_port_exists (const device_port_info_t *ports, size_t coun
  * @param path Шлях до tty-порту для додавання.
  * @return true — успіх, false — помилка виділення памʼяті.
  */
-static bool
-cmd_device_port_add (device_port_info_t **ports, size_t *count, size_t *capacity, const char *path) {
+static bool cmd_device_port_add (
+    device_port_info_t **ports, size_t *count, size_t *capacity, const char *path) {
     if (!ports || !count || !capacity || !path || !*path)
         return false;
     if (*ports && cmd_device_port_exists (*ports, *count, path))
@@ -2131,11 +2131,11 @@ static int cmd_resolve_port_or_err (const char *alias, char *out, size_t outlen)
 #define DEV_WRAP(name, action_desc, cb, wait_idle)                                                 \
     cmd_result_t name (const char *alias, const char *model, bool verbose) {                       \
         char port_buf[PATH_MAX];                                                                   \
-        if (cmd_resolve_port_or_err (alias, port_buf, sizeof (port_buf)) != 0)                         \
+        if (cmd_resolve_port_or_err (alias, port_buf, sizeof (port_buf)) != 0)                     \
             return 1;                                                                              \
         return cmd_with_axidraw_device (                                                           \
-            port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, action_desc, cb, NULL,           \
-            wait_idle);                                                                           \
+            port_buf, model, verbose ? VERBOSE_ON : VERBOSE_OFF, action_desc, cb, NULL,            \
+            wait_idle);                                                                            \
     }
 
 DEV_WRAP (cmd_device_pen_up, "підйом пера", cmd_device_pen_up_cb, true)

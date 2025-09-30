@@ -55,7 +55,8 @@ static double planner_clamp_positive (double value, double fallback) {
  * @param curr Поточний вузол.
  * @return Максимальна швидкість входу згідно з `cornering_distance_mm` і кутом між векторами.
  */
-static double planner_compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
+static double
+planner_compute_junction_speed (const planner_node_t *prev, const planner_node_t *curr) {
     if (!prev || !curr)
         return 0.0;
     double dot = prev->unit_vec[0] * curr->unit_vec[0] + prev->unit_vec[1] * curr->unit_vec[1];

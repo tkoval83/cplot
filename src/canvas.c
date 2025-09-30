@@ -69,7 +69,8 @@ static canvas_status_t canvas_copy_paths_mm (const geom_paths_t *src, geom_paths
 /**
  * @brief Гарантує місце у масиві сегментів планувальника (realloc при потребі).
  */
-static int canvas_segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap, size_t extra) {
+static int
+canvas_segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap, size_t extra) {
     size_t need = *len + extra;
     if (need <= *cap)
         return 0;

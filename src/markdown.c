@@ -191,7 +191,8 @@ typedef struct {
  * @param flag Прапор стилю (`TEXT_STYLE_*`).
  * @return 0 — успіх; 1 — помилка виділення памʼяті.
  */
-static int markdown_md_inline_emit_span (md_inline_buffer_t *buf, size_t start, size_t end, unsigned flag) {
+static int
+markdown_md_inline_emit_span (md_inline_buffer_t *buf, size_t start, size_t end, unsigned flag) {
     if (!buf || start >= end)
         return 0;
     if (buf->span_count == buf->span_cap) {
@@ -529,7 +530,8 @@ static int markdown_collect_prefixed_lines (
  * @param count_out [out] Кількість елементів у `cells_out`.
  * @return 0 — успіх; 1 — помилка аргументів або памʼяті.
  */
-static int markdown_table_split_cells (const char *line, size_t len, char ***cells_out, size_t *count_out) {
+static int
+markdown_table_split_cells (const char *line, size_t len, char ***cells_out, size_t *count_out) {
     if (!line || !cells_out || !count_out)
         return 1;
     *cells_out = NULL;

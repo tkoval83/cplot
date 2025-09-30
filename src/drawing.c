@@ -96,7 +96,8 @@ int drawing_build_layout (
     geom_paths_t text_paths;
     text_render_info_t info;
     memset (&info, 0, sizeof (info));
-    if (drawing_build_text_paths (input, font_family, font_size_pt, frame_width_mm, &text_paths, &info)
+    if (drawing_build_text_paths (
+            input, font_family, font_size_pt, frame_width_mm, &text_paths, &info)
         != 0)
         return 1;
 

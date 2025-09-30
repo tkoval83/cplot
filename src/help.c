@@ -143,7 +143,8 @@ static const char *help_lookup_group_title (const char *group_key) {
  * @param printed_count Лічильник елементів у `printed` (буде оновлено).
  * @return 1 — додано новий ключ; 0 — ключ уже був присутній.
  */
-static int help_add_group_marker (const char *group_key, const char **printed, size_t *printed_count) {
+static int
+help_add_group_marker (const char *group_key, const char **printed, size_t *printed_count) {
     if (!group_key)
         group_key = "";
     for (size_t i = 0; i < *printed_count; ++i) {
@@ -477,9 +478,11 @@ void help_cli_help (void) {
     help_cli_usage ();
     help_cli_description ();
     if (options && option_count > 0)
-        help_cli_global_options (options, option_count, label_width, printed_groups, &printed_count);
+        help_cli_global_options (
+            options, option_count, label_width, printed_groups, &printed_count);
     help_cli_commands (options, option_count, label_width, printed_groups, &printed_count);
     if (options && option_count > 0)
-        help_cli_remaining_groups (options, option_count, label_width, printed_groups, &printed_count);
+        help_cli_remaining_groups (
+            options, option_count, label_width, printed_groups, &printed_count);
     help_cli_author ();
 }

@@ -508,7 +508,8 @@ static int text_break_tokens_into_lines (
     size_t line_count = 0, line_cap = 0;
     size_t consumed_input_total = 0;
     size_t assigned_input_current = 0;
-    layout_line_t *current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+    layout_line_t *current
+        = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
     if (!current)
         return -1;
 
@@ -706,7 +707,8 @@ static int text_break_tokens_into_lines (
 
                     consumed_input_total += assigned_input_current;
                     assigned_input_current = 0;
-                    current = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
+                    current
+                        = text_add_new_line (&lines, &line_count, &line_cap, consumed_input_total);
                     if (!current) {
                         text_split_result_dispose (&fsplit);
                         if (segments_owned)
@@ -1184,7 +1186,8 @@ typedef struct {
     inline_decoration_t underline;
 } decoration_state_t;
 
-static void text_decoration_state_init (decoration_state_t *state, double strike_y, double underline_y) {
+static void
+text_decoration_state_init (decoration_state_t *state, double strike_y, double underline_y) {
     if (!state)
         return;
     text_inline_decoration_init (&state->strike, strike_y, STYLE_STRIKE);
@@ -1607,11 +1610,11 @@ int text_layout_render_spans (
 
 #define LAYOUT_FAIL()                                                                              \
     do {                                                                                           \
-        text_font_usage_stats_dispose (&usage);                                                         \
+        text_font_usage_stats_dispose (&usage);                                                    \
         font_fallback_dispose (&fallback);                                                         \
         font_render_context_dispose (&ctx);                                                        \
         geom_paths_free (out);                                                                     \
-        text_free_lines (lines, line_count);                                                            \
+        text_free_lines (lines, line_count);                                                       \
         if (info)                                                                                  \
             memset (info, 0, sizeof (*info));                                                      \
         return -1;                                                                                 \

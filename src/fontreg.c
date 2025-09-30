@@ -494,7 +494,8 @@ static void fontreg_evaluate_family (
  * @param current Поточний найкращий.
  * @return 1 — кандидат кращий; 0 — ні.
  */
-static int fontreg_family_full_better (const family_eval_t *candidate, const family_eval_t *current) {
+static int
+fontreg_family_full_better (const family_eval_t *candidate, const family_eval_t *current) {
     int cap_c = fontreg_popcount_int (candidate->capability_mask);
     int cap_cur = fontreg_popcount_int (current->capability_mask);
     if (cap_c != cap_cur)
@@ -524,7 +525,8 @@ static int fontreg_family_full_better (const family_eval_t *candidate, const fam
  * @param current Поточний найкращий.
  * @return 1 — кандидат кращий; 0 — ні.
  */
-static int fontreg_family_partial_better (const family_eval_t *candidate, const family_eval_t *current) {
+static int
+fontreg_family_partial_better (const family_eval_t *candidate, const family_eval_t *current) {
     if (candidate->best_variant_cover != current->best_variant_cover)
         return candidate->best_variant_cover > current->best_variant_cover;
     int cap_c = fontreg_popcount_int (candidate->capability_mask);
@@ -842,7 +844,8 @@ int fontreg_select_face_for_codepoints (
     font_face_t resolved_pref;
     int preferred_index = -1;
     if (preferred_family && fontreg_resolve (preferred_family, &resolved_pref) == 0)
-        preferred_index = fontreg_find_family_index_by_variant_id (resolved_pref.id, evals, g_family_count);
+        preferred_index
+            = fontreg_find_family_index_by_variant_id (resolved_pref.id, evals, g_family_count);
 
     size_t full_best = (size_t)-1;
     size_t partial_best = (size_t)-1;
@@ -850,7 +853,8 @@ int fontreg_select_face_for_codepoints (
         if (evals[i].best_variant_index == (size_t)-1)
             continue;
         if (evals[i].covers_all) {
-            if (full_best == (size_t)-1 || fontreg_family_full_better (&evals[i], &evals[full_best]))
+            if (full_best == (size_t)-1
+                || fontreg_family_full_better (&evals[i], &evals[full_best]))
                 full_best = i;
         } else {
             if (partial_best == (size_t)-1
@@ -871,7 +875,8 @@ int fontreg_select_face_for_codepoints (
             if (full_best != (size_t)-1)
                 chosen = full_best;
             else if (
-                partial_best != (size_t)-1 && fontreg_family_partial_better (&evals[partial_best], pref))
+                partial_best != (size_t)-1
+                && fontreg_family_partial_better (&evals[partial_best], pref))
                 chosen = partial_best;
             else
                 chosen = (size_t)preferred_index;

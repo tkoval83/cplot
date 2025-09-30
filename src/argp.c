@@ -281,7 +281,7 @@ int argp_arg_parser_parse (arg_parser_t *p, int argc, const char *argv[]) {
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
         if (strcmp (arg, "--help") == 0 || strcmp (arg, "-h") == 0) {
-    argp_print_usage_header (p, stdout);
+            argp_print_usage_header (p, stdout);
             argp_arg_parser_print_options (p, stdout);
             p->printed_usage = 1;
             return 0;

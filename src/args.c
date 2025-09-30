@@ -14,7 +14,6 @@
 #include "log.h"
 #include "str.h"
 
-
 /**
  * @brief Створює значення дії пристрою без вибраної дії.
  * @return Обʼєкт дії з kind=DEVICE_ACTION_NONE.
@@ -258,17 +257,16 @@ static const struct option k_long_options[] = {
  */
 const struct option *argdefs_long_options (void) { return k_long_options; }
 
-static const cli_option_desc_t k_option_descs[] = {
+static const cli_option_desc_t k_option_descs_global[] = {
     { "help", no_argument, 'h', 'h', NULL, "global", "Показати довідку" },
     { "version", no_argument, 'v', 'v', NULL, "global", "Показати версію" },
     { "no-colors", no_argument, ARG_NO_COLORS, '\0', NULL, "global", "Вимкнути ANSI-кольори" },
     { "verbose", no_argument, ARG_VERBOSE, '\0', NULL, "global", "Розгорнутий вивід" },
     { "dry-run", no_argument, ARG_DRY_RUN, '\0', NULL, "global",
       "Не надсилати команди на пристрій" },
+};
 
-    { "device", required_argument, ARG_DEVICE_MODEL, '\0', "name", "config",
-      "Обрати профіль пристрою (напр., minikit2)" },
-
+static const cli_option_desc_t k_option_descs_print[] = {
     { "portrait", no_argument, ARG_PORTRAIT, '\0', NULL, "layout", "Орієнтація портрет" },
     { "landscape", no_argument, ARG_LANDSCAPE, '\0', NULL, "layout", "Орієнтація альбомна" },
     { "margins", required_argument, ARG_MARGINS, '\0', "T[,R,B,L]", "layout",
@@ -286,21 +284,59 @@ static const cli_option_desc_t k_option_descs[] = {
       "Формат вхідного документа (доступно: markdown)" },
     { "family", required_argument, ARG_FONT_FAMILY_VALUE, '\0', "NAME|ID", "layout",
       "Родина або шрифт для поточного друку" },
+};
 
+static const cli_option_desc_t k_option_descs_device[] = {
     { "device-name", required_argument, ARG_DEVICE_NAME, '\0', "NAME", "device-settings",
       "Псевдонім пристрою з `device list`" },
     { "dx", required_argument, ARG_DX, '\0', "мм", "device-settings", "Зсув по X для jog" },
     { "dy", required_argument, ARG_DY, '\0', "мм", "device-settings", "Зсув по Y для jog" },
+};
 
+static const cli_option_desc_t k_option_descs_fonts[] = {
     { "list", no_argument, ARG_LIST, '\0', NULL, "font", "Перелічити доступні шрифти" },
     { "font-family", no_argument, ARG_FONT_FAMILIES, '\0', NULL, "font",
       "Список лише родин шрифтів" },
+};
 
+static const cli_option_desc_t k_option_descs_config[] = {
     { "show", no_argument, ARG_SHOW, '\0', NULL, "config", "Показати конфігурацію" },
     { "reset", no_argument, ARG_RESET, '\0', NULL, "config", "Скинути до типової" },
     { "set", required_argument, ARG_SET, '\0', "key=value[,..]", "config",
       "Задати ключі конфігурації" },
+    { "device", required_argument, ARG_DEVICE_MODEL, '\0', "name", "config",
+      "Обрати профіль пристрою (напр., minikit2)" },
 };
+
+#define ARRAY_COUNT(arr) (sizeof (arr) / sizeof ((arr)[0]))
+
+static cli_option_desc_t g_option_descs[
+    ARRAY_COUNT (k_option_descs_global) + ARRAY_COUNT (k_option_descs_print)
+    + ARRAY_COUNT (k_option_descs_device) + ARRAY_COUNT (k_option_descs_fonts)
+    + ARRAY_COUNT (k_option_descs_config)] = { 0 };
+
+static size_t g_option_descs_count = 0;
+
+static void args_option_descs_init (void) {
+    if (g_option_descs_count > 0)
+        return;
+
+    size_t idx = 0;
+
+#define COPY_DESC_BLOCK(block)                                                                 \
+    memcpy (&g_option_descs[idx], block, sizeof (block));                                       \
+    idx += ARRAY_COUNT (block)
+
+    COPY_DESC_BLOCK (k_option_descs_global);
+    COPY_DESC_BLOCK (k_option_descs_print);
+    COPY_DESC_BLOCK (k_option_descs_device);
+    COPY_DESC_BLOCK (k_option_descs_fonts);
+    COPY_DESC_BLOCK (k_option_descs_config);
+
+#undef COPY_DESC_BLOCK
+
+    g_option_descs_count = idx;
+}
 
 /**
  * @brief Повертає внутрішній опис опцій для побудови хелпу.
@@ -308,9 +344,10 @@ static const cli_option_desc_t k_option_descs[] = {
  * @return Вказівник на статичний масив описів.
  */
 const cli_option_desc_t *args_argdefs_options (size_t *out_count) {
+    args_option_descs_init ();
     if (out_count)
-        *out_count = sizeof (k_option_descs) / sizeof (k_option_descs[0]);
-    return k_option_descs;
+        *out_count = g_option_descs_count;
+    return g_option_descs;
 }
 
 static const cli_command_desc_t k_commands[] = {
@@ -433,10 +470,10 @@ static void args_parse_margins_argument (const char *value, options_t *options) 
     if (parts == 1) {
         r = b = l = t;
     }
-    options->margin_top_mm = t;
-    options->margin_right_mm = r;
-    options->margin_bottom_mm = b;
-    options->margin_left_mm = l;
+    options->print.margin_top_mm = t;
+    options->print.margin_right_mm = r;
+    options->print.margin_bottom_mm = b;
+    options->print.margin_left_mm = l;
 }
 
 /**
@@ -449,11 +486,11 @@ static void args_parse_margins_argument (const char *value, options_t *options) 
 static bool args_handle_layout_option (int arg, const char *value, options_t *options) {
     switch (arg) {
     case ARG_PORTRAIT:
-        options->orientation = ORIENT_PORTRAIT;
+        options->print.orientation = ORIENT_PORTRAIT;
         LOGD ("орієнтація: портретна");
         return true;
     case ARG_LANDSCAPE:
-        options->orientation = ORIENT_LANDSCAPE;
+        options->print.orientation = ORIENT_LANDSCAPE;
         LOGD ("орієнтація: альбомна");
         return true;
     case ARG_MARGINS:
@@ -461,31 +498,32 @@ static bool args_handle_layout_option (int arg, const char *value, options_t *op
         return true;
     case ARG_WIDTH:
         if (value)
-            options->paper_w_mm = atof (value);
-        LOGD ("ширина=%.3f мм", options->paper_w_mm);
+            options->print.paper_w_mm = atof (value);
+        LOGD ("ширина=%.3f мм", options->print.paper_w_mm);
         return true;
     case ARG_HEIGHT:
         if (value)
-            options->paper_h_mm = atof (value);
-        LOGD ("висота=%.3f мм", options->paper_h_mm);
+            options->print.paper_h_mm = atof (value);
+        LOGD ("висота=%.3f мм", options->print.paper_h_mm);
         return true;
     case ARG_FIT_PAGE:
-        options->fit_page = true;
+        options->print.fit_page = true;
         LOGD ("масштаб: вміст у межах однієї сторінки");
         return true;
     case ARG_FORMAT:
         if (value && (strcmp (value, "markdown") == 0)) {
-            options->input_format = INPUT_FORMAT_MARKDOWN;
+            options->print.input_format = INPUT_FORMAT_MARKDOWN;
             LOGD ("формат вводу: маркдаун");
         } else {
             LOGW ("Непідтримуваний параметр формату: %s (використовую текст)", value ? value : "");
-            options->input_format = INPUT_FORMAT_TEXT;
+            options->print.input_format = INPUT_FORMAT_TEXT;
         }
         return true;
     case ARG_FONT_FAMILY_VALUE:
         if (value) {
-            str_string_copy (options->font_family, sizeof (options->font_family), value);
-            LOGD ("родина/шрифт: %s", options->font_family);
+            str_string_copy (
+                options->print.font_family, sizeof (options->print.font_family), value);
+            LOGD ("родина/шрифт: %s", options->print.font_family);
         }
         return true;
     default:
@@ -502,21 +540,23 @@ static bool args_handle_layout_option (int arg, const char *value, options_t *op
 static bool args_handle_output_option (int arg, options_t *options) {
     switch (arg) {
     case ARG_PNG:
-        options->preview_png = true;
+        options->print.preview_png = true;
         LOGD ("формат прев’ю: ПНГ");
         return true;
     case ARG_OUTPUT:
         if (options) {
-            str_string_copy (options->output_path, sizeof (options->output_path), optarg ? optarg : "");
-            LOGD ("прев’ю: файл виводу %s", options->output_path);
+            str_string_copy (
+                options->print.output_path, sizeof (options->print.output_path),
+                optarg ? optarg : "");
+            LOGD ("прев’ю: файл виводу %s", options->print.output_path);
         }
         return true;
     case ARG_PREVIEW:
-        options->preview = true;
+        options->print.preview = true;
         LOGD ("увімкнено прев’ю");
         return true;
     case ARG_DRY_RUN:
-        options->dry_run = true;
+        options->print.dry_run = true;
         LOGD ("сухий запуск: без надсилання на пристрій");
         return true;
     case ARG_VERBOSE:
@@ -541,11 +581,11 @@ static bool args_handle_font_option (int arg, options_t *options) {
         return false;
     switch (arg) {
     case ARG_LIST:
-        options->fonts_list = true;
+        options->fonts.list = true;
         LOGD ("шрифти: перелік");
         return true;
     case ARG_FONT_FAMILIES:
-        options->fonts_list_families = true;
+        options->fonts.list_families = true;
         LOGD ("шрифти: лише родини");
         return true;
     default:
@@ -563,18 +603,21 @@ static bool args_handle_font_option (int arg, options_t *options) {
 static bool args_handle_device_option (int arg, const char *value, options_t *options) {
     switch (arg) {
     case ARG_DEVICE_NAME:
-        str_string_copy (options->remote_device, sizeof (options->remote_device), value);
-        LOGD ("пристрій: псевдонім %s", options->remote_device);
+        str_string_copy (
+            options->device.remote_device, sizeof (options->device.remote_device), value);
+        LOGD ("пристрій: псевдонім %s", options->device.remote_device);
         return true;
     case ARG_DX:
-        options->jog_dx_mm = value ? atof (value) : 0.0;
+        options->device.jog_dx_mm = value ? atof (value) : 0.0;
         return true;
     case ARG_DY:
-        options->jog_dy_mm = value ? atof (value) : 0.0;
+        options->device.jog_dy_mm = value ? atof (value) : 0.0;
         return true;
     case ARG_DEVICE_MODEL:
-        str_string_copy (options->device_model, sizeof (options->device_model), value);
-        LOGD ("модель пристрою: %s", options->device_model);
+        str_string_copy (
+            options->device.device_model, sizeof (options->device.device_model), value);
+        str_string_copy (options->print.device_model, sizeof (options->print.device_model), value);
+        LOGD ("модель пристрою: %s", options->device.device_model);
         return true;
     default:
         return false;
@@ -591,17 +634,17 @@ static bool args_handle_device_option (int arg, const char *value, options_t *op
 static bool args_handle_config_option (int arg, const char *value, options_t *options) {
     switch (arg) {
     case ARG_SHOW:
-        options->config_action = CFG_SHOW;
+        options->config.action = CFG_SHOW;
         LOGD ("конфігурація: показ");
         return true;
     case ARG_RESET:
-        options->config_action = CFG_RESET;
+        options->config.action = CFG_RESET;
         LOGD ("конфігурація: скидання");
         return true;
     case ARG_SET:
-        options->config_action = CFG_SET;
-        str_string_copy (options->config_set_pairs, sizeof (options->config_set_pairs), value);
-        LOGD ("конфігурація: встановлення %s", options->config_set_pairs);
+        options->config.action = CFG_SET;
+        str_string_copy (options->config.set_pairs, sizeof (options->config.set_pairs), value);
+        LOGD ("конфігурація: встановлення %s", options->config.set_pairs);
         return true;
     default:
         return false;
@@ -617,10 +660,11 @@ static bool args_handle_config_option (int arg, const char *value, options_t *op
 void args_get_file_name (int argc, char *argv[], options_t *options) {
 
     if (optind < argc) {
-        str_string_copy (options->file_name, sizeof (options->file_name), argv[optind++]);
-        LOGD ("вхідний файл: %s", options->file_name);
+        str_string_copy (
+            options->print.file_name, sizeof (options->print.file_name), argv[optind++]);
+        LOGD ("вхідний файл: %s", options->print.file_name);
     } else {
-        options->file_name[0] = '\0';
+        options->print.file_name[0] = '\0';
         LOGD ("вхідний файл не задано");
     }
 }
@@ -637,14 +681,14 @@ void args_options_parser (int argc, char *argv[], options_t *options) {
 
     memset (options, 0, sizeof (*options));
 
-    options->paper_w_mm = NAN;
-    options->paper_h_mm = NAN;
-    options->fit_page = true;
-    options->margin_top_mm = NAN;
-    options->margin_right_mm = NAN;
-    options->margin_bottom_mm = NAN;
-    options->margin_left_mm = NAN;
-    options->font_size_pt = NAN;
+    options->print.paper_w_mm = NAN;
+    options->print.paper_h_mm = NAN;
+    options->print.fit_page = true;
+    options->print.margin_top_mm = NAN;
+    options->print.margin_right_mm = NAN;
+    options->print.margin_bottom_mm = NAN;
+    options->print.margin_left_mm = NAN;
+    options->print.font_size_pt = NAN;
 
     int arg;
 
@@ -705,20 +749,20 @@ void args_options_parser (int argc, char *argv[], options_t *options) {
 
     if (options->cmd == CMD_DEVICE) {
         device_parse_result_t parsed
-            = args_parse_device_tokens (argc, argv, optind, options->device_action);
+            = args_parse_device_tokens (argc, argv, optind, options->device.action);
         if (parsed.action_set) {
-            options->device_action = parsed.action;
+            options->device.action = parsed.action;
             LOGD (
-                "дія пристрою: тип=%d pen=%d мотор=%d", (int)options->device_action.kind,
-                (int)options->device_action.pen, (int)options->device_action.motor);
+                "дія пристрою: тип=%d pen=%d мотор=%d", (int)options->device.action.kind,
+                (int)options->device.action.pen, (int)options->device.action.motor);
         }
         if (parsed.dx_set) {
-            options->jog_dx_mm = parsed.jog_dx_mm;
-            LOGD ("jog dx=%.3f мм", options->jog_dx_mm);
+            options->device.jog_dx_mm = parsed.jog_dx_mm;
+            LOGD ("jog dx=%.3f мм", options->device.jog_dx_mm);
         }
         if (parsed.dy_set) {
-            options->jog_dy_mm = parsed.jog_dy_mm;
-            LOGD ("jog dy=%.3f мм", options->jog_dy_mm);
+            options->device.jog_dy_mm = parsed.jog_dy_mm;
+            LOGD ("jog dy=%.3f мм", options->device.jog_dy_mm);
         }
     }
 

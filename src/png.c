@@ -89,7 +89,8 @@ static uint32_t png_adler32_update (uint32_t adler, const uint8_t *data, size_t 
  * @param add Кількість байтів для додавання.
  * @return 0 — успіх; -1 — помилка виділення памʼяті.
  */
-static int png_append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t *data, size_t add) {
+static int
+png_append_bytes (uint8_t **buf, size_t *len, size_t *cap, const uint8_t *data, size_t add) {
     size_t need = *len + add;
     if (need > *cap) {
         size_t new_cap = (*cap == 0) ? 1024 : *cap;

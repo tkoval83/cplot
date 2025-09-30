@@ -6,6 +6,7 @@
 
 #include "font.h"
 #include "text.h"
+#include "str.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -14,7 +15,6 @@
 #include <string.h>
 
 #include <stdbool.h>
-
 
 /**
  * @brief Гарантує ємність масиву точок для додавання елементів.
@@ -185,7 +185,6 @@ static double font_units_per_point (geom_units_t units) {
  * @param buflen Розмір буфера призначення.
  * @return Довжина джерела (без NUL).
  */
-static int font_copy_string_field (const char *source, char *buffer, size_t buflen);
 
 /** @copydoc font_render_context_init */
 int font_render_context_init (
@@ -275,7 +274,7 @@ int font_fallback_init (
         return -1;
     memset (fallback, 0, sizeof (*fallback));
     if (preferred_family && *preferred_family)
-        font_copy_string_field (preferred_family, fallback->preferred, sizeof (fallback->preferred));
+        str_string_copy (fallback->preferred, sizeof (fallback->preferred), preferred_family);
     fallback->size_pt = (size_pt > 0.0) ? size_pt : 14.0;
     fallback->units = units;
     return 0;
@@ -344,7 +343,7 @@ static const font_render_context_t *font_fallback_get_context (
             fallback->face_cap = new_cap;
         }
         font_fallback_face_t *slot = &fallback->faces[fallback->face_count];
-        font_copy_string_field (face.id, slot->face_id, sizeof (slot->face_id));
+        str_string_copy (slot->face_id, sizeof (slot->face_id), face.id);
         if (font_render_context_init (&slot->ctx, &face, fallback->size_pt, fallback->units) != 0) {
             font_fallback_store_map (fallback, cp, SIZE_MAX);
             return NULL;
@@ -371,7 +370,8 @@ int font_fallback_emit (
         return 1;
     if (used_family)
         *used_family = NULL;
-    const font_render_context_t *fb_ctx = font_fallback_get_context (fallback, primary_ctx, codepoint);
+    const font_render_context_t *fb_ctx
+        = font_fallback_get_context (fallback, primary_ctx, codepoint);
     if (!fb_ctx)
         return 1;
 
@@ -521,8 +521,8 @@ font_extract_attribute (const char *segment, size_t seg_len, const char *attr, c
 /**
  * @brief Зчитує число подвійної точності з атрибута або повертає запасне значення.
  */
-static double
-font_parse_double_with_default (const char *segment, size_t seg_len, const char *attr, double fallback) {
+static double font_parse_double_with_default (
+    const char *segment, size_t seg_len, const char *attr, double fallback) {
     char *value = NULL;
     double result = fallback;
     int rc = font_extract_attribute (segment, seg_len, attr, &value);
@@ -541,7 +541,8 @@ font_parse_double_with_default (const char *segment, size_t seg_len, const char 
  * @brief Копіює значення рядкового атрибута у виділену памʼять.
  * @return 0 — успіх; 1 — відсутній атрибут; -1 — помилка.
  */
-static int font_set_string_field (char **field, const char *segment, size_t seg_len, const char *attr) {
+static int
+font_set_string_field (char **field, const char *segment, size_t seg_len, const char *attr) {
     if (!field)
         return -2;
     char *value = NULL;
@@ -778,8 +779,10 @@ int font_load_from_file (const char *path, font_t **out_font) {
     }
     font->metrics.units_per_em
         = font_parse_double_with_default (face_segment, face_seg_len, "units-per-em=", 1000.0);
-    font->metrics.ascent = font_parse_double_with_default (face_segment, face_seg_len, "ascent=", 0.0);
-    font->metrics.descent = font_parse_double_with_default (face_segment, face_seg_len, "descent=", 0.0);
+    font->metrics.ascent
+        = font_parse_double_with_default (face_segment, face_seg_len, "ascent=", 0.0);
+    font->metrics.descent
+        = font_parse_double_with_default (face_segment, face_seg_len, "descent=", 0.0);
     font->metrics.cap_height
         = font_parse_double_with_default (face_segment, face_seg_len, "cap-height=", 0.0);
     font->metrics.x_height
@@ -788,34 +791,22 @@ int font_load_from_file (const char *path, font_t **out_font) {
     return 0;
 }
 
-/**
- * @brief Копіює рядок у буфер із обрізанням, повертаючи довжину джерела.
- */
-static int font_copy_string_field (const char *source, char *buffer, size_t buflen) {
-    if (!source)
-        return 0;
-    size_t len = strlen (source);
-    if (!buffer || buflen == 0)
-        return (int)len;
-    if (len + 1 > buflen)
-        len = buflen - 1;
-    memcpy (buffer, source, len);
-    buffer[len] = '\0';
-    return (int)strlen (source);
-}
-
 /** @copydoc font_get_id */
 int font_get_id (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
-    return font_copy_string_field (font->id, buffer, buflen);
+    if (buffer && buflen > 0)
+        str_string_copy (buffer, buflen, font->id);
+    return font->id ? (int)strlen (font->id) : 0;
 }
 
 /** @copydoc font_get_family_name */
 int font_get_family_name (const font_t *font, char *buffer, size_t buflen) {
     if (!font)
         return -1;
-    return font_copy_string_field (font->family, buffer, buflen);
+    if (buffer && buflen > 0)
+        str_string_copy (buffer, buflen, font->family);
+    return font->family ? (int)strlen (font->family) : 0;
 }
 
 /** @copydoc font_get_metrics */
