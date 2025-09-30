@@ -136,6 +136,7 @@ int plot_execute_plan (
     }
     if (!pen_is_up)
         (void)axidraw_pen_up (&dev);
+    (void)axidraw_wait_for_idle (&dev, 2000);
 
 cleanup_dev:
     axidraw_device_disconnect (&dev);

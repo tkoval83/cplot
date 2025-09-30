@@ -310,10 +310,11 @@ static const cli_option_desc_t k_option_descs_config[] = {
 
 #define ARRAY_COUNT(arr) (sizeof (arr) / sizeof ((arr)[0]))
 
-static cli_option_desc_t g_option_descs[
-    ARRAY_COUNT (k_option_descs_global) + ARRAY_COUNT (k_option_descs_print)
-    + ARRAY_COUNT (k_option_descs_device) + ARRAY_COUNT (k_option_descs_fonts)
-    + ARRAY_COUNT (k_option_descs_config)] = { 0 };
+static cli_option_desc_t g_option_descs
+    [ARRAY_COUNT (k_option_descs_global) + ARRAY_COUNT (k_option_descs_print)
+     + ARRAY_COUNT (k_option_descs_device) + ARRAY_COUNT (k_option_descs_fonts)
+     + ARRAY_COUNT (k_option_descs_config)]
+    = { 0 };
 
 static size_t g_option_descs_count = 0;
 
@@ -323,8 +324,8 @@ static void args_option_descs_init (void) {
 
     size_t idx = 0;
 
-#define COPY_DESC_BLOCK(block)                                                                 \
-    memcpy (&g_option_descs[idx], block, sizeof (block));                                       \
+#define COPY_DESC_BLOCK(block)                                                                     \
+    memcpy (&g_option_descs[idx], block, sizeof (block));                                          \
     idx += ARRAY_COUNT (block)
 
     COPY_DESC_BLOCK (k_option_descs_global);

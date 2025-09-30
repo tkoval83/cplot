@@ -5,8 +5,8 @@
  */
 
 #include "font.h"
-#include "text.h"
 #include "str.h"
+#include "text.h"
 
 #include <ctype.h>
 #include <errno.h>
