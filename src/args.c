@@ -234,6 +234,7 @@ static const struct option k_long_options[] = {
     { "png", no_argument, 0, ARG_PNG },
     { "output", required_argument, 0, ARG_OUTPUT },
     { "format", required_argument, 0, ARG_FORMAT },
+    { "motion-profile", required_argument, 0, 25 },
     { "preview", no_argument, 0, ARG_PREVIEW },
     { "fit-page", no_argument, 0, ARG_FIT_PAGE },
     { "dry-run", no_argument, 0, ARG_DRY_RUN },
@@ -284,6 +285,8 @@ static const cli_option_desc_t k_option_descs_print[] = {
       "Формат вхідного документа (доступно: markdown)" },
     { "family", required_argument, ARG_FONT_FAMILY_VALUE, '\0', "NAME|ID", "layout",
       "Родина або шрифт для поточного друку" },
+    { "motion-profile", required_argument, 25, '\0', "precise|balanced|fast", "layout",
+      "Профіль руху (швидкість/прискорення)" },
 };
 
 static const cli_option_desc_t k_option_descs_device[] = {
@@ -527,6 +530,23 @@ static bool args_handle_layout_option (int arg, const char *value, options_t *op
             LOGD ("родина/шрифт: %s", options->print.font_family);
         }
         return true;
+    case 25: {
+        if (value == NULL) {
+            options->print.motion_profile = MOTION_PROFILE_BALANCED;
+            return true;
+        }
+        if (strcmp (value, "precise") == 0) {
+            options->print.motion_profile = MOTION_PROFILE_PRECISE;
+            LOGD ("профіль руху: precise");
+        } else if (strcmp (value, "fast") == 0) {
+            options->print.motion_profile = MOTION_PROFILE_FAST;
+            LOGD ("профіль руху: fast");
+        } else {
+            options->print.motion_profile = MOTION_PROFILE_BALANCED;
+            LOGD ("профіль руху: balanced");
+        }
+        return true;
+    }
     default:
         return false;
     }
@@ -690,6 +710,7 @@ void args_options_parser (int argc, char *argv[], options_t *options) {
     options->print.margin_bottom_mm = NAN;
     options->print.margin_left_mm = NAN;
     options->print.font_size_pt = NAN;
+    options->print.motion_profile = MOTION_PROFILE_BALANCED;
 
     int arg;
 

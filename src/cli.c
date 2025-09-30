@@ -140,7 +140,8 @@ int cli_run (const options_t *options, int argc, char *argv[]) {
                 in_chars, in_len, print->input_format == INPUT_FORMAT_MARKDOWN, family,
                 print->font_size_pt, model, print->paper_w_mm, print->paper_h_mm,
                 print->margin_top_mm, print->margin_right_mm, print->margin_bottom_mm,
-                print->margin_left_mm, print->orientation, print->fit_page, print->dry_run,
+                print->margin_left_mm, print->orientation, print->fit_page,
+                print->motion_profile, print->dry_run,
                 options->verbose);
             free (owned);
             return rc;

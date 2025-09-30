@@ -8,6 +8,7 @@
 #define CPLOT_CMD_H
 
 #include "config.h"
+#include "args.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -63,6 +64,7 @@ cmd_result_t cmd_print_execute (
     double margin_left_mm,
     int orientation,
     bool fit_page,
+    motion_profile_t motion_profile,
     bool dry_run,
     bool verbose);
 

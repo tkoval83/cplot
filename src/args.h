@@ -144,6 +144,15 @@ typedef enum {
     INPUT_FORMAT_MARKDOWN = 1,
 } input_format_t;
 
+/**
+ * @brief Режим руху (профіль швидкість/прискорення).
+ */
+typedef enum {
+    MOTION_PROFILE_BALANCED = 0, /**< Збалансований: якість/швидкість. */
+    MOTION_PROFILE_PRECISE = 1,  /**< Точний: повільніше, менше вібрацій. */
+    MOTION_PROFILE_FAST = 2,     /**< Швидкий: вище ліміти для перельотів/чернеток. */
+} motion_profile_t;
+
 typedef struct args_print_options {
     char file_name[FILE_NAME_SIZE];
     orientation_t orientation;
@@ -162,6 +171,7 @@ typedef struct args_print_options {
     double font_size_pt;
     char device_model[32];
     input_format_t input_format;
+    motion_profile_t motion_profile;
 } args_print_options_t;
 
 typedef struct args_device_options {

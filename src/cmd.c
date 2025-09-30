@@ -1573,6 +1573,7 @@ cmd_result_t cmd_print_execute (
     double margin_left,
     int orientation,
     bool fit_page,
+    motion_profile_t motion_profile,
     bool dry_run,
     bool verbose) {
     (void)dry_run;
@@ -1664,7 +1665,40 @@ cmd_result_t cmd_print_execute (
         }
         geom_paths_free (&md_paths);
 
-        int rc = plot_canvas_execute (&layout_info.layout, model, dry_run, verbose);
+        config_t cfg2;
+        const char *model_or_null2 = (model && *model) ? model : NULL;
+        config_factory_defaults (&cfg2, model_or_null2);
+        double base_speed = cfg2.speed_mm_s;
+        double base_accel = cfg2.accel_mm_s2;
+        planner_limits_t lim = { 0 };
+        switch (motion_profile) {
+        case MOTION_PROFILE_PRECISE:
+            lim.max_speed_mm_s = fmin (base_speed, 80.0);
+            lim.max_accel_mm_s2 = fmin (base_accel, 120.0);
+            lim.cornering_distance_mm = 0.2;
+            break;
+        case MOTION_PROFILE_FAST:
+            lim.max_speed_mm_s = fmin (base_speed, 160.0);
+            lim.max_accel_mm_s2 = fmin (base_accel, 160.0);
+            lim.cornering_distance_mm = 0.6;
+            break;
+        case MOTION_PROFILE_BALANCED:
+        default:
+            lim.max_speed_mm_s = fmin (base_speed, 120.0);
+            lim.max_accel_mm_s2 = fmin (base_accel, 120.0);
+            lim.cornering_distance_mm = 0.4;
+            break;
+        }
+        lim.min_segment_mm = 0.1;
+
+        plan_block_t *blocks = NULL;
+        size_t count = 0;
+        if (canvas_generate_motion_plan (&layout_info.layout, &lim, &blocks, &count) != 0) {
+            drawing_layout_dispose (&layout_info);
+            return 1;
+        }
+        int rc = plot_execute_plan (blocks, count, model, dry_run, verbose);
+        free (blocks);
         drawing_layout_dispose (&layout_info);
         return rc;
     } else {
@@ -1690,7 +1724,40 @@ cmd_result_t cmd_print_execute (
                     return 1;
             }
         }
-        int rc = plot_canvas_execute (&layout_info.layout, model, dry_run, verbose);
+        config_t cfg2;
+        const char *model_or_null2 = (model && *model) ? model : NULL;
+        config_factory_defaults (&cfg2, model_or_null2);
+        double base_speed = cfg2.speed_mm_s;
+        double base_accel = cfg2.accel_mm_s2;
+        planner_limits_t lim = { 0 };
+        switch (motion_profile) {
+        case MOTION_PROFILE_PRECISE:
+            lim.max_speed_mm_s = fmin (base_speed, 80.0);
+            lim.max_accel_mm_s2 = fmin (base_accel, 120.0);
+            lim.cornering_distance_mm = 0.2;
+            break;
+        case MOTION_PROFILE_FAST:
+            lim.max_speed_mm_s = fmin (base_speed, 160.0);
+            lim.max_accel_mm_s2 = fmin (base_accel, 160.0);
+            lim.cornering_distance_mm = 0.6;
+            break;
+        case MOTION_PROFILE_BALANCED:
+        default:
+            lim.max_speed_mm_s = fmin (base_speed, 120.0);
+            lim.max_accel_mm_s2 = fmin (base_accel, 120.0);
+            lim.cornering_distance_mm = 0.4;
+            break;
+        }
+        lim.min_segment_mm = 0.1;
+
+        plan_block_t *blocks = NULL;
+        size_t count = 0;
+        if (canvas_generate_motion_plan (&layout_info.layout, &lim, &blocks, &count) != 0) {
+            drawing_layout_dispose (&layout_info);
+            return 1;
+        }
+        int rc = plot_execute_plan (blocks, count, model, dry_run, verbose);
+        free (blocks);
         drawing_layout_dispose (&layout_info);
         return rc;
     }
