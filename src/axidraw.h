@@ -17,7 +17,6 @@
 #include <time.h>
 
 #include "config.h"
-#include "ebb.h"
 #include "serial.h"
 
 /** Повідомлення про відсутній порт у конфігурації. */
@@ -89,6 +88,26 @@ typedef struct {
     bool connected;
 } axidraw_device_t;
 
+/** Режими мікрокроку моторів AxiDraw. */
+typedef enum {
+    AXIDRAW_MOTOR_DISABLED = 0,
+    AXIDRAW_MOTOR_STEP_16 = 1,
+    AXIDRAW_MOTOR_STEP_8 = 2,
+    AXIDRAW_MOTOR_STEP_4 = 3,
+    AXIDRAW_MOTOR_STEP_2 = 4,
+    AXIDRAW_MOTOR_STEP_FULL = 5
+} axidraw_motor_mode_t;
+
+/**
+ * @brief Стан руху та черги команд (аналог ebb_motion_status_t).
+ */
+typedef struct {
+    bool command_active;
+    bool motor1_active;
+    bool motor2_active;
+    int fifo_pending;
+} axidraw_motion_status_t;
+
 /** Скидає налаштування до типових значень. */
 void axidraw_settings_reset (axidraw_settings_t *settings);
 
@@ -158,6 +177,31 @@ int axidraw_pen_up (axidraw_device_t *dev);
 
 /** Команда опускання пера. */
 int axidraw_pen_down (axidraw_device_t *dev);
+
+/** Встановлює режими мікрокроку моторів. */
+int axidraw_motors_set_mode (
+    axidraw_device_t *dev, axidraw_motor_mode_t motor1, axidraw_motor_mode_t motor2);
+
+/** Вимикає живлення моторів. */
+int axidraw_motors_disable (axidraw_device_t *dev);
+
+/** Зчитує лічильники кроків з контролера. */
+int axidraw_query_steps (axidraw_device_t *dev, int32_t *steps1_out, int32_t *steps2_out);
+
+/** Очищає лічильники кроків. */
+int axidraw_clear_steps (axidraw_device_t *dev);
+
+/** Запитує стан руху/черги FIFO. */
+int axidraw_query_motion (axidraw_device_t *dev, axidraw_motion_status_t *status_out);
+
+/** Повертає стан пера. */
+int axidraw_query_pen (axidraw_device_t *dev, bool *pen_up_out);
+
+/** Повертає стан живлення сервоприводу. */
+int axidraw_query_servo_power (axidraw_device_t *dev, bool *power_on_out);
+
+/** Зчитує рядок версії прошивки. */
+int axidraw_query_version (axidraw_device_t *dev, char *buffer, size_t buffer_len);
 
 /**
  * @brief Рух по декартових осях.

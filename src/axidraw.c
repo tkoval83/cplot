@@ -5,6 +5,7 @@
  */
 
 #include "axidraw.h"
+#include "ebb.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1089,6 +1090,141 @@ int axidraw_pen_up (axidraw_device_t *dev) { return axidraw_exec_pen (dev, true)
  * @return 0 — успіх, -1 — помилка.
  */
 int axidraw_pen_down (axidraw_device_t *dev) { return axidraw_exec_pen (dev, false); }
+
+/**
+ * @brief Увімкнути мотори з заданими режимами мікрокроку.
+ *
+ * Обгортає `ebb_enable_motors`, гарантує наявність активного зʼєднання та
+ * транзлює внутрішній enum AxiDraw у значення протоколу EBB.
+ *
+ * @param dev Підключений пристрій.
+ * @param motor1 Режим мікрокроку для осі 1.
+ * @param motor2 Режим мікрокроку для осі 2.
+ * @return 0 — успіх, -1 — помилка зʼєднання або код EBB.
+ */
+int axidraw_motors_set_mode (
+    axidraw_device_t *dev, axidraw_motor_mode_t motor1, axidraw_motor_mode_t motor2) {
+    if (axidraw_require_connection (dev) != 0)
+        return -1;
+    return ebb_enable_motors (
+        dev->port, (ebb_motor_mode_t)motor1, (ebb_motor_mode_t)motor2, dev->timeout_ms);
+}
+
+/**
+ * @brief Вимикає живлення моторів.
+ *
+ * Делегує виклик до `ebb_disable_motors`, тому потребує активного порту. У разі
+ * помилки повертає код EBB або -1, якщо пристрій не підключено.
+ *
+ * @param dev Підключений пристрій.
+ * @return 0 — успіх, -1 — помилка зʼєднання або код EBB.
+ */
+int axidraw_motors_disable (axidraw_device_t *dev) {
+    if (axidraw_require_connection (dev) != 0)
+        return -1;
+    return ebb_disable_motors (dev->port, dev->timeout_ms);
+}
+
+/**
+ * @brief Зчитує лічильники кроків обох осей.
+ *
+ * Перевіряє активне зʼєднання та викликає `ebb_query_steps`. За успіху
+ * повертає значення кроків через вихідні параметри.
+ *
+ * @param dev Підключений пристрій.
+ * @param steps1_out [out] Кроки осі 1.
+ * @param steps2_out [out] Кроки осі 2.
+ * @return 0 — успіх, -1 — помилка аргументів або код EBB.
+ */
+int axidraw_query_steps (axidraw_device_t *dev, int32_t *steps1_out, int32_t *steps2_out) {
+    if (axidraw_require_connection (dev) != 0 || !steps1_out || !steps2_out)
+        return -1;
+    return ebb_query_steps (dev->port, steps1_out, steps2_out, dev->timeout_ms);
+}
+
+/**
+ * @brief Очищає лічильники кроків контролера.
+ *
+ * Виконує команду `CS` через `ebb_clear_steps`. Використовує тайм-аут пристрою.
+ *
+ * @param dev Підключений пристрій.
+ * @return 0 — успіх, -1 — помилка зʼєднання або код EBB.
+ */
+int axidraw_clear_steps (axidraw_device_t *dev) {
+    if (axidraw_require_connection (dev) != 0)
+        return -1;
+    return ebb_clear_steps (dev->port, dev->timeout_ms);
+}
+
+/**
+ * @brief Зчитує стан руху та черги команд.
+ *
+ * Перетворює структуру `ebb_motion_status_t` у `axidraw_motion_status_t`, щоб
+ * приховати деталі протоколу від вищих шарів.
+ *
+ * @param dev Підключений пристрій.
+ * @param status_out [out] Отриманий стан (command_active, motors, FIFO).
+ * @return 0 — успіх, -1 — помилка аргументів або код EBB.
+ */
+int axidraw_query_motion (axidraw_device_t *dev, axidraw_motion_status_t *status_out) {
+    if (axidraw_require_connection (dev) != 0 || !status_out)
+        return -1;
+    ebb_motion_status_t raw = { 0 };
+    int rc = ebb_query_motion (dev->port, &raw, dev->timeout_ms);
+    if (rc != 0)
+        return rc;
+    status_out->command_active = raw.command_active != 0;
+    status_out->motor1_active = raw.motor1_active != 0;
+    status_out->motor2_active = raw.motor2_active != 0;
+    status_out->fifo_pending = raw.fifo_pending;
+    return 0;
+}
+
+/**
+ * @brief Зчитує поточний стан пера (вгору/вниз).
+ *
+ * Обгортає `ebb_query_pen`, тому повертає коди EBB при помилках.
+ *
+ * @param dev Підключений пристрій.
+ * @param pen_up_out [out] true — перо підняте.
+ * @return 0 — успіх, -1 — помилка аргументів або код EBB.
+ */
+int axidraw_query_pen (axidraw_device_t *dev, bool *pen_up_out) {
+    if (axidraw_require_connection (dev) != 0 || !pen_up_out)
+        return -1;
+    return ebb_query_pen (dev->port, pen_up_out, dev->timeout_ms);
+}
+
+/**
+ * @brief Зчитує стан живлення сервоприводу.
+ *
+ * Використовує `ebb_query_servo_power`. Повертає коди EBB у разі помилки.
+ *
+ * @param dev Підключений пристрій.
+ * @param power_on_out [out] true — живлення сервоприводу увімкнене.
+ * @return 0 — успіх, -1 — помилка аргументів або код EBB.
+ */
+int axidraw_query_servo_power (axidraw_device_t *dev, bool *power_on_out) {
+    if (axidraw_require_connection (dev) != 0 || !power_on_out)
+        return -1;
+    return ebb_query_servo_power (dev->port, power_on_out, dev->timeout_ms);
+}
+
+/**
+ * @brief Зчитує рядок версії прошивки контролера.
+ *
+ * Обгортає `ebb_query_version`. Виключно перевіряє зʼєднання та валідність буфера.
+ *
+ * @param dev Підключений пристрій.
+ * @param buffer [out] Буфер для рядка версії.
+ * @param buffer_len Розмір буфера у байтах.
+ * @return 0 — успіх, -1 — помилка аргументів або код EBB.
+ */
+int axidraw_query_version (axidraw_device_t *dev, char *buffer, size_t buffer_len) {
+    if (axidraw_require_connection (dev) != 0 || !buffer || buffer_len == 0)
+        return -1;
+    return ebb_query_version (dev->port, buffer, buffer_len, dev->timeout_ms);
+}
 
 /**
  * @brief Виконує одну SM-команду руху з тайм-аутом та FIFO-логікою.

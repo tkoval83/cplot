@@ -7,7 +7,7 @@
  * @details
  * Цей модуль реалізує високорівневі обробники підкоманд CLI та координує роботу
  * між підсистемами: розкладка/рендеринг (drawing, svg/png), конфігурація (config),
- * шрифти (fontreg), а також взаємодія з обладнанням AxiDraw (axidraw/ebb/serial).
+ * шрифти (fontreg), а також взаємодія з обладнанням AxiDraw (axidraw/serial).
  *
  * Основні принципи:
  * - Вивід у stdout містить лише результати команд (наприклад, переліки, превʼю SVG/PNG).
@@ -180,27 +180,6 @@ static void cmd_warn_device_busy (void) {
 }
 
 /**
- * @brief Обчислює габарити робочої рамки залежно від орієнтації та полів.
- * @param page Параметри сторінки.
- * @param out_w [out] Ширина рамки.
- * @param out_h [out] Висота рамки.
- */
-static void cmd_page_frame_dims (const drawing_page_t *page, double *out_w, double *out_h) {
-    double fw = 0.0, fh = 0.0;
-    if (page->orientation == ORIENT_PORTRAIT) {
-        fw = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
-        fh = page->paper_w_mm - page->margin_left_mm - page->margin_right_mm;
-    } else {
-        fw = page->paper_w_mm - page->margin_left_mm - page->margin_right_mm;
-        fh = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
-    }
-    if (out_w)
-        *out_w = fw;
-    if (out_h)
-        *out_h = fh;
-}
-
-/**
  * @brief Обмежує масштабу в діапазоні (0,1] та застосовує невеликий відступ.
  * @param s Вхідний коефіцієнт.
  * @return Обмежене значення.
@@ -355,7 +334,7 @@ static int cmd_device_pen_down_cb (axidraw_device_t *dev, void *ctx) {
 static int cmd_device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     bool pen_up = false;
-    if (ebb_query_pen (dev->port, &pen_up, dev->timeout_ms) != 0) {
+    if (axidraw_query_pen (dev, &pen_up) != 0) {
         LOGE ("Не вдалося отримати статус пера");
         return -1;
     }
@@ -373,7 +352,7 @@ static int cmd_device_pen_toggle_cb (axidraw_device_t *dev, void *ctx) {
  */
 static int cmd_device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
-    int rc = ebb_enable_motors (dev->port, EBB_MOTOR_STEP_16, EBB_MOTOR_STEP_16, dev->timeout_ms);
+    int rc = axidraw_motors_set_mode (dev, AXIDRAW_MOTOR_STEP_16, AXIDRAW_MOTOR_STEP_16);
     if (rc == 0)
         fprintf (CMD_OUT, "Мотори увімкнено (1/16 мікрокрок)\n");
     return rc;
@@ -387,7 +366,7 @@ static int cmd_device_motors_on_cb (axidraw_device_t *dev, void *ctx) {
  */
 static int cmd_device_motors_off_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
-    int rc = ebb_disable_motors (dev->port, dev->timeout_ms);
+    int rc = axidraw_motors_disable (dev);
     if (rc == 0)
         fprintf (CMD_OUT, "Мотори вимкнено\n");
     return rc;
@@ -427,7 +406,7 @@ static int cmd_device_jog_cb (axidraw_device_t *dev, void *ctx) {
         return 0;
     }
 
-    int rc = ebb_enable_motors (dev->port, EBB_MOTOR_STEP_16, EBB_MOTOR_STEP_16, dev->timeout_ms);
+    int rc = axidraw_motors_set_mode (dev, AXIDRAW_MOTOR_STEP_16, AXIDRAW_MOTOR_STEP_16);
     if (rc != 0)
         return rc;
 
@@ -436,7 +415,7 @@ static int cmd_device_jog_cb (axidraw_device_t *dev, void *ctx) {
     rc = axidraw_move_mm (dev, dx, dy, speed);
     if (rc == 0 && axidraw_wait_for_idle (dev, 200) == 0) {
         int32_t s1 = 0, s2 = 0;
-        if (ebb_query_steps (dev->port, &s1, &s2, dev->timeout_ms) == 0) {
+        if (axidraw_query_steps (dev, &s1, &s2) == 0) {
             double spmm = (cfg && cfg->steps_per_mm > 0.0) ? cfg->steps_per_mm : 0.0;
             if (spmm > 0.0) {
                 double pos_x = s1 / spmm;
@@ -477,7 +456,7 @@ static int cmd_device_home_cb (axidraw_device_t *dev, void *ctx) {
 static int cmd_device_version_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     char version[64];
-    if (ebb_query_version (dev->port, version, sizeof (version), dev->timeout_ms) != 0) {
+    if (axidraw_query_version (dev, version, sizeof (version)) != 0) {
         LOGE ("Не вдалося отримати версію контролера");
         return -1;
     }
@@ -493,17 +472,17 @@ static int cmd_device_version_cb (axidraw_device_t *dev, void *ctx) {
  */
 static int cmd_device_status_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
-    ebb_motion_status_t ms = { 0 };
-    if (ebb_query_motion (dev->port, &ms, dev->timeout_ms) != 0)
+    axidraw_motion_status_t ms = { 0 };
+    if (axidraw_query_motion (dev, &ms) != 0)
         return -1;
     int32_t s1 = 0, s2 = 0;
-    (void)ebb_query_steps (dev->port, &s1, &s2, dev->timeout_ms);
+    (void)axidraw_query_steps (dev, &s1, &s2);
     bool pen_up = false;
-    (void)ebb_query_pen (dev->port, &pen_up, dev->timeout_ms);
+    (void)axidraw_query_pen (dev, &pen_up);
     bool servo_on = false;
-    (void)ebb_query_servo_power (dev->port, &servo_on, dev->timeout_ms);
+    (void)axidraw_query_servo_power (dev, &servo_on);
     char version[64] = { 0 };
-    (void)ebb_query_version (dev->port, version, sizeof (version), dev->timeout_ms);
+    (void)axidraw_query_version (dev, version, sizeof (version));
 
     fprintf (CMD_OUT, "Статус пристрою:\n");
     fprintf (CMD_OUT, "  Команда активна: %s\n", ms.command_active ? "так" : "ні");
@@ -538,7 +517,7 @@ static int cmd_device_position_cb (axidraw_device_t *dev, void *ctx) {
     (void)ctx;
     int32_t steps1 = 0;
     int32_t steps2 = 0;
-    if (ebb_query_steps (dev->port, &steps1, &steps2, dev->timeout_ms) != 0) {
+    if (axidraw_query_steps (dev, &steps1, &steps2) != 0) {
         LOGE ("Не вдалося отримати позицію");
         return -1;
     }
@@ -571,9 +550,9 @@ static int cmd_device_reset_cb (axidraw_device_t *dev, void *ctx) {
         return rc;
     if (axidraw_wait_for_idle (dev, 200) != 0)
         return -1;
-    if (ebb_clear_steps (dev->port, dev->timeout_ms) != 0)
+    if (axidraw_clear_steps (dev) != 0)
         LOGW ("Не вдалося скинути лічильники кроків");
-    rc = ebb_disable_motors (dev->port, dev->timeout_ms);
+    rc = axidraw_motors_disable (dev);
     if (rc != 0)
         return rc;
     fprintf (CMD_OUT, "Пристрій скинуто: перо підняте, лічильники очищено, мотори вимкнені\n");
@@ -1629,12 +1608,26 @@ cmd_result_t cmd_print_execute (
     page.fit_to_frame = fit_page ? 1 : 0;
     LOGD ("cmd: fit_page flag=%d", page.fit_to_frame);
 
+    canvas_options_t page_opts = {
+        .paper_w_mm = page.paper_w_mm,
+        .paper_h_mm = page.paper_h_mm,
+        .margin_top_mm = page.margin_top_mm,
+        .margin_right_mm = page.margin_right_mm,
+        .margin_bottom_mm = page.margin_bottom_mm,
+        .margin_left_mm = page.margin_left_mm,
+        .orientation = page.orientation,
+        .font_family = family,
+        .fit_to_frame = page.fit_to_frame ? true : false,
+    };
+
     string_t input = { .chars = in_chars ? in_chars : "", .len = in_len, .enc = STR_ENC_UTF8 };
     if (markdown) {
-        double frame_width_mm
-            = (page.orientation == ORIENT_PORTRAIT)
-                  ? (page.paper_h_mm - page.margin_top_mm - page.margin_bottom_mm)
-                  : (page.paper_w_mm - page.margin_left_mm - page.margin_right_mm);
+        double frame_width_mm = 0.0;
+        canvas_frame_dimensions (&page_opts, &frame_width_mm, NULL);
+        if (!(frame_width_mm > 0.0)) {
+            LOGE ("Недостатня доступна ширина для тексту — перевірте поля та орієнтацію");
+            return 1;
+        }
         markdown_opts_t mopts = { .family = family,
                                   .base_size_pt = (font_size > 0.0 ? font_size : 14.0),
                                   .frame_width_mm = frame_width_mm };
@@ -1643,8 +1636,8 @@ cmd_result_t cmd_print_execute (
             return 1;
 
         if (page.fit_to_frame) {
-            double fw, fh;
-            cmd_page_frame_dims (&page, &fw, &fh);
+            double fw = 0.0, fh = 0.0;
+            canvas_frame_dimensions (&page_opts, &fw, &fh);
             geom_bbox_t bb;
             if (geom_bbox_of_paths (&md_paths, &bb) == 0) {
                 double cw = bb.max_x - bb.min_x;
@@ -1680,8 +1673,8 @@ cmd_result_t cmd_print_execute (
             return 1;
 
         if (page.fit_to_frame) {
-            double fw, fh;
-            cmd_page_frame_dims (&page, &fw, &fh);
+            double fw = 0.0, fh = 0.0;
+            canvas_frame_dimensions (&page_opts, &fw, &fh);
             geom_bbox_t bb = layout_info.layout.bounds_mm;
             double cw = bb.max_x - bb.min_x;
             double ch = bb.max_y - bb.min_y;
@@ -1777,14 +1770,28 @@ cmd_result_t cmd_print_preview (
         return setup_rc;
     page.fit_to_frame = fit_page ? 1 : 0;
 
+    canvas_options_t page_opts = {
+        .paper_w_mm = page.paper_w_mm,
+        .paper_h_mm = page.paper_h_mm,
+        .margin_top_mm = page.margin_top_mm,
+        .margin_right_mm = page.margin_right_mm,
+        .margin_bottom_mm = page.margin_bottom_mm,
+        .margin_left_mm = page.margin_left_mm,
+        .orientation = page.orientation,
+        .font_family = family,
+        .fit_to_frame = page.fit_to_frame ? true : false,
+    };
+
     string_t input = { .chars = in_chars ? in_chars : "", .len = in_len, .enc = STR_ENC_UTF8 };
     int rc = 0;
     preview_fmt_t format = preview_png ? PREVIEW_FMT_PNG : PREVIEW_FMT_SVG;
     if (markdown) {
-        double frame_width_mm
-            = (page.orientation == ORIENT_PORTRAIT)
-                  ? (page.paper_h_mm - page.margin_top_mm - page.margin_bottom_mm)
-                  : (page.paper_w_mm - page.margin_left_mm - page.margin_right_mm);
+        double frame_width_mm = 0.0;
+        canvas_frame_dimensions (&page_opts, &frame_width_mm, NULL);
+        if (!(frame_width_mm > 0.0)) {
+            LOGE ("Недостатня доступна ширина для тексту — перевірте поля та орієнтацію");
+            return 1;
+        }
         markdown_opts_t mopts = { .family = family,
                                   .base_size_pt = (font_size > 0.0 ? font_size : 14.0),
                                   .frame_width_mm = frame_width_mm };
@@ -1792,8 +1799,8 @@ cmd_result_t cmd_print_preview (
         if (markdown_render_paths (input.chars, &mopts, &md_paths, NULL) != 0)
             return 1;
         if (page.fit_to_frame) {
-            double fw, fh;
-            cmd_page_frame_dims (&page, &fw, &fh);
+            double fw = 0.0, fh = 0.0;
+            canvas_frame_dimensions (&page_opts, &fw, &fh);
             geom_bbox_t bb;
             if (geom_bbox_of_paths (&md_paths, &bb) == 0) {
                 double cw = bb.max_x - bb.min_x;
@@ -1824,8 +1831,8 @@ cmd_result_t cmd_print_preview (
         if (drawing_build_layout (&page, family, font_size, input, &layout_info) != 0)
             return 1;
         if (page.fit_to_frame) {
-            double fw, fh;
-            cmd_page_frame_dims (&page, &fw, &fh);
+            double fw = 0.0, fh = 0.0;
+            canvas_frame_dimensions (&page_opts, &fw, &fh);
             geom_bbox_t bb = layout_info.layout.bounds_mm;
             double cw = bb.max_x - bb.min_x;
             double ch = bb.max_y - bb.min_y;

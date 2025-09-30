@@ -6,7 +6,6 @@
 #include "plot.h"
 
 #include "axidraw.h"
-#include "ebb.h"
 #include "log.h"
 #include "stepper.h"
 
@@ -114,7 +113,7 @@ int plot_execute_plan (
         goto cleanup_dev;
     }
 
-    (void)ebb_enable_motors (dev.port, EBB_MOTOR_STEP_16, EBB_MOTOR_STEP_16, dev.timeout_ms);
+    (void)axidraw_motors_set_mode (&dev, AXIDRAW_MOTOR_STEP_16, AXIDRAW_MOTOR_STEP_16);
     (void)axidraw_pen_up (&dev);
 
     stepper_config_t scfg = { .dev = &dev };

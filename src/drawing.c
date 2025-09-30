@@ -83,11 +83,20 @@ int drawing_build_layout (
     if (!page || !layout)
         return 1;
 
+    canvas_options_t canvas_opts = {
+        .paper_w_mm = page->paper_w_mm,
+        .paper_h_mm = page->paper_h_mm,
+        .margin_top_mm = page->margin_top_mm,
+        .margin_right_mm = page->margin_right_mm,
+        .margin_bottom_mm = page->margin_bottom_mm,
+        .margin_left_mm = page->margin_left_mm,
+        .orientation = page->orientation,
+        .font_family = font_family,
+        .fit_to_frame = page->fit_to_frame ? true : false,
+    };
+
     double frame_width_mm = 0.0;
-    if (page->orientation == ORIENT_PORTRAIT)
-        frame_width_mm = page->paper_h_mm - page->margin_top_mm - page->margin_bottom_mm;
-    else
-        frame_width_mm = page->paper_w_mm - page->margin_left_mm - page->margin_right_mm;
+    canvas_frame_dimensions (&canvas_opts, &frame_width_mm, NULL);
     if (!(frame_width_mm > 0.0)) {
         LOGE ("Недостатня доступна ширина для тексту — перевірте поля та орієнтацію");
         return 1;
@@ -100,18 +109,6 @@ int drawing_build_layout (
             input, font_family, font_size_pt, frame_width_mm, &text_paths, &info)
         != 0)
         return 1;
-
-    canvas_options_t canvas_opts = {
-        .paper_w_mm = page->paper_w_mm,
-        .paper_h_mm = page->paper_h_mm,
-        .margin_top_mm = page->margin_top_mm,
-        .margin_right_mm = page->margin_right_mm,
-        .margin_bottom_mm = page->margin_bottom_mm,
-        .margin_left_mm = page->margin_left_mm,
-        .orientation = page->orientation,
-        .font_family = font_family,
-        .fit_to_frame = page->fit_to_frame ? true : false,
-    };
 
     canvas_layout_t layout_mm;
     canvas_status_t canvas_rc = canvas_layout_document (&canvas_opts, &text_paths, &layout_mm);

@@ -53,6 +53,14 @@ typedef enum {
 } canvas_status_t;
 
 /**
+ * @brief Обчислює доступні габарити рамки сторінки (після полів та орієнтації).
+ * @param options Параметри сторінки.
+ * @param out_w [out] Корисна ширина рамки, мм (може бути NULL).
+ * @param out_h [out] Корисна висота рамки, мм (може бути NULL).
+ */
+void canvas_frame_dimensions (const canvas_options_t *options, double *out_w, double *out_h);
+
+/**
  * @brief Будує макет полотна: нормалізує контури у мм, масштабує/обертає та розміщує в рамці.
  * @param options Параметри сторінки, полів, орієнтації та fit_to_frame.
  * @param source_paths Вхідні контури у будь-яких одиницях (конвертуються у мм).

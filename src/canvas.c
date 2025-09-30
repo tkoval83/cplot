@@ -85,6 +85,28 @@ canvas_segments_reserve (planner_segment_t **segs, size_t *len, size_t *cap, siz
     return 0;
 }
 
+void canvas_frame_dimensions (const canvas_options_t *options, double *out_w, double *out_h) {
+    double fw = 0.0;
+    double fh = 0.0;
+    if (options) {
+        if (options->orientation == ORIENT_PORTRAIT) {
+            fw = options->paper_h_mm - options->margin_top_mm - options->margin_bottom_mm;
+            fh = options->paper_w_mm - options->margin_left_mm - options->margin_right_mm;
+        } else {
+            fw = options->paper_w_mm - options->margin_left_mm - options->margin_right_mm;
+            fh = options->paper_h_mm - options->margin_top_mm - options->margin_bottom_mm;
+        }
+        if (fw < 0.0)
+            fw = 0.0;
+        if (fh < 0.0)
+            fh = 0.0;
+    }
+    if (out_w)
+        *out_w = fw;
+    if (out_h)
+        *out_h = fh;
+}
+
 /**
  * @brief Формує розкладку полотна з урахуванням орієнтації та полів.
  * @param options Параметри сторінки.
