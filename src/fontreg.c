@@ -41,6 +41,11 @@ static size_t g_family_count = 0;
 static size_t g_family_cap = 0;
 static int g_catalog_ready = 0;
 
+/* Кеш для fontreg_list */
+static font_face_t *g_cached_faces = NULL;
+static size_t g_cached_face_count = 0;
+static int g_faces_cache_ready = 0;
+
 static void fontreg_catalog_clear (void) {
     for (size_t i = 0; i < g_family_count; ++i) {
         font_family_info_t *family = &g_families[i];
@@ -53,6 +58,12 @@ static void fontreg_catalog_clear (void) {
     g_family_count = 0;
     g_family_cap = 0;
     g_catalog_ready = 0;
+    
+    /* Очищення кешу faces */
+    free (g_cached_faces);
+    g_cached_faces = NULL;
+    g_cached_face_count = 0;
+    g_faces_cache_ready = 0;
 }
 
 /**
@@ -591,6 +602,23 @@ static const char *fontreg_effective_root (void) {
 int fontreg_list (font_face_t **faces, size_t *count) {
     if (!faces || !count)
         return -1;
+    
+    /* Використовуємо кеш, якщо він готовий */
+    if (g_faces_cache_ready) {
+        if (g_cached_face_count == 0) {
+            *faces = NULL;
+            *count = 0;
+            return -1;
+        }
+        font_face_t *copy = (font_face_t *)malloc (g_cached_face_count * sizeof (*copy));
+        if (!copy)
+            return -1;
+        memcpy (copy, g_cached_faces, g_cached_face_count * sizeof (*copy));
+        *faces = copy;
+        *count = g_cached_face_count;
+        return 0;
+    }
+    
     *faces = NULL;
     *count = 0;
     char index_path[PATH_MAX];
@@ -774,9 +802,17 @@ int fontreg_list (font_face_t **faces, size_t *count) {
             break;
     }
 
+    /* Зберігаємо в кеш для наступних викликів */
+    g_cached_faces = (font_face_t *)malloc (*count * sizeof (*g_cached_faces));
+    if (g_cached_faces) {
+        memcpy (g_cached_faces, arr, *count * sizeof (*g_cached_faces));
+        g_cached_face_count = *count;
+        g_faces_cache_ready = 1;
+        LOGD ("завантажено шрифтів: %zu", *count);
+        log_print (LOG_INFO, "реєстр шрифтів: завантажено %zu шрифтів", *count);
+    }
+    
     *faces = arr;
-    LOGD ("завантажено шрифтів: %zu", *count);
-    log_print (LOG_INFO, "реєстр шрифтів: завантажено %zu шрифтів", *count);
     free (json);
     return 0;
 }
@@ -947,7 +983,7 @@ int fontreg_resolve (const char *query, font_face_t *out) {
     }
     LOGD ("вибрано шрифт: %s", out->id);
     log_print (
-        LOG_INFO, "реєстр шрифтів: обрано шрифт %s (%s)", out->id,
+        LOG_DEBUG, "реєстр шрифтів: обрано шрифт %s (%s)", out->id,
         (query && *query) ? query : "<типовий>");
     return 0;
 }

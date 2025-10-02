@@ -142,7 +142,7 @@ help:
 	@echo
 	@echo "Доступні цілі:"
 	@echo "    all      - Компілює та створює виконуваний файл"
-	@echo "    tests    - Компілює з cmocka та запускає тести (якщо увімкнено)"
+	@echo "    tests    - Запускає базові smoke-тести"
 	@echo "    start    - Створює новий проєкт на основі шаблону"
 	@echo "    valgrind - Запускає бінарник під valgrind"
 	@echo "    clean    - Прибирає артефакти збірки"
@@ -192,9 +192,25 @@ valgrind:
 	@echo -en "\nCheck the log file: $(LOGDIR)/$@.log\n"
 
 
-# Compile tests and run the test binary
-tests:
-	@echo "Tests disabled"
+# Basic smoke tests without external dependencies
+tests: all
+	@echo "Запуск базових smoke-тестів..."
+	@echo -n "  Тест --help: "
+	@if ./$(BINDIR)/$(BINARY) --help >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@echo -n "  Тест --version: "
+	@if ./$(BINDIR)/$(BINARY) --version >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@echo -n "  Тест fonts --list: "
+	@if ./$(BINDIR)/$(BINARY) fonts --list >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@echo -n "  Тест config --show: "
+	@if ./$(BINDIR)/$(BINARY) config --show >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@echo -n "  Тест device list: "
+	@if ./$(BINDIR)/$(BINARY) device list >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@echo -n "  Тест SVG превʼю: "
+	@if echo "Test" | ./$(BINDIR)/$(BINARY) print --preview >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@echo -n "  Тест PNG превʼю: "
+	@if echo "Test" | ./$(BINDIR)/$(BINARY) print --preview --png --output /tmp/cplot-test.png >/dev/null 2>&1; then echo "✓ ПРОЙШОВ"; else echo "✗ ПРОВАЛЕНИЙ"; exit 1; fi
+	@rm -f /tmp/cplot-test.png
+	@echo "Всі базові тести пройшли успішно! 🎉"
 
 
 # Rule for cleaning the project
